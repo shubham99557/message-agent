@@ -12,6 +12,7 @@ from app.models.email import EmailDraft, EmailEvent
 from app.models.whatsapp import WhatsAppTemplate, WhatsAppMessage, WebhookEvent
 from app.models.reply import Conversation, Reply, REPLY_CATEGORIES
 from app.models.activity import AuditLog, IntegrationCredential, SuppressionList
+from app.models.job import BackgroundTaskRecord, DeadLetterTask, TASK_CATEGORIES, TASK_STATUSES
 
 __all__ = [
     "Base",
@@ -41,5 +42,9 @@ __all__ = [
     "Reply",
     "REPLY_CATEGORIES",
     "AuditLog",
-    "IntegrationCredential"
+    "IntegrationCredential",
+    "BackgroundTaskRecord",
+    "DeadLetterTask",
+    "TASK_CATEGORIES",
+    "TASK_STATUSES"
 ]

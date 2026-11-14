@@ -56,6 +56,59 @@ services:
       - acttrident_internal
       - acttrident_public
 
+  redis:
+    image: redis:7-alpine
+    container_name: acttrident_redis
+    restart: always
+    command: redis-server --appendonly yes
+    volumes:
+      - redisdata:/data
+    networks:
+      - acttrident_internal
+
+  celery_worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    container_name: acttrident_celery_worker
+    restart: always
+    command: celery -A app.worker.celery_app.celery_app worker --loglevel=info -Q research,outreach,high_priority,default -c 4
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      ENVIRONMENT: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-acttrident}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-acttrident_db}
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      SECRET_KEY: ${SECRET_KEY:?CRITICAL: SECRET_KEY of at least 32 characters must be provided in .env}
+      AI_PROVIDER: ${AI_PROVIDER:-mock}
+      EMAIL_PROVIDER: ${EMAIL_PROVIDER:-mock}
+    networks:
+      - acttrident_internal
+
+  celery_beat:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    container_name: acttrident_celery_beat
+    restart: always
+    command: celery -A app.worker.celery_app.celery_app beat --loglevel=info
+    depends_on:
+      - celery_worker
+    environment:
+      ENVIRONMENT: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-acttrident}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-acttrident_db}
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      SECRET_KEY: ${SECRET_KEY:?CRITICAL: SECRET_KEY of at least 32 characters must be provided in .env}
+    networks:
+      - acttrident_internal
+
   frontend:
     build:
       context: .
@@ -71,6 +124,7 @@ services:
 
 volumes:
   pgdata:
+  redisdata:
 
 networks:
   acttrident_internal:

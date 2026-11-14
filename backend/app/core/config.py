@@ -21,6 +21,12 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./acttrident.db")
 
+    # Redis & Distributed Celery Task Queue
+    REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    CELERY_BROKER_URL: str = os.getenv("CELERY_BROKER_URL", os.getenv("REDIS_URL", "redis://localhost:6379/0"))
+    CELERY_RESULT_BACKEND: str = os.getenv("CELERY_RESULT_BACKEND", os.getenv("REDIS_URL", "redis://localhost:6379/0"))
+    TIMEZONE: str = os.getenv("TIMEZONE", "Asia/Kolkata")
+
     # AI Configuration (gemini, openai, anthropic, mock)
     AI_PROVIDER: str = os.getenv("AI_PROVIDER", "mock")
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")

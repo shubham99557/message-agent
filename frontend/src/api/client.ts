@@ -261,4 +261,18 @@ export const api = {
   saveIntegration: (config: any) => request<any>('/settings/integrations', { method: 'POST', body: JSON.stringify(config) }),
   getAuditLogs: () => request<any[]>('/settings/audit-logs'),
   getSuppressionList: () => request<any[]>('/settings/suppression-list'),
+
+  // Background Jobs & Queue Automation
+  getQueueHealth: () => request<any>('/jobs/health'),
+  getTaskHistory: (category?: string, status?: string) => {
+    const query = new URLSearchParams();
+    if (category) query.append('category', category);
+    if (status) query.append('status', status);
+    return request<any[]>(`/jobs/history?${query.toString()}`);
+  },
+  triggerBackgroundTask: (data: { category: string; payload?: any; idempotency_key?: string; campaign_id?: number; execute_sync?: boolean }) =>
+    request<any>('/jobs/trigger', { method: 'POST', body: JSON.stringify(data) }),
+  cancelTask: (taskId: string) => request<any>(`/jobs/cancel/${taskId}`, { method: 'POST' }),
+  getDeadLetterQueue: () => request<any[]>('/jobs/dead-letter'),
+  retryDeadLetterTask: (dlqId: number) => request<any>(`/jobs/dead-letter/${dlqId}/retry`, { method: 'POST' }),
 };
