@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: acttrident_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: acttrident
+      POSTGRES_PASSWORD: ActTridentSecure2026!
+      POSTGRES_DB: acttrident_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U acttrident -d acttrident_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    container_name: acttrident_backend
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://acttrident:ActTridentSecure2026!@postgres:5432/acttrident_db
+      SECRET_KEY: ${SECRET_KEY:-acttrident_prod_secret_key_change_me_2026}
+      AI_PROVIDER: ${AI_PROVIDER:-mock}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      EMAIL_PROVIDER: ${EMAIL_PROVIDER:-mock}
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-ActTrident Business Development}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-outreach@acttrident.ai}
+      META_WA_ACCESS_TOKEN: ${META_WA_ACCESS_TOKEN:-}
+      META_WA_PHONE_NUMBER_ID: ${META_WA_PHONE_NUMBER_ID:-}
+      META_WA_BUSINESS_ACCOUNT_ID: ${META_WA_BUSINESS_ACCOUNT_ID:-}
+      META_WA_VERIFY_TOKEN: ${META_WA_VERIFY_TOKEN:-acttrident_meta_webhook_secret_2026}
+      DEFAULT_DAILY_EMAIL_LIMIT: ${DEFAULT_DAILY_EMAIL_LIMIT:-50}
+      DEFAULT_DAILY_WHATSAPP_LIMIT: ${DEFAULT_DAILY_WHATSAPP_LIMIT:-20}
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend
+    container_name: acttrident_frontend
+    restart: always
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+      - "5173:80"
+
+volumes:
+  pgdata:

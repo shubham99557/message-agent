@@ -1,0 +1,65 @@
+{
+  "product": {
+    "name": "ActTrident",
+    "website": "https://acttrident.ai/",
+    "primary_offer": "Proposed 90-day free product evaluation for companies managing 5+ laptops"
+  },
+  "email_templates": [
+    {
+      "tone": "Friendly professional",
+      "subject": "ActTrident 90-day Evaluation Program for {{company_name}} ({{city}})",
+      "structure": [
+        "1. Professional greeting",
+        "2. Short introduction to ActTrident",
+        "3. Relevant reason for approaching company",
+        "4. Accurate description of product capabilities",
+        "5. Invitation to product demonstration",
+        "6. Proposed 90-day evaluation programme",
+        "7. Simple meeting request",
+        "8. Professional signature"
+      ],
+      "body_example": "Hello {{recipient_name}},\n\nI am reaching out from ActTrident (https://acttrident.ai/). We specialize in enterprise endpoint protection and browser workspace security designed specifically to safeguard distributed workstations and modern cloud workflows.\n\nWe noticed {{company_name}}'s growing technical operations in {{city}} and your team's deployment of managed laptops. Companies in the {{industry}} sector often require rigorous security controls around client deliverables and web-based development environments.\n\nActTrident provides lightweight, non-intrusive protection for company laptops. It isolates sensitive browser sessions, safeguards corporate accounts, and ensures devices accessing your business services maintain verified security compliance.\n\nWe would welcome the opportunity to share a concise 15-minute product overview tailored to your environment.\n\nFor eligible companies managing at least five company laptops, we are currently offering a proposed 90-day free product evaluation. This allows your team to experience ActTrident's capabilities in your actual environment with full technical support and zero obligation.\n\nWould you be open to a brief 15-minute introductory call next Tuesday or Wednesday to discuss whether this evaluation program is a fit for your team?\n\nBest regards,\nBusiness Development Team | ActTrident\nhttps://acttrident.ai/ | outreach@acttrident.ai"
+    },
+    {
+      "tone": "Technical",
+      "subject": "ActTrident Endpoint Security & Browser Isolation for {{company_name}}",
+      "body_example": "Hello {{recipient_name}},\n\nActTrident provides zero-trust workspace security engineered for modern developer fleets. Our platform enforces runtime credential isolation and centralized device posture verification across employee laptops without impacting build performance.\n\nFor eligible engineering teams managing 5+ developer machines in {{city}}, we provide a 90-day zero-cost evaluation deployment with full telemetry.\n\nWould you be open to a 15-minute technical review next week?\n\nBest regards,\nTechnical Solutions Engineering | ActTrident"
+    },
+    {
+      "tone": "Formal",
+      "subject": "Proposed 90-Day Enterprise Evaluation: ActTrident Workspace Protection for {{company_name}}",
+      "body_example": "Dear {{recipient_name}},\n\nI have the privilege of introducing ActTrident (https://acttrident.ai/), an enterprise solution providing endpoint workspace security and credential protection for corporate laptop deployments.\n\nGiven {{company_name}}'s established presence in {{city}}, we would be honored to extend an invitation to our 90-day complimentary evaluation program for teams with five or more managed workstations.\n\nWe remain at your disposal to schedule a brief introductory briefing at your convenience.\n\nSincerely,\nDirector of Business Development | ActTrident"
+    },
+    {
+      "tone": "Short introductory",
+      "subject": "ActTrident Workspace Protection for {{company_name}} in {{city}}",
+      "body_example": "Hello {{recipient_name}},\n\nActTrident (https://acttrident.ai/) protects managed company laptops and isolates sensitive cloud sessions.\n\nWe are currently onboarding select companies in {{city}} managing 5+ laptops for a proposed 90-day free product evaluation.\n\nWould you have 10 minutes next week for a brief conversation?\n\nBest regards,\nActTrident Team"
+    },
+    {
+      "tone": "Follow-up",
+      "subject": "Follow-up: 90-Day Free Evaluation of ActTrident for {{company_name}}",
+      "body_example": "Hello {{recipient_name}},\n\nI wanted to follow up briefly on my earlier note regarding ActTrident workspace protection for {{company_name}}'s laptop fleet in {{city}}.\n\nWe are still offering the proposed 90-day evaluation program for eligible teams with 5+ managed devices. Would you like to review how this could support your team?\n\nBest regards,\nActTrident Business Development"
+    }
+  ],
+  "whatsapp_templates": [
+    {
+      "template_name": "acttrident_intro_utility_v1",
+      "category": "UTILITY",
+      "language": "en",
+      "status": "APPROVED",
+      "compliance_note": "Meta requires documented valid permission before sending. Unconsented leads must use click-to-chat links.",
+      "header": "ActTrident Workspace Protection",
+      "body": "Hello {{1}}, this is ActTrident (https://acttrident.ai/). We are connecting regarding your business laptop management in {{2}}. Eligible teams with 5+ managed devices qualify for our proposed 90-day evaluation program. Would you like a brief demonstration?",
+      "footer": "Reply STOP to opt out"
+    },
+    {
+      "template_name": "acttrident_eval_notice_v1",
+      "category": "UTILITY",
+      "language": "en",
+      "status": "APPROVED",
+      "header": "90-Day Free Evaluation Notice",
+      "body": "Dear {{1}}, following up on your request for ActTrident workspace protection for {{2}}. Your 90-day evaluation setup is ready for scheduling. Please reply to select a time.",
+      "footer": "Reply STOP to opt out"
+    }
+  ]
+}
