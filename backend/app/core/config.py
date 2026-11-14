@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     SMTP_FROM_NAME: str = os.getenv("SMTP_FROM_NAME", "ActTrident Business Development")
     SMTP_FROM_EMAIL: str = os.getenv("SMTP_FROM_EMAIL", "outreach@acttrident.ai")
     SMTP_USE_TLS: bool = True
+    GMAIL_CLIENT_ID: str = os.getenv("GMAIL_CLIENT_ID", "")
+    GMAIL_CLIENT_SECRET: str = os.getenv("GMAIL_CLIENT_SECRET", "")
+    GMAIL_REFRESH_TOKEN: str = os.getenv("GMAIL_REFRESH_TOKEN", "")
+    GMAIL_ACCESS_TOKEN: str = os.getenv("GMAIL_ACCESS_TOKEN", "")
 
     # WhatsApp Cloud API (Meta Official)
     WHATSAPP_ENABLED: bool = os.getenv("WHATSAPP_ENABLED", "true").lower() == "true"
@@ -56,6 +60,13 @@ class Settings(BaseSettings):
     DEFAULT_DAILY_EMAIL_LIMIT: int = int(os.getenv("DEFAULT_DAILY_EMAIL_LIMIT", "50"))
     DEFAULT_DAILY_WHATSAPP_LIMIT: int = int(os.getenv("DEFAULT_DAILY_WHATSAPP_LIMIT", "20"))
     REQUIRE_HUMAN_APPROVAL: bool = True
+
+    # Search & Real Discovery Providers (hybrid, serpapi, tavily, catalog)
+    SEARCH_PROVIDER: str = os.getenv("SEARCH_PROVIDER", "hybrid")
+    SERPAPI_API_KEY: str = os.getenv("SERPAPI_API_KEY", "")
+    TAVILY_API_KEY: str = os.getenv("TAVILY_API_KEY", "")
+    GOOGLE_SEARCH_API_KEY: str = os.getenv("GOOGLE_SEARCH_API_KEY", "")
+    GOOGLE_SEARCH_ENGINE_ID: str = os.getenv("GOOGLE_SEARCH_ENGINE_ID", "")
 
     # CORS: Explicit allowed origins (Never wildcard in production)
     BACKEND_CORS_ORIGINS: List[str] = [

@@ -38,6 +38,7 @@ export interface Company {
   qualification_score: number;
   qualification_status: string;
   qualification_reason?: string;
+  qualification_factors?: string;
   date_last_verified: string;
   created_at: string;
   sources: ContactSource[];

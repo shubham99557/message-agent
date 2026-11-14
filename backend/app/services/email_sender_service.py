@@ -1,3 +1,4 @@
+import base64
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -5,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+import httpx
 
 from app.models.email import EmailDraft, EmailEvent
 from app.models.activity import SuppressionList
@@ -41,6 +43,62 @@ def check_daily_sending_limit(db: Session, campaign_id: Optional[int] = None) ->
                 return False
 
     return True
+
+
+def _ensure_opt_out_footer(draft: EmailDraft) -> str:
+    """Attaches compliance opt-out footer if missing from draft text."""
+    body = draft.body_text or ""
+    if "opt-out" not in body.lower() and "unsubscribe" not in body.lower():
+        footer = (
+            f"\n\n---\n"
+            f"ActTrident AI B2B Outreach • Targeting 5+ managed laptops in Siliguri, Gangtok, Patna & Bhagalpur.\n"
+            f"To opt out of future communications regarding ActTrident evaluations, reply with 'Unsubscribe' "
+            f"or visit https://acttrident.ai/opt-out?email={draft.recipient_email}"
+        )
+        return body + footer
+    return body
+
+
+def _send_via_gmail_api(draft: EmailDraft, body_with_optout: str) -> str:
+    """Dispatches RFC 2822 message through official Google Gmail REST API."""
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = draft.subject
+    msg["From"] = f"{settings.SMTP_FROM_NAME} <{settings.SMTP_FROM_EMAIL}>"
+    msg["To"] = draft.recipient_email
+
+    msg.attach(MIMEText(body_with_optout, "plain"))
+    if draft.body_html:
+        msg.attach(MIMEText(draft.body_html, "html"))
+
+    raw_message = base64.urlsafe_b64encode(msg.as_bytes()).decode("utf-8")
+    
+    token = settings.GMAIL_ACCESS_TOKEN
+    # If refresh token available, request fresh access token
+    if not token and settings.GMAIL_REFRESH_TOKEN and settings.GMAIL_CLIENT_ID and settings.GMAIL_CLIENT_SECRET:
+        with httpx.Client(timeout=8.0) as client:
+            token_resp = client.post(
+                "https://oauth2.googleapis.com/token",
+                data={
+                    "client_id": settings.GMAIL_CLIENT_ID,
+                    "client_secret": settings.GMAIL_CLIENT_SECRET,
+                    "refresh_token": settings.GMAIL_REFRESH_TOKEN,
+                    "grant_type": "refresh_token"
+                }
+            )
+            if token_resp.status_code == 200:
+                token = token_resp.json().get("access_token")
+
+    if not token:
+        raise RuntimeError("No valid Gmail API access token or OAuth credentials configured.")
+
+    with httpx.Client(timeout=10.0) as client:
+        resp = client.post(
+            "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json={"raw": raw_message}
+        )
+        resp.raise_for_status()
+        return resp.json().get("id") or f"gmail-{int(datetime.now().timestamp())}"
 
 
 def send_approved_email(
@@ -107,21 +165,28 @@ def send_approved_email(
             message=f"Daily email limit ({settings.DEFAULT_DAILY_EMAIL_LIMIT}) reached. Message held in queue."
         )
 
-    # 5. DISPATCH VIA CONFIGURED PROVIDER (SMTP / MOCK)
+    # 5. DISPATCH VIA CONFIGURED PROVIDER (GMAIL / SMTP / MOCK)
     provider_msg_id = f"acttrident-msg-{draft.id}-{int(datetime.now().timestamp())}"
     send_success = True
     error_msg = None
     is_mock = False
+    body_with_optout = _ensure_opt_out_footer(draft)
 
-    if settings.EMAIL_PROVIDER == "smtp" and settings.SMTP_USER and settings.SMTP_PASSWORD:
+    if settings.EMAIL_PROVIDER == "gmail" and (settings.GMAIL_ACCESS_TOKEN or settings.GMAIL_REFRESH_TOKEN):
+        try:
+            provider_msg_id = _send_via_gmail_api(draft, body_with_optout)
+        except Exception as e:
+            send_success = False
+            error_msg = f"Gmail API error: {e}"
+    elif settings.EMAIL_PROVIDER == "smtp" and settings.SMTP_USER and settings.SMTP_PASSWORD:
         try:
             msg = MIMEMultipart("alternative")
             msg["Subject"] = draft.subject
             msg["From"] = f"{settings.SMTP_FROM_NAME} <{settings.SMTP_FROM_EMAIL}>"
             msg["To"] = draft.recipient_email
             
-            part1 = MIMEText(draft.body_text, "plain")
-            part2 = MIMEText(draft.body_html, "html")
+            part1 = MIMEText(body_with_optout, "plain")
+            part2 = MIMEText(draft.body_html or body_with_optout, "html")
             msg.attach(part1)
             msg.attach(part2)
 
@@ -203,7 +268,7 @@ def send_approved_email(
         event_failed = EmailEvent(
             draft_id=draft.id,
             event_type="bounced",
-            details=f"SMTP dispatch failure: {error_msg}"
+            details=f"Dispatch failure: {error_msg}"
         )
         db.add(event_failed)
         db.commit()
@@ -213,3 +278,8 @@ def send_approved_email(
             provider=settings.EMAIL_PROVIDER,
             message=f"Dispatch failed: {error_msg}"
         )
+
+
+def send_email(db: Session, draft: EmailDraft) -> EmailSendResult:
+    """Convenience alias for background job worker dispatch."""
+    return send_approved_email(db, draft.id, user_id=1)

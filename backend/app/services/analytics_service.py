@@ -160,3 +160,66 @@ def calculate_campaign_performances(db: Session) -> List[CampaignPerformanceSumm
         ))
 
     return summaries
+
+
+def generate_daily_operational_digest(db: Session) -> dict:
+    """Generates comprehensive daily digest with exact metrics across all modules."""
+    from datetime import datetime, timezone
+    from app.models.job import BackgroundTaskRecord, DeadLetterTask
+    from app.models.whatsapp import WhatsAppMessage
+    from app.core.config import settings
+
+    now_utc = datetime.now(timezone.utc)
+    today_start = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    # 1. Pipeline & Volume
+    funnel = calculate_funnel_metrics(db)
+    city_breakdown = calculate_city_breakdown(db)
+
+    # 2. Email & WhatsApp Dispatches (Real vs Simulated)
+    emails_sent_real = db.query(EmailDraft).filter(EmailDraft.approval_status == "sent").count()
+    emails_simulated = db.query(EmailDraft).filter(EmailDraft.approval_status == "simulated").count()
+    wa_sent_real = db.query(WhatsAppMessage).filter(WhatsAppMessage.status == "sent").count()
+    wa_simulated = db.query(WhatsAppMessage).filter(WhatsAppMessage.status == "simulated").count()
+
+    # 3. Replies by Category (all 10 classes)
+    reply_counts_by_cat = {}
+    reply_rows = db.query(Reply.classification, func.count(Reply.id)).group_by(Reply.classification).all()
+    for cat, count in reply_rows:
+        reply_counts_by_cat[cat] = count
+
+    # 4. Job Engine Health & DLQ
+    dlq_count = db.query(DeadLetterTask).filter(DeadLetterTask.requeued == False).count()
+    failed_tasks_today = db.query(BackgroundTaskRecord).filter(
+        BackgroundTaskRecord.created_at >= today_start,
+        BackgroundTaskRecord.status == "failed"
+    ).count()
+
+    return {
+        "report_date": today_start.strftime("%Y-%m-%d"),
+        "timezone": settings.TIMEZONE,
+        "generated_at": now_utc.isoformat(),
+        "summary": {
+            "total_companies_discovered": funnel.total_companies_researched,
+            "qualified_leads": funnel.qualified_leads,
+            "qualification_rate_percent": funnel.qualification_rate,
+            "emails_drafted": funnel.emails_drafted,
+            "emails_approved": funnel.emails_approved,
+            "emails_dispatched_real": emails_sent_real,
+            "emails_dispatched_simulated": emails_simulated,
+            "whatsapp_dispatched_real": wa_sent_real,
+            "whatsapp_dispatched_simulated": wa_simulated,
+            "replies_received": funnel.replies_received,
+            "meetings_booked": funnel.meetings_booked,
+            "evaluation_programs_started": funnel.trials_started,
+            "customer_conversions": funnel.paid_conversions,
+            "opt_outs": funnel.opt_outs
+        },
+        "replies_breakdown": reply_counts_by_cat,
+        "worker_health": {
+            "failed_tasks_today": failed_tasks_today,
+            "unresolved_dead_letters": dlq_count,
+            "status": "healthy" if dlq_count == 0 else "action_required"
+        },
+        "city_breakdown": [item.model_dump() for item in city_breakdown]
+    }

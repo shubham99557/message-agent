@@ -14,8 +14,15 @@ def classify_reply_text(message_text: str) -> tuple[str, float, str, str, bool]:
     """Classifies inbound response into 10 categories, generates suggested reply and checks negotiation."""
     text_lower = message_text.lower().strip()
 
-    # 1. Unsubscribe / Opt-out
-    if any(k in text_lower for k in ["unsubscribe", "stop", "remove me", "don't email", "do not contact", "opt out"]):
+    # 1. Hostile / Legal Threat / Unsubscribe / Opt-out
+    if any(k in text_lower for k in ["sue", "lawyer", "attorney", "harassment", "illegal", "police", "court", "cease and desist", "spam report"]):
+        classification = "unsubscribe"
+        confidence = 0.99
+        reason = "Legal threat or hostile objection detected. Automated responses strictly suppressed."
+        suggested = ""  # NEVER send automated response to anger or legal threat
+        is_negotiation = False
+
+    elif any(k in text_lower for k in ["unsubscribe", "stop", "remove me", "don't email", "do not contact", "opt out"]):
         classification = "unsubscribe"
         confidence = 0.99
         reason = "Explicit request to unsubscribe or stop communication."

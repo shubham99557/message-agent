@@ -48,3 +48,14 @@ def run_batch_qualification(
             res = qualify_company(db, company)
             results.append(res)
     return results
+
+
+@router.post("/reverify-stale", response_model=List[QualificationResult])
+def reverify_stale_leads(
+    max_age_days: int = 30,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Scans and re-qualifies leads with qualification records older than max_age_days."""
+    from app.services.qualification_service import reverify_stale_qualifications
+    return reverify_stale_qualifications(db, max_age_days=max_age_days)

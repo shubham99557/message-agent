@@ -258,22 +258,8 @@ def execute_task_logic(category: str, payload: Dict[str, Any], db) -> Dict[str, 
         return {"lead_id": lead.id, "status": lead.pipeline_status}
 
     elif category == "followup_scheduling":
-        from app.models.lead import Lead
-        from app.models.activity import SuppressionList
-        # Find leads contacted > 3 days ago with no reply and not suppressed
-        three_days_ago = datetime.now(timezone.utc) - timedelta(days=3)
-        candidates = db.query(Lead).filter(
-            Lead.pipeline_status == "contacted",
-            Lead.updated_at <= three_days_ago
-        ).limit(20).all()
-
-        scheduled = []
-        for lead in candidates:
-            # Check suppression
-            suppressed = db.query(SuppressionList).filter(SuppressionList.company_id == lead.company_id).first()
-            if not suppressed:
-                scheduled.append(lead.id)
-        return {"evaluated_count": len(candidates), "followup_candidates": scheduled}
+        from app.services.followup_service import process_autonomous_followups
+        return process_autonomous_followups(db)
 
     elif category == "daily_reporting":
         from app.services.analytics_service import calculate_funnel_metrics

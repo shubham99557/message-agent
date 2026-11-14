@@ -37,3 +37,13 @@ def get_campaigns_performance(
     current_user: User = Depends(get_current_user)
 ):
     return calculate_campaign_performances(db)
+
+
+@router.get("/daily-digest")
+def get_daily_digest(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Generates daily operational digest with genuine pipeline metrics, reply breakdown, and DLQ status."""
+    from app.services.analytics_service import generate_daily_operational_digest
+    return generate_daily_operational_digest(db)

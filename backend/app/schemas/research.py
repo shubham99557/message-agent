@@ -8,6 +8,9 @@ class QualificationFactorResult(BaseModel):
     passed: bool
     score_weight: float
     evidence: str
+    evidence_source: Optional[str] = None
+    confidence: float = 1.0
+    explanation: Optional[str] = None
 
 
 class QualificationResult(BaseModel):
@@ -18,6 +21,9 @@ class QualificationResult(BaseModel):
     factors: List[QualificationFactorResult]
     has_verified_5_plus_laptops: bool
     distinction_note: str
+    recommended_next_action: str = "Proceed to outreach"
+    last_verified_at: Optional[datetime] = None
+    is_stale: bool = False
 
 
 class ResearchReportBase(BaseModel):
@@ -65,3 +71,15 @@ class DiscoveredCompanyItem(BaseModel):
     laptop_count_evidence: Optional[str] = None
     source_url: str
     source_type: str = "business_directory"
+    confidence_level: float = 1.0
+    retrieval_timestamp: Optional[datetime] = None
+
+
+class WebsiteCrawlRequest(BaseModel):
+    website_url: str
+    company_name: Optional[str] = None
+    city: Optional[str] = None
+
+
+class BatchImportRequest(BaseModel):
+    companies: List[DiscoveredCompanyItem]

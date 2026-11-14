@@ -148,6 +148,39 @@ export const ResearchView: React.FC<ResearchViewProps> = ({ selectedCompany, onN
                 {activeCompany.qualification_reason || 'Run evaluation to analyze 7-factor scoring criteria.'}
               </div>
 
+              {/* Render Individual Factors if available */}
+              {(() => {
+                let factorsList: any[] = qualification?.factors || [];
+                if (!factorsList.length && activeCompany.qualification_factors) {
+                  try {
+                    factorsList = JSON.parse(activeCompany.qualification_factors);
+                  } catch {}
+                }
+                if (!factorsList.length) return null;
+                return (
+                  <div className="space-y-2 mb-4 max-h-60 overflow-y-auto pr-1">
+                    <span className="text-[11px] font-semibold text-slate-300 block uppercase tracking-wider">Scored Factors</span>
+                    {factorsList.map((f: any, idx: number) => (
+                      <div key={idx} className="bg-cobalt-950/70 p-2.5 rounded border border-cobalt-800/80 text-[11px] space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="font-medium text-slate-200 truncate pr-2">{f.factor_name}</span>
+                          <span className={`font-mono font-bold shrink-0 ${f.passed ? 'text-emerald-400' : 'text-slate-400'}`}>
+                            +{f.score_weight} pts
+                          </span>
+                        </div>
+                        <p className="text-slate-400 text-[10px] leading-tight">{f.evidence}</p>
+                        {f.evidence_source && (
+                          <div className="text-[10px] text-cobalt-400 flex items-center justify-between">
+                            <span className="truncate max-w-[150px]">Source: {f.evidence_source}</span>
+                            <span className="text-slate-400 font-mono">Conf: {Math.round((f.confidence ?? 1) * 100)}%</span>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+
               {/* Strict Laptop Distinction Alert */}
               <div className="text-[11px] text-amber-300/90 bg-amber-500/10 p-3 rounded border border-amber-500/30 leading-relaxed mb-4">
                 <strong className="block text-amber-200 mb-0.5">Compliance Notice:</strong>

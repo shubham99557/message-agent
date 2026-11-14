@@ -168,9 +168,22 @@ export const api = {
   searchDiscovery: (params: { city: string; industry?: string; query?: string; min_devices?: number }) =>
     request<any[]>('/discovery/search', { method: 'POST', body: JSON.stringify(params) }),
   importDiscoveredLead: (lead: any) => request<any>('/discovery/import', { method: 'POST', body: JSON.stringify(lead) }),
+  batchImportDiscoveredLeads: (companies: any[]) =>
+    request<any[]>('/discovery/batch-import', { method: 'POST', body: JSON.stringify({ companies }) }),
+  crawlWebsite: (websiteUrl: string, companyName?: string, city?: string) =>
+    request<any>('/discovery/crawl-website', { method: 'POST', body: JSON.stringify({ website_url: websiteUrl, company_name: companyName, city }) }),
+  uploadDiscoveryCsv: async (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return request<any[]>('/discovery/upload-csv', { method: 'POST', body: formData });
+  },
 
   // Qualification
   qualifyCompany: (companyId: number) => request<any>(`/qualification/company/${companyId}`, { method: 'POST' }),
+  batchQualifyCompanies: (companyIds: number[]) =>
+    request<any[]>('/qualification/batch', { method: 'POST', body: JSON.stringify(companyIds) }),
+  reverifyStaleQualifications: (maxAgeDays: number = 30) =>
+    request<any[]>(`/qualification/reverify-stale?max_age_days=${maxAgeDays}`, { method: 'POST' }),
 
   // Research Report
   generateResearchReport: (companyId: number) => request<any>(`/research/company/${companyId}`, { method: 'POST' }),

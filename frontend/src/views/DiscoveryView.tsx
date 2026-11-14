@@ -213,7 +213,26 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onCompanyImported 
           <div className="text-xs font-semibold text-slate-200">
             Discovered Company Records ({results.length} found)
           </div>
-          <span className="text-[11px] font-mono text-slate-400">Strict Source Verification Active</span>
+          <div className="flex items-center space-x-3">
+            <span className="text-[11px] font-mono text-slate-400">Strict Source Verification Active</span>
+            {results.length > 0 && (
+              <button
+                onClick={async () => {
+                  try {
+                    const imported = await api.batchImportDiscoveredLeads(results);
+                    setImportSuccess(`Batch imported ${imported.length} new qualified leads!`);
+                    if (onCompanyImported) onCompanyImported();
+                  } catch (e: any) {
+                    alert(`Batch import failed: ${e.message}`);
+                  }
+                }}
+                className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-medium transition-colors flex items-center space-x-1"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>Import All ({results.length})</span>
+              </button>
+            )}
+          </div>
         </div>
 
         {results.length === 0 ? (
