@@ -9,9 +9,13 @@ from app.services.auth_service import seed_default_admin
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Enforce production security constraints
+    settings.validate_production_security()
+
     # Ensure all tables exist on startup
     Base.metadata.create_all(bind=engine)
-    # Seed default admin user
+    
+    # Bootstrap initial admin if provided via environment
     db = SessionLocal()
     try:
         seed_default_admin(db)
@@ -26,12 +30,12 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS Middleware
+# CORS Middleware: Explicit non-wildcard origins
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.BACKEND_CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -43,6 +47,7 @@ def health_check():
     return {
         "status": "healthy",
         "service": settings.PROJECT_NAME,
+        "environment": settings.ENVIRONMENT,
         "version": "1.0.0"
     }
 

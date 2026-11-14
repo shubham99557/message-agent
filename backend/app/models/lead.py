@@ -23,6 +23,25 @@ PIPELINE_STATUSES = [
     "do_not_contact"
 ]
 
+PIPELINE_TRANSITIONS = {
+    "new": ["researching", "qualified", "do_not_contact"],
+    "researching": ["qualified", "not_suitable", "do_not_contact"],
+    "qualified": ["draft_ready", "awaiting_approval", "do_not_contact"],
+    "draft_ready": ["awaiting_approval", "do_not_contact"],
+    "awaiting_approval": ["contacted", "rejected", "do_not_contact"],
+    "contacted": ["replied", "not_interested", "do_not_contact"],
+    "replied": ["interested", "not_interested", "meeting_scheduled", "do_not_contact"],
+    "interested": ["meeting_scheduled", "demo_completed", "trial_offered", "do_not_contact"],
+    "meeting_scheduled": ["demo_completed", "not_interested", "do_not_contact"],
+    "demo_completed": ["trial_offered", "converted", "lost", "do_not_contact"],
+    "trial_offered": ["trial_activated", "lost", "do_not_contact"],
+    "trial_activated": ["converted", "lost", "do_not_contact"],
+    "converted": [],
+    "lost": ["new", "researching"],
+    "not_interested": ["do_not_contact"],
+    "do_not_contact": []
+}
+
 
 class Lead(Base):
     __tablename__ = "leads"
@@ -37,6 +56,7 @@ class Lead(Base):
     followup_count = Column(Integer, default=0)
     
     # Meeting & Evaluation notes
+    notes = Column(Text, nullable=True)
     meeting_notes = Column(Text, nullable=True)
     product_feedback = Column(Text, nullable=True)
     

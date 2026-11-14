@@ -27,10 +27,10 @@ def calculate_funnel_metrics(db: Session, campaign_id: Optional[int] = None) -> 
         draft_query = draft_query.filter(EmailDraft.campaign_id == campaign_id)
 
     emails_drafted = draft_query.count()
-    emails_approved = draft_query.filter(EmailDraft.approval_status.in_(["approved", "sent"])).count()
+    emails_approved = draft_query.filter(EmailDraft.approval_status.in_(["approved", "sent", "simulated"])).count()
     
-    # Strictly sent messages (never count drafted or queued!)
-    emails_sent = draft_query.filter(EmailDraft.approval_status == "sent").count()
+    # Strictly sent or simulated test dispatches (never count drafted, queued, or rejected!)
+    emails_sent = draft_query.filter(EmailDraft.approval_status.in_(["sent", "simulated"])).count()
 
     # Events
     emails_delivered = db.query(EmailEvent).filter(EmailEvent.event_type == "delivered").count()

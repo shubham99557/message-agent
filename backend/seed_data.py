@@ -31,9 +31,10 @@ def run_seed():
         
         rep = db.query(User).filter(User.email == "sales@acttrident.ai").first()
         if not rep:
+            sales_password = os.getenv("INITIAL_SALES_PASSWORD", "SalesPassword2026!")
             rep = User(
                 email="sales@acttrident.ai",
-                hashed_password=get_password_hash("SalesPassword2026!"),
+                hashed_password=get_password_hash(sales_password),
                 full_name="ActTrident BD Specialist",
                 role="sales_rep"
             )
@@ -43,7 +44,7 @@ def run_seed():
         print("2. Seeding Approved Meta WhatsApp Templates...")
         seed_default_meta_templates(db)
 
-        print("3. Seeding Target Companies across Siliguri, Gangtok, Patna, Bhagalpur...")
+        print("3. Seeding Target Companies across Siliguri, Gangtok, Patna, Bhagalpur (Demo Flagged)...")
         sample_companies = [
             # Siliguri
             {
@@ -150,6 +151,7 @@ def run_seed():
                     employee_size_evidence=cdata["employee_size_evidence"],
                     decision_maker_name=cdata["decision_maker_name"],
                     decision_maker_role=cdata["decision_maker_role"],
+                    is_demo=True,  # Explicitly marked as demo data
                     date_last_verified=datetime.now(timezone.utc)
                 )
                 db.add(comp)
@@ -161,7 +163,7 @@ def run_seed():
                     field_name="profile_and_laptops",
                     source_url=cdata["source_url"],
                     source_type="official_documentation",
-                    notes="Verified verified laptop fleet & decision-maker information"
+                    extracted_text="Verified laptop fleet & decision-maker information"
                 )
                 db.add(src)
 

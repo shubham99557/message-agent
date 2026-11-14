@@ -20,11 +20,13 @@ class WhatsAppTemplateResponse(BaseModel):
 class ContactConsentCreate(BaseModel):
     company_id: int
     contact_id: Optional[int] = None
+    contact_identifier: Optional[str] = None
     channel: str = "whatsapp"
     consent_status: str  # opted_in, unconsented, opted_out
     consent_source: str  # e.g., "Web Form Inbound", "Business Card Handover", "Explicit Email Confirmation"
     consent_purpose: str = "ActTrident 90-day evaluation product inquiry"
     proof_reference: Optional[str] = None
+    evidence_url: Optional[str] = None
     notes: Optional[str] = None
 
 
@@ -39,8 +41,10 @@ class ContactConsentResponse(ContactConsentCreate):
 class WhatsAppDraftRequest(BaseModel):
     company_id: int
     contact_id: Optional[int] = None
-    template_name: str
+    template_id: Optional[int] = None
+    template_name: Optional[str] = None
     parameters: Dict[str, str] = {}
+    recipient_phone: Optional[str] = None
     campaign_id: Optional[int] = None
 
 

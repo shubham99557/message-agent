@@ -35,17 +35,22 @@ class WhatsAppMessage(Base):
     message_text = Column(Text, nullable=False)
     parameters_json = Column(Text, nullable=True)
     
+    # Versioning & Content Immutability
+    version = Column(Integer, default=1, nullable=False)
+    content_hash = Column(String(64), nullable=True)
+    approved_content_hash = Column(String(64), nullable=True)
+
     # Consent Verification Check
     has_valid_consent = Column(Boolean, default=False)
     click_to_chat_url = Column(String(512), nullable=True)
     
     # Human Approval & Meta Delivery Status
-    approval_status = Column(String(50), default="draft")  # draft, approved, rejected, sent
+    approval_status = Column(String(50), default="draft")  # draft, approved, rejected, sent, simulated
     approved_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     approved_at = Column(DateTime, nullable=True)
     
     meta_message_id = Column(String(255), nullable=True)
-    delivery_status = Column(String(50), default="draft")  # draft, queued, sent, delivered, read, failed
+    delivery_status = Column(String(50), default="draft")  # draft, queued, sent, delivered, read, failed, simulated
     error_message = Column(Text, nullable=True)
     sent_at = Column(DateTime, nullable=True)
     
@@ -58,3 +63,17 @@ class WhatsAppMessage(Base):
     template = relationship("WhatsAppTemplate", back_populates="messages")
     consent = relationship("ContactConsent")
     approved_by = relationship("User")
+
+
+class WebhookEvent(Base):
+    __tablename__ = "webhook_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    source = Column(String(50), nullable=False, index=True)  # meta_whatsapp, gmail, sendgrid
+    event_id = Column(String(255), nullable=True, index=True)
+    idempotency_key = Column(String(128), unique=True, index=True, nullable=False)
+    payload_json = Column(Text, nullable=False)
+    status = Column(String(50), default="received")  # received, processed, ignored, failed
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    processed_at = Column(DateTime, nullable=True)

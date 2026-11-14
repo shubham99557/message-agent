@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File,
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, get_current_user
+from app.api.deps import get_db, get_current_user, require_role
 from app.models.user import User
 from app.schemas.company import (
     CompanyCreate,
@@ -38,13 +38,14 @@ def get_all_companies(
     qualification_status: Optional[str] = None,
     has_laptops: Optional[bool] = None,
     search: Optional[str] = None,
+    is_demo: Optional[bool] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     companies, total = list_companies(
         db, skip=skip, limit=limit, city=city, state=state,
         industry=industry, qualification_status=qualification_status,
-        has_laptops=has_laptops, search=search
+        has_laptops=has_laptops, search=search, is_demo=is_demo
     )
     return {
         "items": [CompanyResponse.model_validate(c) for c in companies],
@@ -60,14 +61,14 @@ def create_new_company(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    company = create_company(db, comp_in)
+    company = create_company(db, comp_in, user_id=current_user.id)
     record_audit_log(
         db=db,
         action="create_company",
         entity_type="company",
         entity_id=str(company.id),
         user_id=current_user.id,
-        details={"name": company.name, "city": company.city}
+        details={"name": company.name, "city": company.city, "is_demo": company.is_demo}
     )
     return company
 
@@ -91,9 +92,19 @@ def update_existing_company(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    company = update_company(db, company_id, comp_in)
+    company = get_company(db, company_id)
     if not company:
         raise HTTPException(status_code=404, detail="Company not found")
+
+    # Ownership / Privilege check
+    if current_user.role not in ["admin", "manager"]:
+        if company.created_by_id and company.created_by_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Permission denied: You can only edit companies you created or require manager privileges."
+            )
+
+    updated = update_company(db, company_id, comp_in)
     record_audit_log(
         db=db,
         action="update_company",
@@ -101,7 +112,7 @@ def update_existing_company(
         entity_id=str(company.id),
         user_id=current_user.id
     )
-    return company
+    return updated
 
 
 @router.post("/{company_id}/sources", response_model=ContactSourceResponse, status_code=status.HTTP_201_CREATED)
@@ -129,7 +140,7 @@ async def upload_csv_file(
         raise HTTPException(status_code=400, detail="Only .csv files are supported")
     content = await file.read()
     csv_text = content.decode("utf-8", errors="replace")
-    summary = import_companies_from_csv(db, csv_text)
+    summary = import_companies_from_csv(db, csv_text, user_id=current_user.id)
     record_audit_log(
         db=db,
         action="import_csv",

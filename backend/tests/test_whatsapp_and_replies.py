@@ -1,4 +1,4 @@
-def test_whatsapp_strict_consent_enforcement(client, auth_headers):
+def test_whatsapp_strict_consent_enforcement(client, auth_headers, admin_auth_headers):
     # 1. Company with public WhatsApp but NO recorded consent
     comp = client.post(
         "/api/v1/companies",
@@ -28,7 +28,7 @@ def test_whatsapp_strict_consent_enforcement(client, auth_headers):
     assert "https://wa.me/919733099999" in msg_data["click_to_chat_url"]
 
     # ATTEMPT TO APPROVE UNCONSENTED WHATSAPP MESSAGE -> MUST BE BLOCKED BY POLICY
-    appr_res = client.post(f"/api/v1/whatsapp/approve/{msg_data['id']}", headers=auth_headers)
+    appr_res = client.post(f"/api/v1/whatsapp/approve/{msg_data['id']}", headers=admin_auth_headers)
     assert appr_res.status_code == 400
     assert "consent is mandatory" in appr_res.json()["detail"].lower()
 
@@ -59,19 +59,19 @@ def test_whatsapp_strict_consent_enforcement(client, auth_headers):
     ).json()
     assert draft_consented["has_valid_consent"] is True
 
-    # Approve consented message
-    appr_success = client.post(f"/api/v1/whatsapp/approve/{draft_consented['id']}", headers=auth_headers)
+    # Approve consented message using admin/manager headers
+    appr_success = client.post(f"/api/v1/whatsapp/approve/{draft_consented['id']}", headers=admin_auth_headers)
     assert appr_success.status_code == 200
     assert appr_success.json()["approval_status"] == "approved"
 
     # Send approved message
-    send_res = client.post(f"/api/v1/whatsapp/send/{draft_consented['id']}", headers=auth_headers)
+    send_res = client.post(f"/api/v1/whatsapp/send/{draft_consented['id']}", headers=admin_auth_headers)
     assert send_res.status_code == 200
     assert send_res.json()["status"] == "success"
 
 
-def test_ai_reply_classification_10_categories(client, auth_headers):
-    # Test Inbound 'Interested' reply
+def test_ai_reply_classification_10_categories(client, auth_headers, admin_auth_headers):
+    # Test Inbound 'Interested' reply (authenticated endpoint)
     res_interest = client.post(
         "/api/v1/replies/inbound",
         json={
@@ -79,7 +79,8 @@ def test_ai_reply_classification_10_categories(client, auth_headers):
             "sender_identifier": "cto@patnadevs.example.com",
             "subject": "Re: ActTrident 90-day Evaluation",
             "message_body": "This sounds relevant. We manage 15 hybrid laptops. Please share more details and a demo."
-        }
+        },
+        headers=auth_headers
     )
     assert res_interest.status_code == 201
     rep1 = res_interest.json()
@@ -95,7 +96,8 @@ def test_ai_reply_classification_10_categories(client, auth_headers):
             "sender_identifier": "remove@unsubcompany.example.com",
             "subject": "STOP",
             "message_body": "Please stop emailing me. Unsubscribe."
-        }
+        },
+        headers=auth_headers
     )
     assert res_unsub.status_code == 201
     rep2 = res_unsub.json()
@@ -109,17 +111,18 @@ def test_ai_reply_classification_10_categories(client, auth_headers):
             "sender_identifier": "auto@holiday.example.com",
             "subject": "Out of office: Away on annual leave",
             "message_body": "I am away from my desk until next Monday. I will have limited access to email."
-        }
+        },
+        headers=auth_headers
     )
     assert res_ooo.status_code == 201
     rep3 = res_ooo.json()
     assert rep3["classification"] == "out_of_office"
 
-    # Human approves negotiated response
+    # Human approves negotiated response using admin credentials
     appr_resp = client.post(
         f"/api/v1/replies/{rep1['id']}/approve-response",
         json={"approved_text": "Thank you! We have confirmed Thursday at 3 PM IST.", "send_immediately": False},
-        headers=auth_headers
+        headers=admin_auth_headers
     )
     assert appr_resp.status_code == 200
     assert appr_resp.json()["human_approved"] is True

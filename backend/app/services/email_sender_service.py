@@ -1,33 +1,62 @@
-from datetime import datetime, timezone, date
 import smtplib
-from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from datetime import datetime, timezone
 from typing import Optional
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
 from app.models.email import EmailDraft, EmailEvent
 from app.models.activity import SuppressionList
-from app.models.lead import Lead
+from app.models.campaign import Campaign
 from app.schemas.email import EmailSendResult
 from app.core.config import settings
 from app.core.audit import record_audit_log
+from app.core.security import compute_content_hash
 
 
-def check_daily_sending_limit(db: Session) -> bool:
-    """Verifies that daily outbound email count remains strictly under the conservative limit."""
+def check_daily_sending_limit(db: Session, campaign_id: Optional[int] = None) -> bool:
+    """Enforces conservative daily email limits across campaigns and global ceiling."""
     today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-    count = db.query(EmailEvent).filter(
-        EmailEvent.event_type == "sent",
-        EmailEvent.timestamp >= today_start
+    
+    # Global daily sent count (excluding simulated)
+    global_sent_today = db.query(EmailDraft).filter(
+        EmailDraft.sent_at >= today_start,
+        EmailDraft.approval_status == "sent"
     ).count()
-    return count < settings.DEFAULT_DAILY_EMAIL_LIMIT
+
+    if global_sent_today >= settings.DEFAULT_DAILY_EMAIL_LIMIT:
+        return False
+
+    # Campaign-level daily sent count
+    if campaign_id:
+        campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
+        if campaign:
+            camp_sent_today = db.query(EmailDraft).filter(
+                EmailDraft.campaign_id == campaign_id,
+                EmailDraft.sent_at >= today_start,
+                EmailDraft.approval_status == "sent"
+            ).count()
+            if camp_sent_today >= campaign.daily_email_limit:
+                return False
+
+    return True
 
 
-def send_approved_email(db: Session, draft_id: int, user_id: int) -> EmailSendResult:
-    """Sends an email strictly if approved, not suppressed, and within limits."""
+def send_approved_email(
+    db: Session,
+    draft_id: int,
+    user_id: int
+) -> EmailSendResult:
+    """Dispatches an email draft strictly after validating Human Approval, Content Hash, and Suppression."""
     draft = db.query(EmailDraft).filter(EmailDraft.id == draft_id).first()
     if not draft:
-        return EmailSendResult(draft_id=draft_id, status="failed", provider="none", message="Draft not found")
+        return EmailSendResult(
+            draft_id=draft_id,
+            status="failed",
+            provider=settings.EMAIL_PROVIDER,
+            message="Email draft not found"
+        )
 
     # 1. MANDATORY HUMAN APPROVAL ENFORCEMENT
     if draft.approval_status != "approved":
@@ -35,10 +64,26 @@ def send_approved_email(db: Session, draft_id: int, user_id: int) -> EmailSendRe
             draft_id=draft_id,
             status="failed",
             provider=draft.provider,
-            message="Cannot send: Draft must be explicitly approved by a user before outbound delivery"
+            message="Security Block: Email has not been approved by a designated reviewer"
         )
 
-    # 2. SUPPRESSION LIST ENFORCEMENT
+    # 2. IMMUTABLE CONTENT HASH VERIFICATION
+    current_hash = compute_content_hash([draft.subject, draft.body_text])
+    if not draft.approved_content_hash or current_hash != draft.approved_content_hash:
+        # Invalidate approval immediately if content mismatch detected
+        draft.approval_status = "draft"
+        draft.approved_by_id = None
+        draft.approved_at = None
+        draft.approved_content_hash = None
+        db.commit()
+        return EmailSendResult(
+            draft_id=draft_id,
+            status="failed",
+            provider=draft.provider,
+            message="Security Block: Draft content was modified after approval was granted. Re-approval required."
+        )
+
+    # 3. SUPPRESSION LIST ENFORCEMENT
     suppressed = db.query(SuppressionList).filter(
         SuppressionList.identifier == draft.recipient_email.strip().lower()
     ).first()
@@ -53,8 +98,8 @@ def send_approved_email(db: Session, draft_id: int, user_id: int) -> EmailSendRe
             message=f"Recipient {draft.recipient_email} is on the global suppression list"
         )
 
-    # 3. CONSERVATIVE DAILY LIMIT CHECK
-    if not check_daily_sending_limit(db):
+    # 4. CONSERVATIVE DAILY LIMIT CHECK
+    if not check_daily_sending_limit(db, draft.campaign_id):
         return EmailSendResult(
             draft_id=draft_id,
             status="queued",
@@ -62,10 +107,11 @@ def send_approved_email(db: Session, draft_id: int, user_id: int) -> EmailSendRe
             message=f"Daily email limit ({settings.DEFAULT_DAILY_EMAIL_LIMIT}) reached. Message held in queue."
         )
 
-    # 4. DISPATCH VIA CONFIGURED PROVIDER (SMTP / GMAIL / MOCK)
+    # 5. DISPATCH VIA CONFIGURED PROVIDER (SMTP / MOCK)
     provider_msg_id = f"acttrident-msg-{draft.id}-{int(datetime.now().timestamp())}"
     send_success = True
     error_msg = None
+    is_mock = False
 
     if settings.EMAIL_PROVIDER == "smtp" and settings.SMTP_USER and settings.SMTP_PASSWORD:
         try:
@@ -88,28 +134,47 @@ def send_approved_email(db: Session, draft_id: int, user_id: int) -> EmailSendRe
             send_success = False
             error_msg = str(e)
     else:
-        # Test / Mock provider mode: simulates successful delivery without network dependencies
-        send_success = True
+        # Explicit mock mode: must NEVER report simulated messages as real 'sent' or 'delivered'
+        is_mock = True
+
+    if is_mock:
+        # Accurately record mock dispatch without falsifying delivery metrics
+        draft.approval_status = "simulated"
+        draft.provider_message_id = f"sim-{provider_msg_id}"
+        event_sim = EmailEvent(
+            draft_id=draft.id,
+            event_type="simulated",
+            details="Simulated dispatch in test environment without network transmission"
+        )
+        db.add(event_sim)
+        db.commit()
+
+        record_audit_log(
+            db=db,
+            action="simulate_email_send",
+            entity_type="email_draft",
+            entity_id=str(draft.id),
+            user_id=user_id,
+            details={"recipient": draft.recipient_email, "mode": "simulated"}
+        )
+        return EmailSendResult(
+            draft_id=draft.id,
+            status="simulated",
+            provider="mock",
+            message="Message dispatch simulated (mock provider active; no live external email sent)"
+        )
 
     if send_success:
         draft.approval_status = "sent"
         draft.sent_at = datetime.now(timezone.utc)
         draft.provider_message_id = provider_msg_id
         
-        # Log delivery events
         event_sent = EmailEvent(
             draft_id=draft.id,
             event_type="sent",
             details="Message dispatched through configured mail transport"
         )
         db.add(event_sent)
-
-        event_delivered = EmailEvent(
-            draft_id=draft.id,
-            event_type="delivered",
-            details="Accepted by recipient mail transfer agent"
-        )
-        db.add(event_delivered)
 
         # Update CRM Lead
         if draft.company and draft.company.lead:
@@ -142,7 +207,6 @@ def send_approved_email(db: Session, draft_id: int, user_id: int) -> EmailSendRe
         )
         db.add(event_failed)
         db.commit()
-
         return EmailSendResult(
             draft_id=draft.id,
             status="failed",

@@ -14,7 +14,7 @@ class InboundReplyCreate(BaseModel):
 class ReplyResponse(BaseModel):
     id: int
     conversation_id: Optional[int] = None
-    company_id: int
+    company_id: Optional[int] = None
     channel: str
     sender_identifier: str
     recipient_identifier: str
@@ -33,5 +33,8 @@ class ReplyResponse(BaseModel):
 
 
 class SuggestedResponseApproval(BaseModel):
+    reply_id: Optional[int] = None
     approved_text: Optional[str] = None
+    edited_response: Optional[str] = None
+    approved: bool = True
     send_immediately: bool = False

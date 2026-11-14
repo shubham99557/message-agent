@@ -1,4 +1,4 @@
-def test_analytics_funnel_and_denominators(client, auth_headers):
+def test_analytics_funnel_and_denominators(client, auth_headers, admin_auth_headers):
     # Create 2 companies
     c1 = client.post(
         "/api/v1/companies",
@@ -21,9 +21,9 @@ def test_analytics_funnel_and_denominators(client, auth_headers):
     assert a1["emails_drafted"] >= 2
     initial_sent = a1["emails_sent"]
 
-    # Approve and send ONLY ONE email
-    client.post(f"/api/v1/approvals/approve/{d1['id']}", headers=auth_headers)
-    client.post(f"/api/v1/emails/send/{d1['id']}", headers=auth_headers)
+    # Approve and send ONLY ONE email using admin credentials
+    client.post(f"/api/v1/approvals/approve/{d1['id']}", headers=admin_auth_headers)
+    client.post(f"/api/v1/emails/send/{d1['id']}", headers=admin_auth_headers)
 
     # Check analytics again: sent count must increase by exactly 1, NEVER 2!
     a2 = client.get("/api/v1/analytics/dashboard", headers=auth_headers).json()

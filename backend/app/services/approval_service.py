@@ -8,10 +8,11 @@ from app.models.company import Company
 from app.models.consent import ContactConsent
 from app.schemas.email import EmailDraftResponse, EmailDraftUpdate, BulkApprovalRequest
 from app.core.audit import record_audit_log
+from app.core.security import compute_content_hash
 
 
 def enrich_draft_response(db: Session, draft: EmailDraft) -> EmailDraftResponse:
-    """Enriches draft with compliance and source attribution data for the Human Approval UI."""
+    """Enriches draft with compliance, content hash, and source attribution data for the Human Approval UI."""
     company = draft.company
     contact_source_url = None
     consent_status = "unconsented"
@@ -87,11 +88,15 @@ def approve_email_draft(db: Session, draft_id: int, user_id: int) -> Optional[Em
     if not draft:
         return None
 
+    # Compute and bind immutable content hash to approval record
+    current_hash = compute_content_hash([draft.subject, draft.body_text])
+    draft.content_hash = current_hash
+    draft.approved_content_hash = current_hash
     draft.approval_status = "approved"
     draft.approved_by_id = user_id
     draft.approved_at = datetime.now(timezone.utc)
     
-    # Update lead status to awaiting_approval or ready for sending
+    # Update lead status to awaiting_approval / ready
     if draft.company and draft.company.lead:
         draft.company.lead.pipeline_status = "awaiting_approval"
 
@@ -107,6 +112,7 @@ def reject_email_draft(db: Session, draft_id: int, user_id: int, reason: Optiona
 
     draft.approval_status = "rejected"
     draft.rejection_reason = reason or "Rejected during human review"
+    draft.approved_content_hash = None
     db.commit()
     db.refresh(draft)
     return draft
@@ -123,22 +129,50 @@ def skip_email_draft(db: Session, draft_id: int, user_id: int) -> Optional[Email
     return draft
 
 
-def edit_email_draft(db: Session, draft_id: int, update_in: EmailDraftUpdate, user_id: int) -> Optional[EmailDraft]:
+def edit_email_draft(
+    db: Session,
+    draft_id: int,
+    update_in: EmailDraftUpdate,
+    user_id: int,
+    user_role: str = "sales_rep"
+) -> Optional[EmailDraft]:
+    """Editing an approved draft MUST increment version, recalculate content hash, and invalidate prior approval."""
     draft = db.query(EmailDraft).filter(EmailDraft.id == draft_id).first()
     if not draft:
         return None
 
-    if update_in.subject is not None:
+    content_changed = False
+    if update_in.subject is not None and update_in.subject != draft.subject:
         draft.subject = update_in.subject
-    if update_in.body_text is not None:
+        content_changed = True
+    if update_in.body_text is not None and update_in.body_text != draft.body_text:
         draft.body_text = update_in.body_text
-    if update_in.body_html is not None:
+        content_changed = True
+    if update_in.body_html is not None and update_in.body_html != draft.body_html:
         draft.body_html = update_in.body_html
+        content_changed = True
+
+    if content_changed:
+        draft.version = (draft.version or 1) + 1
+        draft.content_hash = compute_content_hash([draft.subject, draft.body_text])
+        # Invalidate approval immediately on content modification
+        draft.approval_status = "draft"
+        draft.approved_by_id = None
+        draft.approved_at = None
+        draft.approved_content_hash = None
+
     if update_in.approval_status is not None:
-        draft.approval_status = update_in.approval_status
         if update_in.approval_status == "approved":
-            draft.approved_by_id = user_id
-            draft.approved_at = datetime.now(timezone.utc)
+            # Only managers or admins can mark approved
+            if user_role in ["admin", "manager"]:
+                draft.approval_status = "approved"
+                draft.approved_by_id = user_id
+                draft.approved_at = datetime.now(timezone.utc)
+                draft.approved_content_hash = compute_content_hash([draft.subject, draft.body_text])
+            else:
+                draft.approval_status = "draft"
+        else:
+            draft.approval_status = update_in.approval_status
 
     db.commit()
     db.refresh(draft)

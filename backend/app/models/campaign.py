@@ -14,6 +14,9 @@ class Campaign(Base):
     target_industry = Column(String(255), nullable=True)
     status = Column(String(50), default="draft")  # draft, scheduled, active, paused, completed
     
+    # Ownership
+    created_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
     # Conservative Limits & Schedules
     daily_email_limit = Column(Integer, default=50)
     daily_whatsapp_limit = Column(Integer, default=20)
@@ -22,6 +25,7 @@ class Campaign(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
+    created_by = relationship("User")
     recipients = relationship("CampaignRecipient", back_populates="campaign", cascade="all, delete-orphan")
     email_drafts = relationship("EmailDraft", back_populates="campaign", cascade="all, delete-orphan")
     whatsapp_messages = relationship("WhatsAppMessage", back_populates="campaign", cascade="all, delete-orphan")

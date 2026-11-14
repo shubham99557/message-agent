@@ -6,9 +6,17 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     PROJECT_NAME: str = "ActTrident AI Outreach Agent"
     API_V1_STR: str = "/api/v1"
-    SECRET_KEY: str = os.getenv("SECRET_KEY", "acttrident-super-secret-production-key-change-in-env-2026")
+    ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")  # development, test, production
+
+    # JWT Security
+    SECRET_KEY: str = os.getenv("SECRET_KEY", "acttrident-dev-secret-key-replace-in-env-at-least-32-chars")
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))  # 30 min lifetime
+    REFRESH_TOKEN_EXPIRE_DAYS: int = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "14"))  # 14 days
+
+    # Initial Admin Bootstrap (from environment only; never hardcoded in source)
+    INITIAL_ADMIN_EMAIL: str = os.getenv("INITIAL_ADMIN_EMAIL", "admin@acttrident.ai")
+    INITIAL_ADMIN_PASSWORD: str = os.getenv("INITIAL_ADMIN_PASSWORD", "AdminPassword2026!")
 
     # Database
     DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./acttrident.db")
@@ -36,14 +44,22 @@ class Settings(BaseSettings):
     META_WA_PHONE_NUMBER_ID: str = os.getenv("META_WA_PHONE_NUMBER_ID", "")
     META_WA_BUSINESS_ACCOUNT_ID: str = os.getenv("META_WA_BUSINESS_ACCOUNT_ID", "")
     META_WA_VERIFY_TOKEN: str = os.getenv("META_WA_VERIFY_TOKEN", "acttrident_meta_webhook_secret_2026")
+    META_APP_SECRET: str = os.getenv("META_APP_SECRET", "")  # Used for HMAC-SHA256 signature verification
 
     # Conservative Safety & Sending Limits
     DEFAULT_DAILY_EMAIL_LIMIT: int = int(os.getenv("DEFAULT_DAILY_EMAIL_LIMIT", "50"))
     DEFAULT_DAILY_WHATSAPP_LIMIT: int = int(os.getenv("DEFAULT_DAILY_WHATSAPP_LIMIT", "20"))
     REQUIRE_HUMAN_APPROVAL: bool = True
 
-    # CORS
-    BACKEND_CORS_ORIGINS: List[str] = ["*"]
+    # CORS: Explicit allowed origins (Never wildcard in production)
+    BACKEND_CORS_ORIGINS: List[str] = [
+        origin.strip()
+        for origin in os.getenv(
+            "BACKEND_CORS_ORIGINS",
+            "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000"
+        ).split(",")
+        if origin.strip()
+    ]
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -52,5 +68,15 @@ class Settings(BaseSettings):
         extra="ignore"
     )
 
+    def validate_production_security(self) -> None:
+        """Validates that production environment is not using insecure default credentials or wildcards."""
+        if self.ENVIRONMENT.lower() == "production":
+            if "replace-in-env" in self.SECRET_KEY or len(self.SECRET_KEY) < 32:
+                raise ValueError("CRITICAL SECURITY ERROR: Production SECRET_KEY must be a unique key of at least 32 characters.")
+            if "*" in self.BACKEND_CORS_ORIGINS:
+                raise ValueError("CRITICAL SECURITY ERROR: Wildcard CORS is strictly forbidden in production.")
+
 
 settings = Settings()
+# Execute check on startup
+settings.validate_production_security()

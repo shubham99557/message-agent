@@ -19,8 +19,13 @@ class EmailDraft(Base):
     body_text = Column(Text, nullable=False)
     tone = Column(String(50), default="Friendly professional")  # Formal, Friendly professional, Technical, Short introductory, Follow-up
     
+    # Versioning & Immutability Content Hash
+    version = Column(Integer, default=1, nullable=False)
+    content_hash = Column(String(64), nullable=True)  # SHA-256 of subject + body_text
+    approved_content_hash = Column(String(64), nullable=True)  # Set strictly upon human approval
+
     # Mandatory Human Approval Status
-    approval_status = Column(String(50), default="draft")  # draft, approved, rejected, skipped, sent
+    approval_status = Column(String(50), default="draft")  # draft, approved, rejected, skipped, sent, simulated
     approved_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     approved_at = Column(DateTime, nullable=True)
     rejection_reason = Column(Text, nullable=True)

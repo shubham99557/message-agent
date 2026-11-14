@@ -40,7 +40,7 @@ def find_duplicate_company(db: Session, name: str, website: Optional[str] = None
     return None
 
 
-def create_company(db: Session, comp_in: CompanyCreate) -> Company:
+def create_company(db: Session, comp_in: CompanyCreate, user_id: Optional[int] = None) -> Company:
     # Validate verified laptops: never label as having 5+ laptops without evidence
     has_5_laptops = bool(comp_in.laptop_count_verified and comp_in.laptop_count_verified >= 5 and comp_in.laptop_count_evidence)
 
@@ -66,6 +66,8 @@ def create_company(db: Session, comp_in: CompanyCreate) -> Company:
         decision_maker_role=comp_in.decision_maker_role,
         decision_maker_email=comp_in.decision_maker_email,
         decision_maker_linkedin=comp_in.decision_maker_linkedin,
+        is_demo=comp_in.is_demo,
+        created_by_id=user_id,
         date_last_verified=datetime.now(timezone.utc)
     )
     db.add(company)
@@ -79,7 +81,7 @@ def create_company(db: Session, comp_in: CompanyCreate) -> Company:
             field_name="public_email",
             source_url=source_url,
             source_type="official_website" if comp_in.website else "user_entry",
-            notes=comp_in.source_notes or "Collected during company profiling"
+            extracted_text=comp_in.source_notes or "Collected during company profiling"
         )
         db.add(source_email)
 
@@ -89,7 +91,7 @@ def create_company(db: Session, comp_in: CompanyCreate) -> Company:
             field_name="public_phone",
             source_url=source_url,
             source_type="official_website" if comp_in.website else "user_entry",
-            notes=comp_in.source_notes or "Public business telephone"
+            extracted_text=comp_in.source_notes or "Public business telephone"
         )
         db.add(source_phone)
 
@@ -98,25 +100,18 @@ def create_company(db: Session, comp_in: CompanyCreate) -> Company:
             company_id=company.id,
             field_name="laptop_count",
             source_url=source_url,
-            source_type="verified_documentation",
-            notes=comp_in.laptop_count_evidence
+            source_type="official_website" if comp_in.website else "user_entry",
+            extracted_text=comp_in.laptop_count_evidence
         )
         db.add(source_laptop)
 
-    # Automatically create CRM lead
-    lead = Lead(company_id=company.id, pipeline_status="new")
+    # Initialize associated CRM Lead record
+    lead = Lead(
+        company_id=company.id,
+        pipeline_status="new",
+        notes="Discovered and added to system"
+    )
     db.add(lead)
-
-    # Initialize consent record for WhatsApp as unconsented by default (strict compliance!)
-    if comp_in.public_whatsapp:
-        consent_wa = ContactConsent(
-            company_id=company.id,
-            channel="whatsapp",
-            consent_status="unconsented",
-            consent_source="Public Directory Listing",
-            notes="Requires explicit permission before promotional messages can be sent via Meta Cloud API"
-        )
-        db.add(consent_wa)
 
     db.commit()
     db.refresh(company)
@@ -132,11 +127,14 @@ def list_companies(
     industry: Optional[str] = None,
     qualification_status: Optional[str] = None,
     has_laptops: Optional[bool] = None,
-    search: Optional[str] = None
+    search: Optional[str] = None,
+    is_demo: Optional[bool] = None
 ) -> Tuple[List[Company], int]:
     query = db.query(Company)
 
-    if city and city.lower() != "all":
+    if is_demo is not None:
+        query = query.filter(Company.is_demo == is_demo)
+    if city:
         query = query.filter(Company.city.ilike(f"%{city.strip()}%"))
     if state:
         query = query.filter(Company.state.ilike(f"%{state.strip()}%"))
@@ -190,12 +188,11 @@ def update_company(db: Session, company_id: int, comp_update: CompanyUpdate) -> 
 def add_contact_source(db: Session, source_in: ContactSourceCreate) -> ContactSource:
     source = ContactSource(
         company_id=source_in.company_id,
-        contact_id=source_in.contact_id,
         field_name=source_in.field_name,
         source_url=source_in.source_url,
         source_type=source_in.source_type,
-        notes=source_in.notes,
-        verified_at=datetime.now(timezone.utc)
+        extracted_text=source_in.notes,
+        retrieved_at=datetime.now(timezone.utc)
     )
     db.add(source)
     db.commit()
@@ -203,7 +200,7 @@ def add_contact_source(db: Session, source_in: ContactSourceCreate) -> ContactSo
     return source
 
 
-def import_companies_from_csv(db: Session, csv_content: str) -> CSVImportSummary:
+def import_companies_from_csv(db: Session, csv_content: str, user_id: Optional[int] = None) -> CSVImportSummary:
     reader = csv.DictReader(io.StringIO(csv_content))
     created = 0
     updated = 0
@@ -219,103 +216,70 @@ def import_companies_from_csv(db: Session, csv_content: str) -> CSVImportSummary
             continue
 
         city = row.get("city") or row.get("City") or "Siliguri"
-        website = row.get("website") or row.get("Website") or row.get("Official Website")
-        public_email = row.get("email") or row.get("Public Email") or row.get("Business Email")
-        public_phone = row.get("phone") or row.get("Public Phone") or row.get("Telephone")
-        public_whatsapp = row.get("whatsapp") or row.get("WhatsApp") or row.get("WhatsApp Contact")
-        industry = row.get("industry") or row.get("Industry") or "Technology"
-        state = row.get("state") or row.get("State")
-        source_url = row.get("source_url") or row.get("Source URL") or website or "CSV Bulk Import"
-        
-        # Laptop / Device verification
-        laptop_count_str = row.get("laptop_count") or row.get("Laptop Count") or row.get("Verified Laptops")
-        laptop_count = None
-        if laptop_count_str and laptop_count_str.isdigit():
-            laptop_count = int(laptop_count_str)
-        laptop_evidence = row.get("laptop_evidence") or row.get("Laptop Evidence")
+        website = row.get("website") or row.get("Official Website") or row.get("Website")
+        email = row.get("email") or row.get("public_email") or row.get("Email")
+        phone = row.get("phone") or row.get("public_phone") or row.get("Phone")
+        industry = row.get("industry") or row.get("Industry")
+        desc = row.get("description") or row.get("Description")
 
         # Employee counts
-        emp_min_str = row.get("employee_min") or row.get("Min Employees")
-        emp_min = int(emp_min_str) if emp_min_str and emp_min_str.isdigit() else None
-        emp_max_str = row.get("employee_max") or row.get("Max Employees")
-        emp_max = int(emp_max_str) if emp_max_str and emp_max_str.isdigit() else None
-        emp_evidence = row.get("employee_evidence") or row.get("Employee Evidence")
+        emp_min = None
+        emp_max = None
+        try:
+            if row.get("employee_count_min"):
+                emp_min = int(row.get("employee_count_min"))
+            if row.get("employee_count_max"):
+                emp_max = int(row.get("employee_count_max"))
+        except ValueError:
+            pass
 
-        # Decision maker
-        dm_name = row.get("decision_maker_name") or row.get("Decision Maker")
-        dm_role = row.get("decision_maker_role") or row.get("Decision Maker Role") or row.get("Title")
+        # Managed laptop count (requires explicit evidence)
+        laptop_count = None
+        laptop_evidence = row.get("laptop_count_evidence") or row.get("Laptop Evidence")
+        try:
+            raw_lap = row.get("laptop_count_verified") or row.get("Verified Laptops")
+            if raw_lap:
+                laptop_count = int(raw_lap)
+        except ValueError:
+            pass
 
-        # Check for duplicate
-        existing = find_duplicate_company(db, name=name, website=website, email=public_email)
+        existing = find_duplicate_company(db, name=name, website=website, email=email)
         if existing:
-            # Update existing company with any new fields
-            if website and not existing.website:
+            # Update fields if new data provided
+            if not existing.website and website:
                 existing.website = website
-            if public_email and not existing.public_email:
-                existing.public_email = public_email
-            if laptop_count and not existing.laptop_count_verified:
-                existing.laptop_count_verified = laptop_count
-                existing.laptop_count_evidence = laptop_evidence
-                existing.has_verified_5_plus_laptops = bool(laptop_count >= 5 and laptop_evidence)
+            if not existing.public_email and email:
+                existing.public_email = email
+            if not existing.public_phone and phone:
+                existing.public_phone = phone
             db.commit()
             updated += 1
-            continue
-
-        # Create new company
-        has_5_laptops = bool(laptop_count and laptop_count >= 5 and laptop_evidence)
-        new_company = Company(
-            name=name.strip(),
-            website=website.strip() if website else None,
-            city=city.strip(),
-            state=state.strip() if state else None,
-            country="India",
-            industry=industry.strip() if industry else None,
-            public_email=public_email.strip() if public_email else None,
-            public_phone=public_phone.strip() if public_phone else None,
-            public_whatsapp=public_whatsapp.strip() if public_whatsapp else None,
-            employee_count_min=emp_min,
-            employee_count_max=emp_max,
-            employee_size_evidence=emp_evidence,
-            laptop_count_verified=laptop_count,
-            laptop_count_evidence=laptop_evidence,
-            has_verified_5_plus_laptops=has_5_laptops,
-            decision_maker_name=dm_name,
-            decision_maker_role=dm_role,
-            date_last_verified=datetime.now(timezone.utc)
-        )
-        db.add(new_company)
-        db.flush()
-
-        # Add Source Record
-        source = ContactSource(
-            company_id=new_company.id,
-            field_name="general_profile",
-            source_url=source_url,
-            source_type="csv_import",
-            notes="Imported via official company batch upload"
-        )
-        db.add(source)
-
-        # Create Lead
-        lead = Lead(company_id=new_company.id, pipeline_status="new")
-        db.add(lead)
-
-        # Consent record for WhatsApp
-        if public_whatsapp:
-            consent_wa = ContactConsent(
-                company_id=new_company.id,
-                channel="whatsapp",
-                consent_status="unconsented",
-                consent_source="Public Directory / CSV Import",
-                notes="Requires explicit permission before promotional messages can be sent via Meta Cloud API"
+            skipped += 1
+        else:
+            comp_create = CompanyCreate(
+                name=name,
+                city=city,
+                state=row.get("state") or row.get("State"),
+                country="India",
+                website=website,
+                industry=industry,
+                description=desc,
+                public_email=email,
+                public_phone=phone,
+                public_whatsapp=row.get("whatsapp") or row.get("WhatsApp"),
+                employee_count_min=emp_min,
+                employee_count_max=emp_max,
+                employee_size_evidence=row.get("employee_size_evidence"),
+                laptop_count_verified=laptop_count,
+                laptop_count_evidence=laptop_evidence,
+                source_url=website or "CSV Upload",
+                is_demo=False
             )
-            db.add(consent_wa)
+            create_company(db, comp_create, user_id=user_id)
+            created += 1
 
-        created += 1
-
-    db.commit()
     return CSVImportSummary(
-        total_processed=created + updated + skipped,
+        total_processed=row_num - 1,
         created_count=created,
         updated_count=updated,
         duplicate_skipped_count=skipped,

@@ -69,9 +69,23 @@ def update_email_draft_endpoint(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    draft = edit_email_draft(db, draft_id, update_in, current_user.id)
+    draft = edit_email_draft(
+        db=db,
+        draft_id=draft_id,
+        update_in=update_in,
+        user_id=current_user.id,
+        user_role=current_user.role
+    )
     if not draft:
         raise HTTPException(status_code=404, detail="Draft not found")
+    record_audit_log(
+        db=db,
+        action="update_email_draft",
+        entity_type="email_draft",
+        entity_id=str(draft.id),
+        user_id=current_user.id,
+        details={"new_version": draft.version, "approval_status": draft.approval_status}
+    )
     return enrich_draft_response(db, draft)
 
 
@@ -82,6 +96,6 @@ def send_email_endpoint(
     current_user: User = Depends(get_current_user)
 ):
     result = send_approved_email(db, draft_id, current_user.id)
-    if result.status == "failed" and "approved" in result.message:
+    if result.status == "failed":
         raise HTTPException(status_code=400, detail=result.message)
     return result

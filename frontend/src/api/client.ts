@@ -4,18 +4,64 @@ export function getAuthToken(): string | null {
   return localStorage.getItem('acttrident_token');
 }
 
-export function setAuthToken(token: string) {
-  localStorage.setItem('acttrident_token', token);
+export function getRefreshToken(): string | null {
+  return localStorage.getItem('acttrident_refresh_token');
 }
 
-export function clearAuthToken() {
+export function setAuthTokens(accessToken: string, refreshToken?: string) {
+  localStorage.setItem('acttrident_token', accessToken);
+  if (refreshToken) {
+    localStorage.setItem('acttrident_refresh_token', refreshToken);
+  }
+}
+
+export function clearAuthTokens() {
   localStorage.removeItem('acttrident_token');
+  localStorage.removeItem('acttrident_refresh_token');
+}
+
+export const clearAuthToken = clearAuthTokens;
+
+let isRefreshing = false;
+let refreshSubscribers: ((token: string) => void)[] = [];
+
+function subscribeTokenRefresh(cb: (token: string) => void) {
+  refreshSubscribers.push(cb);
+}
+
+function onRefreshed(token: string) {
+  refreshSubscribers.forEach((cb) => cb(token));
+  refreshSubscribers = [];
+}
+
+async function refreshAccessToken(): Promise<string | null> {
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) return null;
+
+  try {
+    const res = await fetch(`${API_BASE}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      setAuthTokens(data.access_token, data.refresh_token);
+      return data.access_token;
+    }
+  } catch {
+    // refresh failed
+  }
+
+  clearAuthTokens();
+  return null;
 }
 
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-  const token = getAuthToken();
+  let token = getAuthToken();
   const headers = new Headers(options.headers || {});
-  
+
   if (token && !headers.has('Authorization')) {
     headers.set('Authorization', `Bearer ${token}`);
   }
@@ -23,10 +69,38 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     headers.set('Content-Type', 'application/json');
   }
 
-  const response = await fetch(`${API_BASE}${endpoint}`, {
+  let response = await fetch(`${API_BASE}${endpoint}`, {
     ...options,
     headers,
   });
+
+  // Handle 401 with Token Rotation / Refresh
+  if (response.status === 401 && !endpoint.startsWith('/auth/login') && !endpoint.startsWith('/auth/refresh')) {
+    if (!isRefreshing) {
+      isRefreshing = true;
+      const newToken = await refreshAccessToken();
+      isRefreshing = false;
+
+      if (newToken) {
+        onRefreshed(newToken);
+        headers.set('Authorization', `Bearer ${newToken}`);
+        response = await fetch(`${API_BASE}${endpoint}`, {
+          ...options,
+          headers,
+        });
+      }
+    } else {
+      // Wait for existing refresh promise
+      const retryToken = await new Promise<string>((resolve) => {
+        subscribeTokenRefresh((token) => resolve(token));
+      });
+      headers.set('Authorization', `Bearer ${retryToken}`);
+      response = await fetch(`${API_BASE}${endpoint}`, {
+        ...options,
+        headers,
+      });
+    }
+  }
 
   if (!response.ok) {
     let errorDetail = 'An error occurred';
@@ -52,25 +126,31 @@ export const api = {
     const formData = new URLSearchParams();
     formData.append('username', username);
     formData.append('password', password);
-    const res = await request<{ access_token: string; token_type: string; user: any }>('/auth/login', {
+    const res = await request<{ access_token: string; refresh_token?: string; token_type: string; user: any }>('/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: formData.toString(),
     });
-    setAuthToken(res.access_token);
+    setAuthTokens(res.access_token, res.refresh_token);
     return res;
   },
   getMe: () => request<any>('/auth/me'),
-  logout: () => {
-    clearAuthToken();
+  logout: async () => {
+    try {
+      await request<any>('/auth/logout', { method: 'POST' });
+    } catch {
+      // Ignore network errors on logout
+    }
+    clearAuthTokens();
   },
 
   // Companies & Leads
-  getCompanies: (params: { city?: string; industry?: string; search?: string; skip?: number; limit?: number } = {}) => {
+  getCompanies: (params: { city?: string; industry?: string; search?: string; skip?: number; limit?: number; is_demo?: boolean } = {}) => {
     const query = new URLSearchParams();
     if (params.city) query.append('city', params.city);
     if (params.industry) query.append('industry', params.industry);
     if (params.search) query.append('search', params.search);
+    if (params.is_demo !== undefined) query.append('is_demo', String(params.is_demo));
     if (params.skip !== undefined) query.append('skip', String(params.skip));
     if (params.limit !== undefined) query.append('limit', String(params.limit));
     return request<{ items: any[]; total: number }>(`/companies?${query.toString()}`);
@@ -128,9 +208,9 @@ export const api = {
   addCampaignRecipients: (campaignId: number, companyIds: number[]) =>
     request<any>(`/campaigns/${campaignId}/recipients`, { method: 'POST', body: JSON.stringify({ company_ids: companyIds }) }),
   generateCampaignDrafts: (campaignId: number, tone: string = 'Friendly professional') =>
-    request<any>(`/campaigns/${campaignId}/generate-drafts`, { method: 'POST', body: JSON.stringify({ tone }) }),
+    request<any>(`/campaigns/${campaignId}/batch-draft`, { method: 'POST', body: JSON.stringify({ tone }) }),
   sendApprovedCampaignEmails: (campaignId: number) =>
-    request<any>(`/campaigns/${campaignId}/send-approved`, { method: 'POST' }),
+    request<any>(`/campaigns/${campaignId}/dispatch-approved`, { method: 'POST' }),
 
   // CRM Pipeline
   getLeads: (status?: string, city?: string) => {
@@ -149,13 +229,24 @@ export const api = {
     request<any>('/crm/opt-out', { method: 'POST', body: JSON.stringify({ identifier, channel, reason }) }),
 
   // Inbox & Replies
-  getInbox: (classification?: string) => {
+  getInbox: async (classification?: string) => {
     const query = new URLSearchParams();
     if (classification) query.append('classification', classification);
-    return request<{ items: any[]; total: number; available_categories: string[] }>(`/replies/inbox?${query.toString()}`);
+    const res = await request<{ items: any[]; total: number; categories: string[] }>(`/replies/inbox?${query.toString()}`);
+    return {
+      ...res,
+      available_categories: res.categories || [],
+    };
   },
-  approveReplyResponse: (replyId: number, approvedText: string) =>
-    request<any>(`/replies/${replyId}/approve-response`, { method: 'POST', body: JSON.stringify({ approved_text: approvedText }) }),
+  approveReplyResponse: (replyId: number, approvedOrText: boolean | string = true, editedResponse?: string) => {
+    const isBool = typeof approvedOrText === 'boolean';
+    const approved = isBool ? approvedOrText : true;
+    const text = isBool ? editedResponse : approvedOrText;
+    return request<any>('/replies/approve-response', {
+      method: 'POST',
+      body: JSON.stringify({ reply_id: replyId, approved, edited_response: text, approved_text: text })
+    });
+  },
 
   // Analytics
   getDashboardAnalytics: (campaignId?: number) => {
