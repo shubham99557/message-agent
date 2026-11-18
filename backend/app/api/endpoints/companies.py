@@ -98,9 +98,9 @@ def update_existing_company(
     if not company:
         raise HTTPException(status_code=404, detail="Company not found")
 
-    # Ownership / Privilege check
+    # Strict Ownership / Privilege check
     if current_user.role not in ["admin", "manager"]:
-        if company.created_by_id and company.created_by_id != current_user.id:
+        if company.created_by_id != current_user.id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Permission denied: You can only edit companies you created or require manager privileges."
@@ -124,14 +124,20 @@ def verify_company_endpoint(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Records user verification and evidence corrections with full audit trail."""
+    """Records user verification and evidence corrections with strict ownership/role guard and audit trail."""
+    existing = get_company(db, company_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Company not found")
+    if current_user.role not in ["admin", "manager"] and existing.created_by_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied: Only managers/admins or the owning analyst can verify this company record.",
+        )
+
     try:
         company = verify_company_record(db, company_id, verify_in)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-
-    if not company:
-        raise HTTPException(status_code=404, detail="Company not found")
 
     record_audit_log(
         db=db,
@@ -158,6 +164,11 @@ def add_source_to_company(
     company = get_company(db, company_id)
     if not company:
         raise HTTPException(status_code=404, detail="Company not found")
+    if current_user.role not in ["admin", "manager"] and company.created_by_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied: You can only attach sources to companies you created or require manager privileges.",
+        )
     source_in.company_id = company_id
     source = add_contact_source(db, source_in)
     return source

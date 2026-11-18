@@ -431,6 +431,19 @@ def sync_gmail_replies(
                 or "undeliverable" in subject.lower()
             )
             if is_bounce:
+                # Idempotency check: skip bounce notices already recorded in EmailEvent
+                already_recorded = (
+                    db.query(EmailEvent)
+                    .filter(
+                        EmailEvent.event_type == "bounced",
+                        EmailEvent.details.contains(f"Provider bounce message {msg_id}:"),
+                    )
+                    .first()
+                )
+                if already_recorded:
+                    skipped_duplicates += 1
+                    continue
+
                 matched_draft = None
                 if thread_id:
                     matched_draft = db.query(EmailDraft).filter(EmailDraft.provider_thread_id == thread_id).first()

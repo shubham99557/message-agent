@@ -155,7 +155,7 @@ class WhatsAppChannelAdapter(ChannelAdapter):
     channel_name = "whatsapp"
 
     def connect(self, db: Session, user_id: int, **kwargs: Any) -> Dict[str, Any]:
-        return check_meta_connection_health()
+        return check_meta_connection_health(db=db, http_client=kwargs.get("http_client"))
 
     def connection_status(self, db: Session) -> Dict[str, Any]:
         status = get_whatsapp_connection_status(db)
@@ -182,31 +182,48 @@ class WhatsAppChannelAdapter(ChannelAdapter):
         return True, "valid"
 
     def prepare_message(self, db: Session, company_id: int, payload: Dict[str, Any], user_id: int) -> Any:
-        from app.schemas.whatsapp import WhatsAppMessageCreate
+        from app.models.company import Company
+        from app.schemas.whatsapp import WhatsAppDraftRequest
         from app.services.whatsapp_service import create_whatsapp_message
 
-        req = WhatsAppMessageCreate(
+        company = db.query(Company).filter(Company.id == company_id).first()
+        if not company:
+            raise ValueError("Company not found.")
+        req = WhatsAppDraftRequest(
             company_id=company_id,
+            campaign_id=payload.get("campaign_id"),
             recipient_phone=payload["recipient_phone"],
             template_name=payload["template_name"],
-            template_variables=payload.get("template_variables", {}),
+            parameters=payload.get("parameters") or payload.get("template_variables") or {},
         )
-        return create_whatsapp_message(db=db, msg_in=req, user_id=user_id)
+        return create_whatsapp_message(db=db, company=company, req=req)
 
     def send_approved_message(self, db: Session, message_id: int, user_id: int, **kwargs: Any) -> Dict[str, Any]:
         from app.services.whatsapp_service import send_approved_whatsapp_message
 
-        return send_approved_whatsapp_message(db=db, message_id=message_id, user_id=user_id)
+        success, message = send_approved_whatsapp_message(
+            db=db,
+            message_id=message_id,
+            user_id=user_id,
+            http_client=kwargs.get("http_client"),
+        )
+        return {"channel": "whatsapp", "success": success, "message": message}
 
     def receive_event(self, db: Session, event_payload: Dict[str, Any]) -> Dict[str, Any]:
-        from app.services.whatsapp_service import process_meta_webhook_payload
-
-        return process_meta_webhook_payload(db=db, payload=event_payload)
+        return self.process_webhook(db=db, payload=event_payload, signature=None)
 
     def process_webhook(self, db: Session, payload: Dict[str, Any], signature: Optional[str] = None) -> Dict[str, Any]:
-        from app.services.whatsapp_service import process_meta_webhook_payload
+        import json
+        from app.services.whatsapp_service import process_incoming_meta_webhook
 
-        return process_meta_webhook_payload(db=db, payload=payload)
+        raw_body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        ok, detail = process_incoming_meta_webhook(
+            db=db,
+            raw_body=raw_body,
+            payload=payload,
+            signature_header=signature,
+        )
+        return {"channel": "whatsapp", "success": ok, "detail": detail}
 
     def sync_conversation(self, db: Session, **kwargs: Any) -> Dict[str, Any]:
         return {"channel": "whatsapp", "mode": "webhook_driven", "note": "WhatsApp inbound messages arrive via signed Meta Cloud API webhooks."}

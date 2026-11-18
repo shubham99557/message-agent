@@ -22,8 +22,8 @@ class Settings(BaseSettings):
     OUTBOUND_RATE_LIMIT_WA_PER_MIN: int = int(os.getenv("OUTBOUND_RATE_LIMIT_WA_PER_MIN", "10"))
 
     # Initial Admin Bootstrap (from environment only; never hardcoded in source)
-    INITIAL_ADMIN_EMAIL: str = os.getenv("INITIAL_ADMIN_EMAIL", "admin@acttrident.ai")
-    INITIAL_ADMIN_PASSWORD: str = os.getenv("INITIAL_ADMIN_PASSWORD", "AdminPassword2026!")
+    INITIAL_ADMIN_EMAIL: str = os.getenv("INITIAL_ADMIN_EMAIL", "")
+    INITIAL_ADMIN_PASSWORD: str = os.getenv("INITIAL_ADMIN_PASSWORD", "")
 
     # Database
     DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./acttrident.db")
@@ -129,6 +129,11 @@ class Settings(BaseSettings):
                 raise ValueError("CRITICAL SECURITY ERROR: Production requires CREDENTIAL_ENCRYPTION_KEY (at least 16 characters).")
             if self.DATABASE_URL.lower().startswith("sqlite"):
                 raise ValueError("CRITICAL SECURITY ERROR: SQLite is forbidden in production; configure PostgreSQL DATABASE_URL.")
+            if self.WHATSAPP_ENABLED and (self.META_WA_ACCESS_TOKEN or "").strip():
+                if not (self.META_APP_SECRET or "").strip():
+                    raise ValueError("CRITICAL SECURITY ERROR: Production WhatsApp Cloud API requires META_APP_SECRET for HMAC verification.")
+                if (self.META_WA_VERIFY_TOKEN or "").strip() in ("", "acttrident_meta_webhook_secret_2026"):
+                    raise ValueError("CRITICAL SECURITY ERROR: Production META_WA_VERIFY_TOKEN must not use the default development token.")
 
 
 settings = Settings()

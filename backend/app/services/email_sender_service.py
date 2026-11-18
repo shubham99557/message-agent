@@ -178,7 +178,7 @@ def send_approved_email(
             message=f"Recipient {draft.recipient_email} is on the global suppression list"
         )
 
-    # 5. CONSERVATIVE DAILY LIMIT CHECK
+    # 5. CONSERVATIVE DAILY LIMIT & PER-MINUTE RATE LIMIT CHECKS
     if not check_daily_sending_limit(db, draft.campaign_id):
         draft.approval_status = "queued"
         db.commit()
@@ -187,6 +187,16 @@ def send_approved_email(
             status="queued",
             provider=draft.provider,
             message=f"Daily email limit ({settings.DEFAULT_DAILY_EMAIL_LIMIT}) reached. Message held in queue."
+        )
+
+    from app.services.job_service import check_rate_limit
+    email_per_min = getattr(settings, "OUTBOUND_RATE_LIMIT_EMAIL_PER_MIN", 30)
+    if not check_rate_limit("email_dispatch", email_per_min, 60):
+        return EmailSendResult(
+            draft_id=draft_id,
+            status="rate_limited",
+            provider=draft.provider,
+            message=f"Per-minute email rate limit ({email_per_min}/min) reached. Please retry shortly."
         )
 
     # 6. ATOMIC DISPATCH LOCK (Prevents approval/sending race conditions & duplicate sends)

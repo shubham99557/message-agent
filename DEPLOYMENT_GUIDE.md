@@ -38,10 +38,11 @@ docker compose up -d postgres redis
 docker compose build backend celery_worker celery_beat frontend
 
 # 3. Apply Alembic database migrations to head (0006_phase6_orchestration_outbox)
-docker compose run --rm backend python -m alembic -c /app/backend/alembic.ini upgrade head
+# Note: Dockerfile.backend copies backend/ directly into /app/
+docker compose run --rm backend python -m alembic -c /app/alembic.ini upgrade head
 
 # 4. Provision the initial production admin user interactively (never hardcoded!)
-docker compose run --rm backend python /app/backend/scripts/provision_admin.py \
+docker compose run --rm backend python /app/scripts/provision_admin.py \
   --email admin@your-domain.com \
   --name "ActTrident Admin"
 
@@ -60,17 +61,17 @@ curl -f http://localhost:8000/health
 curl -f http://localhost:8000/ready
 
 # Verify Alembic head revision
-docker compose exec backend python -m alembic -c /app/backend/alembic.ini current
+docker compose exec backend python -m alembic -c /app/alembic.ini current
 ```
 
 ---
 
 ## 5. Backups & Rollback
-- Always run a pre-deployment backup before upgrading migrations:
+- Always run a pre-deployment backup before upgrading migrations (supported inside the backend container since `postgresql-client` is installed):
   ```bash
-  python backend/scripts/backup_restore_db.py backup \
+  docker compose exec backend python /app/scripts/backup_restore_db.py backup \
     --db-url "$DATABASE_URL" \
-    --output "./backups/pre_deploy_$(date +%Y%m%d_%H%M%S).dump"
+    --output "/tmp/pre_deploy_$(date +%Y%m%d_%H%M%S).dump"
   ```
 - Emergency outbound stop: Activate the **Global Emergency Outbound Kill Switch** in **Settings** (or `POST /api/v1/settings/kill-switch` with `{"active": true}`) to halt all outbound traffic instantaneously without taking the UI offline.
 - Detailed migration rollback steps: see [DATABASE_MIGRATIONS.md](DATABASE_MIGRATIONS.md).

@@ -234,6 +234,31 @@ def approve_whatsapp_message_internal(db: Session, msg: WhatsAppMessage, user_id
     return msg
 
 
+def check_daily_whatsapp_limit(db: Session, campaign_id: Optional[int] = None) -> bool:
+    """Enforces conservative daily WhatsApp limits across campaigns and global ceiling."""
+    from app.models.campaign import Campaign
+
+    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    global_sent_today = db.query(WhatsAppMessage).filter(
+        WhatsAppMessage.sent_at >= today_start,
+        WhatsAppMessage.approval_status == "sent",
+    ).count()
+    if global_sent_today >= settings.DEFAULT_DAILY_WHATSAPP_LIMIT:
+        return False
+
+    if campaign_id:
+        campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
+        if campaign and campaign.daily_whatsapp_limit:
+            camp_sent_today = db.query(WhatsAppMessage).filter(
+                WhatsAppMessage.campaign_id == campaign_id,
+                WhatsAppMessage.sent_at >= today_start,
+                WhatsAppMessage.approval_status == "sent",
+            ).count()
+            if camp_sent_today >= campaign.daily_whatsapp_limit:
+                return False
+    return True
+
+
 def send_approved_whatsapp_message(
     db: Session,
     message_id: int,
@@ -320,6 +345,15 @@ def send_approved_whatsapp_message(
             msg.error_message = str(exc)
             db.commit()
             return False, str(exc)
+
+    # Rule 5b: Conservative Daily & Per-Minute WhatsApp Rate Limits
+    if not check_daily_whatsapp_limit(db, msg.campaign_id):
+        return False, f"Daily WhatsApp sending limit ({settings.DEFAULT_DAILY_WHATSAPP_LIMIT}) reached. Message held."
+
+    from app.services.job_service import check_rate_limit
+    wa_per_min = getattr(settings, "OUTBOUND_RATE_LIMIT_WA_PER_MIN", 10)
+    if not check_rate_limit("whatsapp_dispatch", wa_per_min, 60):
+        return False, f"Per-minute WhatsApp rate limit ({wa_per_min}/min) reached. Please retry shortly."
 
     # Rule 6: Atomic dispatch lock (prevents race-condition duplicate sends)
     idem_key = f"wa-msg-{msg.id}-v{msg.version or 1}-{current_hash[:16]}"

@@ -499,8 +499,11 @@ export const IntegrationsView: React.FC = () => {
             </div>
 
             <div className="p-2.5 bg-cobalt-950 rounded border border-cobalt-800 text-[11px] text-slate-400 space-y-1">
-              <div>Webhook Verify Token:</div>
-              <div className="font-mono text-slate-200 select-all">acttrident_meta_webhook_secret_2026</div>
+              <div>Webhook Verify Token &amp; HMAC Secret:</div>
+              <div className="font-mono text-slate-300">
+                Managed securely via backend <code className="text-cobalt-300">META_WA_VERIFY_TOKEN</code> &amp;{' '}
+                <code className="text-cobalt-300">META_APP_SECRET</code> environment variables.
+              </div>
             </div>
 
             <button

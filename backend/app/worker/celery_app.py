@@ -42,11 +42,13 @@ celery_app.conf.task_routes = {
     "app.worker.tasks.task_crm_update": {"queue": "default"},
     "app.worker.tasks.task_followup_scheduling": {"queue": "default"},
     "app.worker.tasks.task_daily_reporting": {"queue": "default"},
+    "app.worker.tasks.task_outbox_dispatch": {"queue": "outreach"},
+    "app.worker.tasks.task_gmail_reply_sync": {"queue": "high_priority"},
 }
 
 # Celery Beat Periodic Automation Schedule (Asia/Kolkata Timezone)
 celery_app.conf.beat_schedule = {
-    # 1. Daily automated company discovery (01:00 AM IST)
+    # 1. Daily automated company discovery (01:00 AM IST — strictly real public sources, never demo fixtures)
     "nightly-company-discovery": {
         "task": "app.worker.tasks.task_company_discovery",
         "schedule": crontab(hour=1, minute=0),
@@ -64,10 +66,22 @@ celery_app.conf.beat_schedule = {
         "schedule": crontab(hour=9, minute=0),
         "args": [],
     },
-    # 4. Business hours autonomous follow-up engine (Every hour 09:30 - 18:30 IST, Mon-Fri)
+    # 4. Business hours autonomous follow-up engine (09:30 - 17:30 IST, Mon-Fri — strictly within 09:00-18:00 IST)
     "business-hours-followup-scheduler": {
         "task": "app.worker.tasks.task_followup_scheduling",
-        "schedule": crontab(minute=30, hour="9-18", day_of_week="mon-fri"),
+        "schedule": crontab(minute=30, hour="9-17", day_of_week="mon-fri"),
         "args": [],
+    },
+    # 5. Transactional Outbox Processor (Every 2 minutes — respects Kill Switch & campaign pause/stop)
+    "transactional-outbox-processor": {
+        "task": "app.worker.tasks.task_outbox_dispatch",
+        "schedule": crontab(minute="*/2"),
+        "args": [{"limit": 20}],
+    },
+    # 6. Gmail Reply & Bounce Synchronization (Every 5 minutes when Gmail OAuth is connected)
+    "gmail-reply-sync-poller": {
+        "task": "app.worker.tasks.task_gmail_reply_sync",
+        "schedule": crontab(minute="*/5"),
+        "args": [{"max_results": 25}],
     },
 }

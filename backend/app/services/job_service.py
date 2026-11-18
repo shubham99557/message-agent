@@ -21,7 +21,13 @@ def get_redis_client():
     """Attempt to connect to Redis, returning None if unreachable or disabled."""
     try:
         import redis
-        client = redis.Redis.from_url(settings.REDIS_URL, decode_responses=True, socket_timeout=1.0)
+        redis_url = (settings.REDIS_URL or "").replace("://localhost:", "://127.0.0.1:")
+        client = redis.Redis.from_url(
+            redis_url,
+            decode_responses=True,
+            socket_connect_timeout=0.3,
+            socket_timeout=0.5,
+        )
         client.ping()
         return client
     except Exception as e:
@@ -29,29 +35,36 @@ def get_redis_client():
         return None
 
 
+def reset_rate_limit(key: str) -> None:
+    """Clears rate-limit history for a key across Redis (if connected) and in-memory fallback."""
+    _LOCAL_RATE_LIMITS.pop(key, None)
+    r = get_redis_client()
+    if r:
+        try:
+            r.delete(f"rate_limit:{key}")
+        except Exception:
+            pass
+
+
 def check_rate_limit(key: str, limit: int, window_seconds: int = 60) -> bool:
     """
     Token/sliding-window rate limiter using Redis if available, with in-memory fallback.
     Returns True if allowed, False if rate limit exceeded.
+    Only records accepted requests in the sliding window.
     """
     now = time.time()
     r = get_redis_client()
     if r:
         try:
-            pipe = r.pipeline()
             redis_key = f"rate_limit:{key}"
-            # Remove timestamps outside current window
-            pipe.zremrangebyscore(redis_key, 0, now - window_seconds)
-            # Count remaining items
-            pipe.zcard(redis_key)
-            # Add current timestamp
-            pipe.zadd(redis_key, {str(now): now})
-            # Set expiry on key
-            pipe.expire(redis_key, window_seconds + 5)
-            results = pipe.execute()
-            count = results[1]
+            r.zremrangebyscore(redis_key, 0, now - window_seconds)
+            count = int(r.zcard(redis_key))
             if count >= limit:
                 return False
+            pipe = r.pipeline()
+            pipe.zadd(redis_key, {f"{now}:{uuid.uuid4().hex[:6]}": now})
+            pipe.expire(redis_key, window_seconds + 5)
+            pipe.execute()
             return True
         except Exception as e:
             logger.warning(f"Redis rate limiting error, falling back to local: {e}")
@@ -128,8 +141,17 @@ def create_background_task(
     return task_record
 
 
-def _run_task_synchronously(task_record_id: int, category: str, payload: Dict[str, Any], db: Optional[Session] = None):
-    """Execute task synchronously as a reliable fallback."""
+def _run_task_synchronously(
+    task_record_id: int,
+    category: str,
+    payload: Dict[str, Any],
+    db: Optional[Session] = None,
+    retry_delay_base: float = 0.05,
+):
+    """
+    Executes a background task synchronously with bounded exponential-backoff retries
+    before moving exhausted failures safely into the Dead Letter Queue ('dead_letter').
+    """
     from app.worker.tasks import execute_task_logic
     should_close = False
     if db is None:
@@ -140,36 +162,54 @@ def _run_task_synchronously(task_record_id: int, category: str, payload: Dict[st
         record = db.query(BackgroundTaskRecord).filter(BackgroundTaskRecord.id == task_record_id).first()
         if not record:
             return
-        record.status = "running"
-        record.started_at = datetime.now(timezone.utc)
-        db.commit()
+        max_retries = max(0, int(record.max_retries if record.max_retries is not None else 3))
 
-        result = execute_task_logic(category, payload, db=db)
+        for attempt in range(max_retries + 1):
+            record.status = "running"
+            if not record.started_at:
+                record.started_at = datetime.now(timezone.utc)
+            db.commit()
 
-        record.status = "completed"
-        record.result_json = json.dumps(result, default=str)
-        record.completed_at = datetime.now(timezone.utc)
-        db.commit()
-    except Exception as exc:
-        logger.error(f"Synchronous execution failed for {category}: {exc}", exc_info=True)
-        record = db.query(BackgroundTaskRecord).filter(BackgroundTaskRecord.id == task_record_id).first()
-        if record:
-            record.status = "failed"
-            record.error_message = str(exc)
-            record.completed_at = datetime.now(timezone.utc)
-            db.commit()
-            # Insert to dead letter queue
-            dlq = DeadLetterTask(
-                task_id=record.task_id,
-                category=category,
-                idempotency_key=record.idempotency_key,
-                payload_json=record.payload_json,
-                final_error=str(exc),
-                retries_exhausted=record.retry_count,
-                failed_at=datetime.now(timezone.utc)
-            )
-            db.add(dlq)
-            db.commit()
+            try:
+                result = execute_task_logic(category, payload, db=db)
+                record.status = "completed"
+                record.result_json = json.dumps(result, default=str)
+                record.error_message = None
+                record.completed_at = datetime.now(timezone.utc)
+                db.commit()
+                return
+            except Exception as exc:
+                logger.error(
+                    f"Synchronous execution failed for {category} (attempt {attempt + 1}/{max_retries + 1}): {exc}",
+                    exc_info=True,
+                )
+                db.rollback()
+                record = db.query(BackgroundTaskRecord).filter(BackgroundTaskRecord.id == task_record_id).first()
+                if not record:
+                    return
+                record.error_message = str(exc)[:1000]
+                if attempt < max_retries:
+                    record.retry_count = attempt + 1
+                    record.status = "retrying"
+                    db.commit()
+                    if retry_delay_base > 0:
+                        time.sleep(min(0.5, retry_delay_base * (2 ** attempt)))
+                else:
+                    record.retry_count = max_retries
+                    record.status = "dead_letter"
+                    record.completed_at = datetime.now(timezone.utc)
+                    dlq = DeadLetterTask(
+                        task_id=record.task_id,
+                        category=category,
+                        idempotency_key=record.idempotency_key,
+                        payload_json=record.payload_json,
+                        final_error=str(exc)[:1000],
+                        retries_exhausted=record.retry_count,
+                        failed_at=datetime.now(timezone.utc),
+                    )
+                    db.add(dlq)
+                    db.commit()
+                    return
     finally:
         if should_close:
             db.close()

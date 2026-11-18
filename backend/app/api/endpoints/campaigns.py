@@ -165,6 +165,14 @@ def add_recipients_to_campaign(
 
     added_count = 0
     for comp_id in payload.company_ids:
+        comp = db.query(Company).filter(Company.id == comp_id).first()
+        if not comp:
+            raise HTTPException(status_code=404, detail=f"Company {comp_id} not found.")
+        if comp.is_demo or getattr(comp, "verification_status", None) == "demo_fixture":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Demo fixture company '{comp.name}' cannot be added to campaigns.",
+            )
         exists = db.query(CampaignRecipient).filter(
             CampaignRecipient.campaign_id == campaign_id,
             CampaignRecipient.company_id == comp_id

@@ -277,10 +277,11 @@ def test_gmail_reply_sync_deduplication_and_bounce_detection(
     assert sent_bounce_draft.approval_status == "bounced"
     assert db.query(EmailEvent).filter(EmailEvent.draft_id == sent_bounce_draft.id, EmailEvent.event_type == "bounced").count() == 1
 
-    # Second sync skips duplicate reply cleanly
+    # Second sync skips BOTH duplicate reply AND duplicate bounce notice cleanly
     sync2 = sync_gmail_replies(db=db, connection=conn, http_client=mock_http)
     assert sync2["synced_replies"] == 0
-    assert sync2["skipped_duplicates"] == 1
+    assert sync2["bounces_recorded"] == 0
+    assert sync2["skipped_duplicates"] == 2
 
 
 def test_provider_delivery_event_and_mock_no_fabricated_provider_id(

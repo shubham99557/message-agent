@@ -15,6 +15,10 @@ from app.models.user import User
 
 @pytest.fixture(scope="function")
 def db_session():
+    # Ensure isolated rate-limit sliding window per test (both Redis and in-memory fallback)
+    from app.services import job_service
+    job_service.reset_rate_limit("email_dispatch")
+    job_service.reset_rate_limit("whatsapp_dispatch")
     # Use StaticPool so all connections share the exact same in-memory SQLite database instance
     engine = create_engine(
         "sqlite://",

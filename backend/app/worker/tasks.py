@@ -71,45 +71,53 @@ def _record_task_failure(db, task_id: str, category: str, payload: dict, exc: Ex
 def execute_task_logic(category: str, payload: Dict[str, Any], db) -> Dict[str, Any]:
     """Pure business logic dispatch for the 13 task categories."""
     if category == "company_discovery":
-        from app.services.discovery_service import DISCOVERY_CATALOG
-        from app.models.company import Company, ContactSource
+        from app.services.discovery_service import search_public_company_directory
+        from app.services.company_service import create_company, find_duplicate_company
+        from app.integrations.discovery_adapters import is_demo_domain
+        from app.schemas.research import DiscoveryQuery
+        from app.schemas.company import CompanyCreate
+
         cities = payload.get("cities") or ["Siliguri", "Gangtok", "Patna", "Bhagalpur"]
         created = 0
-        for item in DISCOVERY_CATALOG:
-            if item.city in cities:
-                existing = db.query(Company).filter(Company.name == item.name).first()
+        skipped_demo = 0
+        for city in cities:
+            # Strictly exclude demo fixtures from autonomous background discovery!
+            items = search_public_company_directory(DiscoveryQuery(city=city, include_demo=False))
+            for item in items:
+                if item.is_demo or is_demo_domain(item.website) or is_demo_domain(item.public_email):
+                    skipped_demo += 1
+                    continue
+                existing = find_duplicate_company(db, name=item.name, website=item.website, email=item.public_email)
                 if not existing:
-                    comp = Company(
-                        name=item.name,
-                        website=item.website,
-                        city=item.city,
-                        state=item.state,
-                        industry=item.industry,
-                        description=item.description,
-                        public_email=item.public_email,
-                        public_phone=item.public_phone,
-                        linkedin_url=item.linkedin_url,
-                        employee_count_min=item.employee_count_min,
-                        employee_count_max=item.employee_count_max,
-                        employee_size_evidence=item.employee_size_evidence,
-                        laptop_count_verified=item.laptop_count_verified,
-                        laptop_count_evidence=item.laptop_count_evidence,
-                        is_demo=False
-                    )
-                    db.add(comp)
-                    db.flush()
-                    if item.source_url:
-                        cs = ContactSource(
-                            company_id=comp.id,
-                            field_name="official_profile",
+                    create_company(
+                        db,
+                        CompanyCreate(
+                            name=item.name,
+                            website=item.website,
+                            city=item.city,
+                            state=item.state,
+                            industry=item.industry,
+                            description=item.description,
+                            public_email=item.public_email,
+                            public_phone=item.public_phone,
+                            public_whatsapp=item.public_whatsapp,
+                            linkedin_url=item.linkedin_url,
+                            employee_count_min=item.employee_count_min,
+                            employee_count_max=item.employee_count_max,
+                            employee_size_evidence=item.employee_size_evidence,
+                            laptop_count_verified=item.laptop_count_verified,
+                            laptop_count_evidence=item.laptop_count_evidence,
                             source_url=item.source_url,
-                            source_type=item.source_type,
-                            confidence=0.9
-                        )
-                        db.add(cs)
+                            source_notes=f"Background discovery ({item.source_type})",
+                            is_demo=False,
+                        ),
+                    )
                     created += 1
-        db.commit()
-        return {"discovered_cities": cities, "new_companies_created": created}
+        return {
+            "discovered_cities": cities,
+            "new_companies_created": created,
+            "skipped_demo_fixtures": skipped_demo,
+        }
 
     elif category == "company_enrichment":
         from app.models.company import Company
@@ -188,34 +196,30 @@ def execute_task_logic(category: str, payload: Dict[str, Any], db) -> Dict[str, 
 
     elif category == "email_dispatch":
         from app.models.email import EmailDraft
-        from app.services.email_sender_service import send_email
-        from app.services.job_service import check_rate_limit
+        from app.services.email_sender_service import send_approved_email
         draft_id = payload.get("draft_id")
         draft = db.query(EmailDraft).filter(EmailDraft.id == draft_id).first()
         if not draft:
             return {"error": f"Draft {draft_id} not found"}
-        
-        email_limit = getattr(settings, "OUTBOUND_RATE_LIMIT_EMAIL_PER_MIN", 30)
-        if not check_rate_limit("email_dispatch", email_limit, 60):
-            raise RuntimeError("Email dispatch rate limit reached, retrying with backoff")
 
-        result = send_email(db, draft)
+        actor_user_id = payload.get("user_id") or draft.approved_by_id or 1
+        result = send_approved_email(db=db, draft_id=draft.id, user_id=actor_user_id)
+        if result.status == "rate_limited":
+            raise RuntimeError(result.message or "Email dispatch rate limit reached, retrying with backoff")
         return {"draft_id": draft_id, "result": result.model_dump()}
 
     elif category == "whatsapp_dispatch":
         from app.models.whatsapp import WhatsAppMessage
         from app.services.whatsapp_service import send_approved_whatsapp_message
-        from app.services.job_service import check_rate_limit
         message_id = payload.get("message_id")
         msg = db.query(WhatsAppMessage).filter(WhatsAppMessage.id == message_id).first()
         if not msg:
             return {"error": f"Message {message_id} not found"}
 
-        wa_limit = getattr(settings, "OUTBOUND_RATE_LIMIT_WA_PER_MIN", 10)
-        if not check_rate_limit("whatsapp_dispatch", wa_limit, 60):
-            raise RuntimeError("WhatsApp dispatch rate limit reached, retrying with backoff")
-
-        success, detail = send_approved_whatsapp_message(db, msg.id, user_id=payload.get("user_id", 1))
+        actor_user_id = payload.get("user_id") or msg.approved_by_id or 1
+        success, detail = send_approved_whatsapp_message(db=db, message_id=msg.id, user_id=actor_user_id)
+        if not success and "rate limit" in (detail or "").lower():
+            raise RuntimeError(detail)
         return {"message_id": message_id, "success": success, "detail": detail}
 
     elif category == "reply_ingestion":
@@ -270,6 +274,25 @@ def execute_task_logic(category: str, payload: Dict[str, Any], db) -> Dict[str, 
         from app.services.analytics_service import generate_daily_operational_digest
         digest = generate_daily_operational_digest(db)
         return {"generated_at": datetime.now(timezone.utc).isoformat(), "metrics": digest["summary"], "digest": digest}
+
+    elif category == "outbox_dispatch":
+        from app.services.orchestration_service import process_outbox_batch
+        return process_outbox_batch(
+            db=db,
+            user_id=int(payload.get("user_id", 1)),
+            limit=int(payload.get("limit", 20)),
+        )
+
+    elif category == "gmail_reply_sync":
+        from app.integrations.gmail_adapter import get_active_gmail_connection, sync_gmail_replies
+        conn = get_active_gmail_connection(db)
+        if not conn or conn.status != "connected":
+            return {"status": "skipped_disconnected", "synced_replies": 0, "bounces_recorded": 0}
+        return sync_gmail_replies(
+            db=db,
+            connection=conn,
+            max_results=int(payload.get("max_results", 25)),
+        )
 
     else:
         raise ValueError(f"Unknown task category: {category}")
@@ -352,6 +375,14 @@ def task_followup_scheduling(self, payload=None, task_uuid=None):
 def task_daily_reporting(self, payload=None, task_uuid=None):
     return _execute_with_retry(self, "daily_reporting", task_uuid, payload or {})
 
+@celery_app.task(bind=True, max_retries=3, name="app.worker.tasks.task_outbox_dispatch")
+def task_outbox_dispatch(self, payload=None, task_uuid=None):
+    return _execute_with_retry(self, "outbox_dispatch", task_uuid, payload or {})
+
+@celery_app.task(bind=True, max_retries=3, name="app.worker.tasks.task_gmail_reply_sync")
+def task_gmail_reply_sync(self, payload=None, task_uuid=None):
+    return _execute_with_retry(self, "gmail_reply_sync", task_uuid, payload or {})
+
 
 CATEGORY_TO_TASK = {
     "company_discovery": task_company_discovery,
@@ -367,6 +398,8 @@ CATEGORY_TO_TASK = {
     "crm_update": task_crm_update,
     "followup_scheduling": task_followup_scheduling,
     "daily_reporting": task_daily_reporting,
+    "outbox_dispatch": task_outbox_dispatch,
+    "gmail_reply_sync": task_gmail_reply_sync,
 }
 
 

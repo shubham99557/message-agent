@@ -28,6 +28,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       ENVIRONMENT: production
       TIMEZONE: ${TIMEZONE:-Asia/Kolkata}
@@ -82,6 +84,11 @@ services:
     container_name: acttrident_redis
     restart: always
     command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
     volumes:
       - redisdata:/data
     networks:
@@ -98,7 +105,7 @@ services:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
     environment:
       ENVIRONMENT: production
       TIMEZONE: ${TIMEZONE:-Asia/Kolkata}
@@ -110,9 +117,30 @@ services:
       CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:?CRITICAL: CREDENTIAL_ENCRYPTION_KEY must be provided in .env}
       BACKEND_CORS_ORIGINS: ${BACKEND_CORS_ORIGINS:-http://localhost,http://localhost:5173}
       AI_PROVIDER: ${AI_PROVIDER:-mock}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       EMAIL_PROVIDER: ${EMAIL_PROVIDER:-mock}
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-ActTrident Business Development}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-outreach@acttrident.ai}
+      GMAIL_CLIENT_ID: ${GMAIL_CLIENT_ID:-}
+      GMAIL_CLIENT_SECRET: ${GMAIL_CLIENT_SECRET:-}
+      GMAIL_REDIRECT_URI: ${GMAIL_REDIRECT_URI:-http://localhost:8000/api/v1/integrations/gmail/oauth/callback}
+      META_WA_ACCESS_TOKEN: ${META_WA_ACCESS_TOKEN:-}
+      META_WA_PHONE_NUMBER_ID: ${META_WA_PHONE_NUMBER_ID:-}
+      META_WA_BUSINESS_ACCOUNT_ID: ${META_WA_BUSINESS_ACCOUNT_ID:-}
+      META_WA_VERIFY_TOKEN: ${META_WA_VERIFY_TOKEN:-}
+      META_APP_SECRET: ${META_APP_SECRET:-}
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      SERPAPI_API_KEY: ${SERPAPI_API_KEY:-}
+      DEFAULT_DAILY_EMAIL_LIMIT: ${DEFAULT_DAILY_EMAIL_LIMIT:-50}
+      DEFAULT_DAILY_WHATSAPP_LIMIT: ${DEFAULT_DAILY_WHATSAPP_LIMIT:-20}
     networks:
       - acttrident_internal
+      - acttrident_public
 
   celery_beat:
     build:
@@ -122,7 +150,12 @@ services:
     restart: always
     command: celery -A app.worker.celery_app.celery_app beat --loglevel=info
     depends_on:
-      - celery_worker
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      celery_worker:
+        condition: service_started
     environment:
       ENVIRONMENT: production
       TIMEZONE: ${TIMEZONE:-Asia/Kolkata}

@@ -16,7 +16,9 @@ TASK_CATEGORIES = [
     "reply_classification",
     "crm_update",
     "followup_scheduling",
-    "daily_reporting"
+    "daily_reporting",
+    "outbox_dispatch",
+    "gmail_reply_sync"
 ]
 
 TASK_STATUSES = [

@@ -56,10 +56,10 @@ def get_current_user(
             detail="Account has been deactivated",
         )
     token_tv = payload.get("tv")
-    if token_tv is not None and token_tv != (user.token_version or 1):
+    if token_tv is None or token_tv != (user.token_version or 1):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Session has been revoked. Please sign in again.",
+            detail="Session has been revoked or missing token version claim. Please sign in again.",
             headers={"WWW-Authenticate": "Bearer"},
         )
     return user

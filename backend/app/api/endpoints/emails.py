@@ -69,6 +69,19 @@ def get_email_draft(
     return enrich_draft_response(db, draft)
 
 
+def _check_draft_ownership(draft: EmailDraft, current_user: User) -> None:
+    """Ensures sales_rep users can only edit/inspect drafts belonging to their own companies or campaigns."""
+    if current_user.role in ["admin", "manager"]:
+        return
+    owns_company = bool(draft.company and draft.company.created_by_id == current_user.id)
+    owns_campaign = bool(draft.campaign and draft.campaign.created_by_id == current_user.id)
+    if not (owns_company or owns_campaign):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied: You do not own this email draft or require manager privileges.",
+        )
+
+
 @router.put("/drafts/{draft_id}", response_model=EmailDraftResponse)
 def update_email_draft_endpoint(
     draft_id: int,
@@ -76,6 +89,16 @@ def update_email_draft_endpoint(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    existing = db.query(EmailDraft).filter(EmailDraft.id == draft_id).first()
+    if not existing:
+        raise HTTPException(status_code=404, detail="Draft not found")
+    _check_draft_ownership(existing, current_user)
+    if existing.approval_status in ("sending", "sent", "delivered"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot edit email draft in final status '{existing.approval_status}'.",
+        )
+
     draft = edit_email_draft(
         db=db,
         draft_id=draft_id,
@@ -83,8 +106,6 @@ def update_email_draft_endpoint(
         user_id=current_user.id,
         user_role=current_user.role
     )
-    if not draft:
-        raise HTTPException(status_code=404, detail="Draft not found")
     record_audit_log(
         db=db,
         action="update_email_draft",
@@ -103,6 +124,12 @@ def send_email_endpoint(
     current_user: User = Depends(require_role(["admin", "manager"]))
 ):
     result = send_approved_email(db, draft_id, current_user.id)
+    if result.status == "rate_limited":
+        raise HTTPException(status_code=429, detail=result.message)
+    if result.status == "blocked_kill_switch":
+        raise HTTPException(status_code=423, detail=result.message)
+    if result.status == "blocked_campaign_inactive":
+        raise HTTPException(status_code=409, detail=result.message)
     if result.status == "failed":
         raise HTTPException(status_code=400, detail=result.message)
     return result
@@ -114,7 +141,11 @@ def get_draft_send_attempts(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Returns separate send-attempt audit records for a draft."""
+    """Returns separate send-attempt audit records for a draft (owner or admin/manager)."""
+    draft = db.query(EmailDraft).filter(EmailDraft.id == draft_id).first()
+    if not draft:
+        raise HTTPException(status_code=404, detail="Draft not found")
+    _check_draft_ownership(draft, current_user)
     attempts = (
         db.query(EmailSendAttempt)
         .filter(EmailSendAttempt.draft_id == draft_id)
