@@ -57,8 +57,12 @@ def test_human_approval_enforcement_and_sending(client, auth_headers, admin_auth
     draft_id = draft["id"]
     assert draft["approval_status"] == "draft"
 
-    # ATTEMPT TO SEND WITHOUT APPROVAL -> MUST FAIL (MANDATORY APPROVAL RULE)
-    unapproved_send = client.post(f"/api/v1/emails/send/{draft_id}", headers=auth_headers)
+    # Unauthorized sales_rep dispatch attempt -> MUST FAIL (403 RBAC)
+    rep_send = client.post(f"/api/v1/emails/send/{draft_id}", headers=auth_headers)
+    assert rep_send.status_code == 403
+
+    # ATTEMPT TO SEND WITHOUT APPROVAL AS ADMIN -> MUST FAIL (MANDATORY APPROVAL RULE)
+    unapproved_send = client.post(f"/api/v1/emails/send/{draft_id}", headers=admin_auth_headers)
     assert unapproved_send.status_code == 400
     assert "approved" in unapproved_send.json()["detail"]
 

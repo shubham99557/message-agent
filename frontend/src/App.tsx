@@ -28,9 +28,9 @@ export const App: React.FC = () => {
   const [pendingApprovalsCount, setPendingApprovalsCount] = useState(0);
   const [inboxCount, setInboxCount] = useState(0);
 
-  // Login Form State
-  const [email, setEmail] = useState('admin@acttrident.ai');
-  const [password, setPassword] = useState('AdminPassword2026!');
+  // Login Form State (never embed default administrator credentials in client code)
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState<string | null>(null);
   const [loggingIn, setLoggingIn] = useState(false);
 
@@ -68,7 +68,8 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await api.logout();
     clearAuthToken();
     setIsAuthenticated(false);
   };
@@ -101,6 +102,7 @@ export const App: React.FC = () => {
               <label className="block text-[11px] font-medium text-slate-400 mb-1">Corporate Email</label>
               <input
                 type="email"
+                placeholder="name@acttrident.ai"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full bg-cobalt-950 border border-cobalt-800 rounded px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-cobalt-600"
@@ -111,6 +113,7 @@ export const App: React.FC = () => {
               <label className="block text-[11px] font-medium text-slate-400 mb-1">Password</label>
               <input
                 type="password"
+                placeholder="Enter your password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full bg-cobalt-950 border border-cobalt-800 rounded px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-cobalt-600"

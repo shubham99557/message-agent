@@ -135,6 +135,13 @@ export const api = {
     return res;
   },
   getMe: () => request<any>('/auth/me'),
+  getUsers: () => request<any[]>('/auth/users'),
+  adminCreateUser: (data: { email: string; full_name: string; password: string; role: string }) =>
+    request<any>('/auth/users', { method: 'POST', body: JSON.stringify(data) }),
+  updateUserStatus: (userId: number, isActive: boolean) =>
+    request<any>(`/auth/users/${userId}/status`, { method: 'PATCH', body: JSON.stringify({ is_active: isActive }) }),
+  updateUserRole: (userId: number, role: string) =>
+    request<any>(`/auth/users/${userId}/role`, { method: 'PATCH', body: JSON.stringify({ role }) }),
   logout: async () => {
     try {
       await request<any>('/auth/logout', { method: 'POST' });
