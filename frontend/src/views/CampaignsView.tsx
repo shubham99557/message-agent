@@ -28,7 +28,15 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({ onNavigate }) => {
   const [objective, setObjective] = useState('Acquire B2B customers for ActTrident 90-day evaluation');
   const [targetCity, setTargetCity] = useState('Siliguri');
   const [targetIndustry, setTargetIndustry] = useState('Software Development');
+  const [businessType, setBusinessType] = useState('IT Services & Technology');
+  const [companySize, setCompanySize] = useState('10-50');
+  const [minDevices, setMinDevices] = useState(5);
+  const [minScore, setMinScore] = useState(0.60);
+  const [allowedChannels, setAllowedChannels] = useState('email,whatsapp,linkedin');
   const [dailyEmailLimit, setDailyEmailLimit] = useState(50);
+  const [totalEmailLimit, setTotalEmailLimit] = useState(200);
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [processingId, setProcessingId] = useState<number | null>(null);
   const [recipientModalCampaign, setRecipientModalCampaign] = useState<any | null>(null);
   const [allCompanies, setAllCompanies] = useState<any[]>([]);
@@ -81,7 +89,15 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({ onNavigate }) => {
         objective,
         target_city: targetCity,
         target_industry: targetIndustry,
+        business_type: businessType,
+        company_size: companySize,
+        min_devices: minDevices,
+        min_score: minScore,
+        allowed_channels: allowedChannels,
         daily_email_limit: dailyEmailLimit,
+        total_email_limit: totalEmailLimit,
+        start_date: startDate ? new Date(startDate).toISOString() : undefined,
+        end_date: endDate ? new Date(endDate).toISOString() : undefined,
         sending_schedule: '09:00-18:00 IST Weekdays'
       });
       setShowCreateModal(false);
@@ -178,9 +194,15 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({ onNavigate }) => {
               </div>
               <span
                 className={`text-[10px] font-mono px-2 py-0.5 rounded uppercase border ${
-                  camp.status === 'active'
+                  camp.status === 'active' || camp.status === 'running'
                     ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
-                    : camp.status === 'stopped'
+                    : camp.status === 'approved' || camp.status === 'ready_for_review'
+                    ? 'bg-blue-500/15 text-blue-300 border-blue-500/30'
+                    : camp.status === 'scheduled' || camp.status === 'researching'
+                    ? 'bg-purple-500/15 text-purple-300 border-purple-500/30'
+                    : camp.status === 'completed'
+                    ? 'bg-teal-500/15 text-teal-300 border-teal-500/30'
+                    : camp.status === 'failed' || camp.status === 'stopped'
                     ? 'bg-rose-500/15 text-rose-300 border-rose-500/30'
                     : 'bg-amber-500/10 text-amber-300 border-amber-500/30'
                 }`}
@@ -209,9 +231,15 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({ onNavigate }) => {
               </div>
             </div>
 
-            <div className="flex items-center justify-between text-[11px] text-slate-400">
-              <span>Limit: {camp.daily_email_limit} emails / day</span>
-              <span>Schedule: {camp.sending_schedule}</span>
+            <div className="flex flex-col space-y-1 text-[11px] text-slate-400">
+              <div className="flex items-center justify-between">
+                <span>Daily Limit: <strong>{camp.daily_email_limit} emails/day</strong></span>
+                <span>Min Devices: <strong>{camp.min_devices || 5}+ laptops</strong></span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>Channels: <strong>{camp.allowed_channels || 'email'}</strong></span>
+                <span>Schedule: <strong>{camp.sending_schedule}</strong></span>
+              </div>
             </div>
 
             {/* Action Buttons */}
@@ -321,24 +349,92 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({ onNavigate }) => {
                 </select>
               </div>
 
-              <div>
-                <label className="block text-[11px] font-medium text-slate-400 mb-1">Target Industry</label>
-                <input
-                  type="text"
-                  value={targetIndustry}
-                  onChange={(e) => setTargetIndustry(e.target.value)}
-                  className="w-full bg-cobalt-950 border border-cobalt-800 rounded px-2.5 py-1.5 text-xs text-slate-200"
-                />
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[11px] font-medium text-slate-400 mb-1">Target Industry</label>
+                  <input
+                    type="text"
+                    value={targetIndustry}
+                    onChange={(e) => setTargetIndustry(e.target.value)}
+                    className="w-full bg-cobalt-950 border border-cobalt-800 rounded px-2.5 py-1.5 text-xs text-slate-200"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-medium text-slate-400 mb-1">Business Type</label>
+                  <input
+                    type="text"
+                    value={businessType}
+                    onChange={(e) => setBusinessType(e.target.value)}
+                    className="w-full bg-cobalt-950 border border-cobalt-800 rounded px-2.5 py-1.5 text-xs text-slate-200"
+                  />
+                </div>
               </div>
 
-              <div>
-                <label className="block text-[11px] font-medium text-slate-400 mb-1">Daily Sending Limit</label>
-                <input
-                  type="number"
-                  value={dailyEmailLimit}
-                  onChange={(e) => setDailyEmailLimit(Number(e.target.value))}
-                  className="w-full bg-cobalt-950 border border-cobalt-800 rounded px-2.5 py-1.5 text-xs text-slate-200"
-                />
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[11px] font-medium text-slate-400 mb-1">Min Laptops Verified</label>
+                  <input
+                    type="number"
+                    value={minDevices}
+                    onChange={(e) => setMinDevices(Number(e.target.value))}
+                    className="w-full bg-cobalt-950 border border-cobalt-800 rounded px-2.5 py-1.5 text-xs text-slate-200"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-medium text-slate-400 mb-1">Allowed Channels</label>
+                  <select
+                    value={allowedChannels}
+                    onChange={(e) => setAllowedChannels(e.target.value)}
+                    className="w-full bg-cobalt-950 border border-cobalt-800 rounded px-2.5 py-1.5 text-xs text-slate-200"
+                  >
+                    <option value="email,whatsapp,linkedin">Email + WhatsApp + LinkedIn</option>
+                    <option value="email,whatsapp">Email + WhatsApp</option>
+                    <option value="email">Email Only</option>
+                    <option value="whatsapp">WhatsApp Only</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[11px] font-medium text-slate-400 mb-1">Daily Limit (Emails)</label>
+                  <input
+                    type="number"
+                    value={dailyEmailLimit}
+                    onChange={(e) => setDailyEmailLimit(Number(e.target.value))}
+                    className="w-full bg-cobalt-950 border border-cobalt-800 rounded px-2.5 py-1.5 text-xs text-slate-200"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-medium text-slate-400 mb-1">Total Campaign Limit</label>
+                  <input
+                    type="number"
+                    value={totalEmailLimit}
+                    onChange={(e) => setTotalEmailLimit(Number(e.target.value))}
+                    className="w-full bg-cobalt-950 border border-cobalt-800 rounded px-2.5 py-1.5 text-xs text-slate-200"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[11px] font-medium text-slate-400 mb-1">Start Date (Optional)</label>
+                  <input
+                    type="date"
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
+                    className="w-full bg-cobalt-950 border border-cobalt-800 rounded px-2.5 py-1.5 text-xs text-slate-200"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-medium text-slate-400 mb-1">End Date (Optional)</label>
+                  <input
+                    type="date"
+                    value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)}
+                    className="w-full bg-cobalt-950 border border-cobalt-800 rounded px-2.5 py-1.5 text-xs text-slate-200"
+                  />
+                </div>
               </div>
 
               <div className="flex justify-end space-x-2 pt-2">

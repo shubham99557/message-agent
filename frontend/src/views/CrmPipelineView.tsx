@@ -10,15 +10,36 @@ import {
   CheckCircle2,
   AlertCircle,
   Plus,
-  ArrowRight
+  ArrowRight,
+  Download
 } from 'lucide-react';
 
 export const CrmPipelineView: React.FC = () => {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [validStatuses, setValidStatuses] = useState<string[]>([]);
   const [statusFilter, setStatusFilter] = useState('All');
+  const [cityFilter, setCityFilter] = useState('All');
   const [loading, setLoading] = useState(true);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
+
+  const statusDisplayMap: Record<string, string> = {
+    new: 'New Lead',
+    researching: 'Researched',
+    qualified: 'Qualified',
+    draft_ready: 'Draft Ready',
+    awaiting_approval: 'Awaiting Approval',
+    contacted: 'Contacted',
+    replied: 'Replied',
+    interested: 'Interested',
+    meeting_scheduled: 'Meeting Scheduled',
+    demo_completed: 'Demo Completed',
+    trial_offered: 'Evaluation Offered',
+    trial_activated: 'Evaluation Active',
+    converted: 'Converted',
+    not_interested: 'Not Interested',
+    lost: 'Lost',
+    do_not_contact: 'Unsubscribed'
+  };
 
   // Modals
   const [showMeetingModal, setShowMeetingModal] = useState(false);
@@ -31,7 +52,10 @@ export const CrmPipelineView: React.FC = () => {
   const loadLeads = async () => {
     setLoading(true);
     try {
-      const data = await api.getLeads(statusFilter === 'All' ? undefined : statusFilter);
+      const data = await api.getLeads(
+        statusFilter === 'All' ? undefined : statusFilter,
+        cityFilter === 'All' ? undefined : cityFilter
+      );
       setLeads(data.items);
       setValidStatuses(data.valid_statuses);
     } catch (err) {
@@ -43,7 +67,15 @@ export const CrmPipelineView: React.FC = () => {
 
   useEffect(() => {
     loadLeads();
-  }, [statusFilter]);
+  }, [statusFilter, cityFilter]);
+
+  const handleExportCsv = async () => {
+    try {
+      await api.exportCrmLeadsCsv(statusFilter, cityFilter);
+    } catch (err: any) {
+      alert(`Export error: ${err.message}`);
+    }
+  };
 
   const handleStatusChange = async (leadId: number, newStatus: string) => {
     try {
@@ -117,7 +149,19 @@ export const CrmPipelineView: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center space-x-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={cityFilter}
+            onChange={(e) => setCityFilter(e.target.value)}
+            className="bg-cobalt-950 border border-cobalt-800 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-cobalt-600"
+          >
+            <option value="All">All Cities</option>
+            <option value="Siliguri">Siliguri</option>
+            <option value="Gangtok">Gangtok</option>
+            <option value="Patna">Patna</option>
+            <option value="Bhagalpur">Bhagalpur</option>
+          </select>
+
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
@@ -126,10 +170,19 @@ export const CrmPipelineView: React.FC = () => {
             <option value="All">All Pipeline Stages ({leads.length})</option>
             {validStatuses.map((s) => (
               <option key={s} value={s}>
-                {s.replace(/_/g, ' ')}
+                {statusDisplayMap[s] || s.replace(/_/g, ' ')}
               </option>
             ))}
           </select>
+
+          <button
+            onClick={handleExportCsv}
+            className="px-3 py-1.5 bg-cobalt-900 hover:bg-cobalt-850 border border-cobalt-700 text-slate-200 rounded text-xs font-medium transition-colors flex items-center space-x-1.5"
+            title="Export CRM pipeline accounts to CSV"
+          >
+            <Download className="w-3.5 h-3.5 text-cobalt-400" />
+            <span>Export CSV</span>
+          </button>
         </div>
       </div>
 
@@ -178,7 +231,7 @@ export const CrmPipelineView: React.FC = () => {
                       >
                         {validStatuses.map((s) => (
                           <option key={s} value={s}>
-                            {s.replace(/_/g, ' ')}
+                            {statusDisplayMap[s] || s.replace(/_/g, ' ')}
                           </option>
                         ))}
                       </select>

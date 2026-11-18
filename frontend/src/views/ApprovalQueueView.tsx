@@ -13,7 +13,9 @@ import {
   ShieldCheck,
   Clock,
   Layers,
-  Save
+  Save,
+  RefreshCw,
+  Calendar
 } from 'lucide-react';
 
 export const ApprovalQueueView: React.FC = () => {
@@ -73,6 +75,32 @@ export const ApprovalQueueView: React.FC = () => {
       loadQueue();
     } catch (err: any) {
       alert(`Skip error: ${err.message}`);
+    }
+  };
+
+  const handleRegenerate = async (id: number) => {
+    const tone = prompt('Select tone: Friendly professional, Formal, Technical, Short introductory, Follow-up', 'Friendly professional');
+    if (!tone) return;
+    try {
+      await api.regenerateEmailDraft(id, tone);
+      alert('Draft regenerated successfully and reset to draft status for human review.');
+      loadQueue();
+    } catch (err: any) {
+      alert(`Regeneration error: ${err.message}`);
+    }
+  };
+
+  const handleSchedule = async (id: number) => {
+    const defaultTime = new Date(Date.now() + 3600 * 1000 * 24).toISOString().slice(0, 16);
+    const timeStr = prompt('Enter scheduled dispatch time (YYYY-MM-DDTHH:MM):', defaultTime);
+    if (!timeStr) return;
+    try {
+      const scheduledIso = new Date(timeStr).toISOString();
+      await api.scheduleEmailDraft(id, scheduledIso);
+      alert(`Draft scheduled for ${timeStr} IST.`);
+      loadQueue();
+    } catch (err: any) {
+      alert(`Schedule error: ${err.message}`);
     }
   };
 
@@ -270,6 +298,24 @@ export const ApprovalQueueView: React.FC = () => {
                   >
                     <Edit3 className="w-3 h-3 text-cobalt-400" />
                     <span>Edit</span>
+                  </button>
+
+                  <button
+                    onClick={() => handleRegenerate(draft.id)}
+                    className="px-2.5 py-1 bg-cobalt-950 hover:bg-cobalt-850 border border-cobalt-700 text-slate-200 rounded text-xs font-medium flex items-center space-x-1"
+                    title="Request AI regeneration with different tone or notes"
+                  >
+                    <RefreshCw className="w-3 h-3 text-amber-400" />
+                    <span>Regenerate</span>
+                  </button>
+
+                  <button
+                    onClick={() => handleSchedule(draft.id)}
+                    className="px-2.5 py-1 bg-cobalt-950 hover:bg-cobalt-850 border border-cobalt-700 text-slate-200 rounded text-xs font-medium flex items-center space-x-1"
+                    title="Set target scheduled dispatch timestamp"
+                  >
+                    <Calendar className="w-3 h-3 text-cobalt-400" />
+                    <span>Schedule</span>
                   </button>
 
                   {draft.approval_status === 'draft' && (

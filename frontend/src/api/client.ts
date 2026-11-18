@@ -240,6 +240,10 @@ export const api = {
   rejectEmail: (draftId: number, reason: string) =>
     request<any>(`/approvals/reject/${draftId}`, { method: 'POST', body: JSON.stringify({ reason }) }),
   skipEmail: (draftId: number) => request<any>(`/approvals/skip/${draftId}`, { method: 'POST' }),
+  regenerateEmailDraft: (draftId: number, tone: string = 'Friendly professional', customNotes?: string) =>
+    request<any>(`/approvals/regenerate/${draftId}`, { method: 'POST', body: JSON.stringify({ tone, custom_notes: customNotes }) }),
+  scheduleEmailDraft: (draftId: number, scheduledAt: string) =>
+    request<any>(`/approvals/schedule/${draftId}`, { method: 'POST', body: JSON.stringify({ scheduled_at: scheduledAt }) }),
   updateEmailDraft: (draftId: number, data: any) => request<any>(`/emails/drafts/${draftId}`, { method: 'PUT', body: JSON.stringify(data) }),
   sendApprovedEmail: (draftId: number) => request<any>(`/emails/send/${draftId}`, { method: 'POST' }),
   bulkApprovalAction: (draftIds: number[], action: string, reason?: string) =>
@@ -290,6 +294,25 @@ export const api = {
     request<any>(`/crm/leads/${leadId}/trials`, { method: 'POST', body: JSON.stringify(trial) }),
   recordOptOut: (identifier: string, channel: string = 'all', reason: string = 'user_opt_out') =>
     request<any>('/crm/opt-out', { method: 'POST', body: JSON.stringify({ identifier, channel, reason }) }),
+  exportCrmLeadsCsv: async (status?: string, city?: string) => {
+    const token = getAuthToken();
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const query = new URLSearchParams();
+    if (status && status !== 'All') query.append('pipeline_status', status);
+    if (city && city !== 'All') query.append('city', city);
+    const res = await fetch(`${API_BASE}/crm/export/csv?${query.toString()}`, { headers });
+    if (!res.ok) throw new Error('Failed to export CRM CSV');
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'acttrident_crm_leads.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  },
 
   // Inbox & Replies
   getInbox: async (classification?: string) => {

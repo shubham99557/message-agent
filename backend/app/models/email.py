@@ -45,6 +45,7 @@ class EmailDraft(Base):
     approval_status = Column(String(50), default="draft", index=True)  # draft, awaiting_approval, approved, queued, sending, sent, delivered, bounced, failed, rejected, skipped, cancelled, simulated
     approved_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     approved_at = Column(DateTime, nullable=True)
+    scheduled_at = Column(DateTime, nullable=True)
     rejection_reason = Column(Text, nullable=True)
     
     # Sending Details

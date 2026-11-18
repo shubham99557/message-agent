@@ -46,6 +46,7 @@ def enrich_draft_response(db: Session, draft: EmailDraft) -> EmailDraftResponse:
         approval_status=draft.approval_status,
         approved_by_id=draft.approved_by_id,
         approved_at=draft.approved_at,
+        scheduled_at=getattr(draft, "scheduled_at", None),
         rejection_reason=draft.rejection_reason,
         sent_at=draft.sent_at,
         provider=draft.provider,
@@ -260,3 +261,88 @@ def bulk_handle_approvals(db: Session, bulk_req: BulkApprovalRequest, user_id: i
             processed += 1
 
     return {"status": "success", "action": bulk_req.action, "processed_count": processed}
+
+
+def regenerate_email_draft(
+    db: Session,
+    draft_id: int,
+    user_id: int,
+    tone: Optional[str] = None,
+    custom_notes: Optional[str] = None
+) -> Optional[EmailDraft]:
+    draft = db.query(EmailDraft).filter(EmailDraft.id == draft_id).first()
+    if not draft:
+        return None
+    if draft.approval_status in ("sending", "sent", "delivered"):
+        return draft
+
+    from app.services.email_generator_service import build_email_content
+
+    company = draft.company
+    if not company:
+        return None
+
+    effective_tone = tone or draft.tone or "Friendly professional"
+    subject, body_text, body_html = build_email_content(
+        company=company,
+        contact=draft.contact,
+        tone=effective_tone,
+        custom_notes=custom_notes
+    )
+
+    draft.subject = subject
+    draft.body_text = body_text
+    draft.body_html = body_html
+    draft.tone = effective_tone
+    draft.version = (draft.version or 1) + 1
+    new_hash = compute_content_hash([subject, body_text])
+    draft.content_hash = new_hash
+    draft.approval_status = "draft"
+    draft.approved_by_id = None
+    draft.approved_at = None
+    draft.approved_content_hash = None
+
+    _log_approval_record(
+        db=db,
+        entity_type="email_draft",
+        entity_id=draft.id,
+        approver_id=user_id,
+        action="regenerated",
+        content_version=draft.version,
+        content_hash=new_hash,
+        reason=f"Regenerated with tone: {effective_tone}"
+    )
+    db.commit()
+    db.refresh(draft)
+    return draft
+
+
+def schedule_email_draft(
+    db: Session,
+    draft_id: int,
+    user_id: int,
+    scheduled_at: datetime
+) -> Optional[EmailDraft]:
+    draft = db.query(EmailDraft).filter(EmailDraft.id == draft_id).first()
+    if not draft:
+        return None
+
+    draft.scheduled_at = scheduled_at
+    current_hash = (
+        draft.content_hash
+        or draft.approved_content_hash
+        or compute_content_hash([draft.subject, draft.body_text])
+    )
+    _log_approval_record(
+        db=db,
+        entity_type="email_draft",
+        entity_id=draft.id,
+        approver_id=user_id,
+        action="scheduled",
+        content_version=draft.version or 1,
+        content_hash=current_hash,
+        reason=f"Scheduled for {scheduled_at.isoformat()}"
+    )
+    db.commit()
+    db.refresh(draft)
+    return draft

@@ -1,11 +1,15 @@
+import csv
+import io
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
 from app.api.deps import get_db, get_current_user
 from app.models.user import User
 from app.models.lead import PIPELINE_STATUSES
+from app.models.company import Company
 from app.schemas.lead import (
     LeadResponse,
     LeadUpdate,
@@ -40,6 +44,52 @@ class OptOutPayload(BaseModel):
     identifier: str
     channel: str = "all"
     reason: str = "user_opt_out"
+
+
+@router.get("/export/csv")
+def export_leads_csv(
+    pipeline_status: Optional[str] = None,
+    city: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Exports CRM pipeline leads with complete contact details, device evidence, and evaluation status."""
+    leads, _ = list_leads(db, status=pipeline_status, city=city, skip=0, limit=2000)
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "Lead ID", "Company Name", "City", "Industry", "Website",
+        "Public Email", "Public Phone", "Decision Maker", "Decision Maker Role",
+        "Pipeline Status", "Verified Laptops", "Device Evidence", "Qualification Score",
+        "Evaluation Status", "Evaluation Devices", "Next Followup Date", "Updated At"
+    ])
+    for l in leads:
+        comp = l.company
+        writer.writerow([
+            l.id,
+            comp.name if comp else "",
+            comp.city if comp else "",
+            comp.industry or "" if comp else "",
+            comp.website or "" if comp else "",
+            comp.public_email or "" if comp else "",
+            comp.public_phone or "" if comp else "",
+            comp.decision_maker_name or "" if comp else "",
+            comp.decision_maker_role or "" if comp else "",
+            l.pipeline_status,
+            comp.laptop_count_verified or "" if comp else "",
+            comp.laptop_count_evidence or "" if comp else "",
+            comp.qualification_score if comp else 0.0,
+            l.trial_status or "none",
+            l.trial_device_count or "",
+            l.next_followup_date.strftime("%Y-%m-%d %H:%M") if l.next_followup_date else "",
+            l.updated_at.strftime("%Y-%m-%d %H:%M") if l.updated_at else ""
+        ])
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=acttrident_crm_leads.csv"}
+    )
 
 
 @router.get("/leads", response_model=dict)

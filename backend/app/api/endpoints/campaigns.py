@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from app.api.deps import get_db, get_current_user, require_role
 from app.models.user import User
-from app.models.campaign import Campaign, CampaignRecipient
+from app.models.campaign import Campaign, CampaignRecipient, CAMPAIGN_STATUSES
 from app.models.email import EmailDraft
 from app.models.company import Company
 from app.schemas.campaign import CampaignCreate, CampaignUpdate, CampaignResponse, CampaignRecipientResponse
@@ -52,9 +52,17 @@ def enrich_campaign_response(db: Session, c: Campaign) -> CampaignResponse:
         target_city=c.target_city,
         target_industry=c.target_industry,
         status=c.status,
+        business_type=getattr(c, "business_type", None),
+        company_size=getattr(c, "company_size", None),
+        min_devices=getattr(c, "min_devices", 5) or 5,
+        min_score=getattr(c, "min_score", 0.0) or 0.0,
+        allowed_channels=getattr(c, "allowed_channels", "email,whatsapp,linkedin") or "email,whatsapp,linkedin",
         daily_email_limit=c.daily_email_limit,
         daily_whatsapp_limit=c.daily_whatsapp_limit,
+        total_email_limit=getattr(c, "total_email_limit", None),
         sending_schedule=c.sending_schedule,
+        start_date=getattr(c, "start_date", None),
+        end_date=getattr(c, "end_date", None),
         created_at=c.created_at,
         updated_at=c.updated_at,
         recipients_count=recipients_count,
@@ -93,10 +101,18 @@ def create_campaign(
         objective=camp_in.objective,
         target_city=camp_in.target_city,
         target_industry=camp_in.target_industry,
-        status="draft",
+        status=camp_in.status if camp_in.status in CAMPAIGN_STATUSES else "draft",
+        business_type=camp_in.business_type,
+        company_size=camp_in.company_size,
+        min_devices=camp_in.min_devices if camp_in.min_devices is not None else 5,
+        min_score=camp_in.min_score if camp_in.min_score is not None else 0.0,
+        allowed_channels=camp_in.allowed_channels or "email,whatsapp,linkedin",
         daily_email_limit=camp_in.daily_email_limit or 50,
         daily_whatsapp_limit=camp_in.daily_whatsapp_limit or 20,
+        total_email_limit=camp_in.total_email_limit,
         sending_schedule=camp_in.sending_schedule or "09:00-18:00 IST Weekdays",
+        start_date=camp_in.start_date,
+        end_date=camp_in.end_date,
         created_by_id=current_user.id
     )
     db.add(camp)
