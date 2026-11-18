@@ -1,10 +1,10 @@
 from datetime import datetime
-from typing import Optional, List, Dict
+from typing import Optional
 from pydantic import BaseModel, ConfigDict
 
 
 class IntegrationConfigUpdate(BaseModel):
-    provider: str  # gemini, openai, smtp, gmail, whatsapp_meta
+    provider: str  # gemini, openai, smtp, gmail, whatsapp_meta, linkedin
     key_identifier: Optional[str] = None
     encrypted_value: Optional[str] = None
     is_active: bool = True
@@ -14,6 +14,8 @@ class IntegrationConfigResponse(BaseModel):
     id: int
     provider: str
     key_identifier: Optional[str] = None
+    has_secret: bool = False
+    masked_value: Optional[str] = None
     is_active: bool
     updated_at: datetime
     model_config = ConfigDict(from_attributes=True)

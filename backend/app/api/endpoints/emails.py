@@ -2,7 +2,7 @@ from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, get_current_user
+from app.api.deps import get_db, get_current_user, require_role
 from app.models.user import User
 from app.models.email import EmailDraft
 from app.schemas.email import (
@@ -93,7 +93,7 @@ def update_email_draft_endpoint(
 def send_email_endpoint(
     draft_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role(["admin", "manager"]))
 ):
     result = send_approved_email(db, draft_id, current_user.id)
     if result.status == "failed":

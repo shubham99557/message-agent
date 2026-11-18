@@ -3,7 +3,7 @@ from typing import List, Optional, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
-from app.models.email import EmailDraft, EmailEvent
+from app.models.email import EmailDraft, EmailEvent, ApprovalRecord
 from app.models.company import Company
 from app.models.consent import ContactConsent
 from app.schemas.email import EmailDraftResponse, EmailDraftUpdate, BulkApprovalRequest
@@ -83,10 +83,36 @@ def list_approval_queue(
     return enriched, total
 
 
+def _log_approval_record(
+    db: Session,
+    entity_type: str,
+    entity_id: int,
+    approver_id: Optional[int],
+    action: str,
+    content_version: int,
+    content_hash: str,
+    reason: Optional[str] = None
+) -> ApprovalRecord:
+    rec = ApprovalRecord(
+        entity_type=entity_type,
+        entity_id=entity_id,
+        approver_id=approver_id,
+        action=action,
+        content_version=content_version or 1,
+        content_hash=content_hash,
+        reason=reason,
+        created_at=datetime.now(timezone.utc)
+    )
+    db.add(rec)
+    return rec
+
+
 def approve_email_draft(db: Session, draft_id: int, user_id: int) -> Optional[EmailDraft]:
     draft = db.query(EmailDraft).filter(EmailDraft.id == draft_id).first()
     if not draft:
         return None
+    if draft.approval_status in ("sending", "sent", "delivered"):
+        return draft
 
     # Compute and bind immutable content hash to approval record
     current_hash = compute_content_hash([draft.subject, draft.body_text])
@@ -95,6 +121,16 @@ def approve_email_draft(db: Session, draft_id: int, user_id: int) -> Optional[Em
     draft.approval_status = "approved"
     draft.approved_by_id = user_id
     draft.approved_at = datetime.now(timezone.utc)
+
+    _log_approval_record(
+        db=db,
+        entity_type="email_draft",
+        entity_id=draft.id,
+        approver_id=user_id,
+        action="approved",
+        content_version=draft.version or 1,
+        content_hash=current_hash
+    )
     
     # Update lead status to awaiting_approval / ready
     if draft.company and draft.company.lead:
@@ -110,9 +146,20 @@ def reject_email_draft(db: Session, draft_id: int, user_id: int, reason: Optiona
     if not draft:
         return None
 
+    current_hash = compute_content_hash([draft.subject, draft.body_text])
     draft.approval_status = "rejected"
     draft.rejection_reason = reason or "Rejected during human review"
     draft.approved_content_hash = None
+    _log_approval_record(
+        db=db,
+        entity_type="email_draft",
+        entity_id=draft.id,
+        approver_id=user_id,
+        action="rejected",
+        content_version=draft.version or 1,
+        content_hash=current_hash,
+        reason=draft.rejection_reason
+    )
     db.commit()
     db.refresh(draft)
     return draft
@@ -123,7 +170,17 @@ def skip_email_draft(db: Session, draft_id: int, user_id: int) -> Optional[Email
     if not draft:
         return None
 
+    current_hash = compute_content_hash([draft.subject, draft.body_text])
     draft.approval_status = "skipped"
+    _log_approval_record(
+        db=db,
+        entity_type="email_draft",
+        entity_id=draft.id,
+        approver_id=user_id,
+        action="skipped",
+        content_version=draft.version or 1,
+        content_hash=current_hash
+    )
     db.commit()
     db.refresh(draft)
     return draft
@@ -136,11 +193,16 @@ def edit_email_draft(
     user_id: int,
     user_role: str = "sales_rep"
 ) -> Optional[EmailDraft]:
-    """Editing an approved draft MUST increment version, recalculate content hash, and invalidate prior approval."""
+    """
+    Editing a draft MUST NEVER implicitly approve it.
+    Any content change increments version, recalculates content hash, invalidates prior approval,
+    and writes an immutable ApprovalRecord entry.
+    """
     draft = db.query(EmailDraft).filter(EmailDraft.id == draft_id).first()
     if not draft:
         return None
 
+    was_approved = draft.approval_status == "approved"
     content_changed = False
     if update_in.subject is not None and update_in.subject != draft.subject:
         draft.subject = update_in.subject
@@ -154,24 +216,29 @@ def edit_email_draft(
 
     if content_changed:
         draft.version = (draft.version or 1) + 1
-        draft.content_hash = compute_content_hash([draft.subject, draft.body_text])
-        # Invalidate approval immediately on content modification
+        new_hash = compute_content_hash([draft.subject, draft.body_text])
+        draft.content_hash = new_hash
+        # Invalidate approval immediately on content modification — explicit re-approval required
         draft.approval_status = "draft"
         draft.approved_by_id = None
         draft.approved_at = None
         draft.approved_content_hash = None
+        if was_approved:
+            _log_approval_record(
+                db=db,
+                entity_type="email_draft",
+                entity_id=draft.id,
+                approver_id=user_id,
+                action="invalidated_by_edit",
+                content_version=draft.version,
+                content_hash=new_hash,
+                reason="Prior approval invalidated after draft content modification"
+            )
 
-    if update_in.approval_status is not None:
-        if update_in.approval_status == "approved":
-            # Only managers or admins can mark approved
-            if user_role in ["admin", "manager"]:
-                draft.approval_status = "approved"
-                draft.approved_by_id = user_id
-                draft.approved_at = datetime.now(timezone.utc)
-                draft.approved_content_hash = compute_content_hash([draft.subject, draft.body_text])
-            else:
-                draft.approval_status = "draft"
-        else:
+    # Strict rule: Editing endpoint can ONLY move to non-approved draft states (draft, awaiting_approval, cancelled)
+    # Implicit approval via PUT /emails/drafts/{id} is strictly forbidden.
+    if update_in.approval_status is not None and not content_changed:
+        if update_in.approval_status in ("draft", "awaiting_approval", "cancelled"):
             draft.approval_status = update_in.approval_status
 
     db.commit()

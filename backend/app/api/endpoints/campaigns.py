@@ -152,6 +152,8 @@ def add_recipients_to_campaign(
     camp = db.query(Campaign).filter(Campaign.id == campaign_id).first()
     if not camp:
         raise HTTPException(status_code=404, detail="Campaign not found")
+    if current_user.role not in ["admin", "manager"] and camp.created_by_id and camp.created_by_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Permission denied: You do not own this campaign.")
 
     added_count = 0
     for comp_id in payload.company_ids:
@@ -211,6 +213,8 @@ def batch_generate_campaign_drafts(
     camp = db.query(Campaign).filter(Campaign.id == campaign_id).first()
     if not camp:
         raise HTTPException(status_code=404, detail="Campaign not found")
+    if current_user.role not in ["admin", "manager"] and camp.created_by_id and camp.created_by_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Permission denied: You do not own this campaign.")
 
     recipients = db.query(CampaignRecipient).filter(
         CampaignRecipient.campaign_id == campaign_id,
@@ -256,12 +260,22 @@ def dispatch_approved_campaign_emails(
     ).limit(camp.daily_email_limit).all()
 
     sent = 0
+    simulated = 0
     failed = 0
     for d in approved_drafts:
         res = send_approved_email(db, d.id, current_user.id)
-        if res.status in ["sent", "simulated"]:
+        if res.status == "sent":
             sent += 1
+        elif res.status == "simulated":
+            simulated += 1
         else:
             failed += 1
 
-    return {"status": "completed", "sent_count": sent, "failed_count": failed}
+    return {
+        "status": "completed",
+        "sent_count": sent,
+        "simulated_count": simulated,
+        "sent": sent,
+        "simulated": simulated,
+        "failed_count": failed
+    }

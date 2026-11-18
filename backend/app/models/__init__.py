@@ -8,7 +8,7 @@ from app.models.lead import (
     PIPELINE_STATUSES, PIPELINE_TRANSITIONS
 )
 from app.models.campaign import Campaign, CampaignRecipient
-from app.models.email import EmailDraft, EmailEvent
+from app.models.email import EmailDraft, EmailEvent, ApprovalRecord
 from app.models.whatsapp import WhatsAppTemplate, WhatsAppMessage, WebhookEvent
 from app.models.reply import Conversation, Reply, REPLY_CATEGORIES
 from app.models.activity import AuditLog, IntegrationCredential, SuppressionList
@@ -35,6 +35,7 @@ __all__ = [
     "CampaignRecipient",
     "EmailDraft",
     "EmailEvent",
+    "ApprovalRecord",
     "WhatsAppTemplate",
     "WhatsAppMessage",
     "WebhookEvent",

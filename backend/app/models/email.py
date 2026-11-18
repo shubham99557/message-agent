@@ -25,7 +25,7 @@ class EmailDraft(Base):
     approved_content_hash = Column(String(64), nullable=True)  # Set strictly upon human approval
 
     # Mandatory Human Approval Status
-    approval_status = Column(String(50), default="draft")  # draft, approved, rejected, skipped, sent, simulated
+    approval_status = Column(String(50), default="draft", index=True)  # draft, awaiting_approval, approved, queued, sending, sent, delivered, bounced, failed, rejected, skipped, cancelled, simulated
     approved_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     approved_at = Column(DateTime, nullable=True)
     rejection_reason = Column(Text, nullable=True)
@@ -56,3 +56,20 @@ class EmailEvent(Base):
     details = Column(Text, nullable=True)  # JSON or message details
 
     email_draft = relationship("EmailDraft", back_populates="events")
+
+
+class ApprovalRecord(Base):
+    """Immutable ledger of every approval, rejection, skip, and post-edit invalidation."""
+    __tablename__ = "approval_records"
+
+    id = Column(Integer, primary_key=True, index=True)
+    entity_type = Column(String(50), nullable=False, index=True)  # email_draft, whatsapp_message, linkedin_message
+    entity_id = Column(Integer, nullable=False, index=True)
+    approver_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    action = Column(String(50), nullable=False, index=True)  # approved, rejected, skipped, invalidated_by_edit
+    content_version = Column(Integer, default=1, nullable=False)
+    content_hash = Column(String(64), nullable=False)
+    reason = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
+
+    approver = relationship("User")

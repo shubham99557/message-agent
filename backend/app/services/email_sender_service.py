@@ -165,6 +165,26 @@ def send_approved_email(
             message=f"Daily email limit ({settings.DEFAULT_DAILY_EMAIL_LIMIT}) reached. Message held in queue."
         )
 
+    # 4.5 ATOMIC DISPATCH LOCK (Prevents approval/sending race conditions & duplicate sends)
+    claimed_rows = (
+        db.query(EmailDraft)
+        .filter(
+            EmailDraft.id == draft_id,
+            EmailDraft.approval_status == "approved",
+            EmailDraft.approved_content_hash == current_hash
+        )
+        .update({"approval_status": "sending"}, synchronize_session="fetch")
+    )
+    db.commit()
+    if claimed_rows == 0:
+        return EmailSendResult(
+            draft_id=draft_id,
+            status="failed",
+            provider=draft.provider,
+            message="Race Condition Block: Draft is already sending, already sent, or modified concurrently."
+        )
+    db.refresh(draft)
+
     # 5. DISPATCH VIA CONFIGURED PROVIDER (GMAIL / SMTP / MOCK)
     provider_msg_id = f"acttrident-msg-{draft.id}-{int(datetime.now().timestamp())}"
     send_success = True
@@ -264,6 +284,7 @@ def send_approved_email(
             message="Email successfully dispatched"
         )
     else:
+        draft.approval_status = "failed"
         draft.error_message = error_msg
         event_failed = EmailEvent(
             draft_id=draft.id,

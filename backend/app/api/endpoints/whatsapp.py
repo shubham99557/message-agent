@@ -80,7 +80,7 @@ def approve_whatsapp_message(
 def send_whatsapp_endpoint(
     message_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role(["admin", "manager"]))
 ):
     success, msg_text = send_approved_whatsapp_message(db, message_id, current_user.id)
     if not success:

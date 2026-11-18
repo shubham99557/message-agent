@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 from sqlalchemy.orm import Session
 from app.models.user import User, RefreshToken
-from app.schemas.auth import UserCreate
+from app.schemas.auth import UserCreate, VALID_ROLES
 from app.core.security import (
     get_password_hash,
     verify_password,
@@ -24,12 +24,15 @@ def get_user_by_id(db: Session, user_id: int) -> Optional[User]:
 
 
 def create_user(db: Session, user_in: UserCreate, role: str = "sales_rep") -> User:
+    safe_role = role if role in VALID_ROLES else "sales_rep"
     hashed_password = get_password_hash(user_in.password)
     db_user = User(
         email=user_in.email.lower().strip(),
         hashed_password=hashed_password,
-        full_name=user_in.full_name,
-        role=role
+        full_name=user_in.full_name.strip(),
+        role=safe_role,
+        is_active=True,
+        token_version=1
     )
     db.add(db_user)
     db.commit()
@@ -80,11 +83,9 @@ def rotate_refresh_token(db: Session, raw_token: str) -> Optional[Tuple[User, st
     if not user or not user.is_active:
         return None
 
-    # Revoke current token
     now = datetime.now(timezone.utc)
     token_record.revoked_at = now
 
-    # Issue new rotated refresh token
     new_raw_token = generate_refresh_token_string()
     new_token_hash = hash_token(new_raw_token)
     token_record.replaced_by_hash = new_token_hash
@@ -101,7 +102,7 @@ def rotate_refresh_token(db: Session, raw_token: str) -> Optional[Tuple[User, st
 
 
 def revoke_user_refresh_tokens(db: Session, user_id: int) -> int:
-    """Revokes all active refresh tokens for a user upon logout or security compromise."""
+    """Revokes all active refresh tokens and increments token_version to invalidate active JWTs."""
     now = datetime.now(timezone.utc)
     tokens = db.query(RefreshToken).filter(
         RefreshToken.user_id == user_id,
@@ -111,12 +112,53 @@ def revoke_user_refresh_tokens(db: Session, user_id: int) -> int:
     for t in tokens:
         t.revoked_at = now
         count += 1
+
+    user = get_user_by_id(db, user_id)
+    if user:
+        user.token_version = (user.token_version or 1) + 1
+
     db.commit()
     return count
 
 
+def set_user_active_status(db: Session, user_id: int, is_active: bool) -> Optional[User]:
+    """Activates or deactivates a user account and immediately revokes all active sessions."""
+    user = get_user_by_id(db, user_id)
+    if not user:
+        return None
+    user.is_active = is_active
+    user.token_version = (user.token_version or 1) + 1
+    if not is_active:
+        revoke_user_refresh_tokens(db, user_id)
+    else:
+        db.commit()
+    db.refresh(user)
+    return user
+
+
+def update_user_role(db: Session, user_id: int, new_role: str) -> Optional[User]:
+    """Updates a user's RBAC role and rotates token_version so stale JWT claims are invalidated."""
+    if new_role not in VALID_ROLES:
+        raise ValueError(f"Invalid role '{new_role}'.")
+    user = get_user_by_id(db, user_id)
+    if not user:
+        return None
+    user.role = new_role
+    user.token_version = (user.token_version or 1) + 1
+    db.commit()
+    db.refresh(user)
+    return user
+
+
 def seed_default_admin(db: Session) -> Optional[User]:
-    """Seeds initial administrator strictly from environment variables without hardcoded credentials."""
+    """
+    Seeds initial administrator strictly in non-production environments from environment variables.
+    Automatic production admin seeding is forbidden — use scripts/provision_admin.py instead.
+    """
+    if settings.ENVIRONMENT.lower() == "production":
+        logger.info("Automatic admin seeding skipped in production environment.")
+        return None
+
     admin_email = (settings.INITIAL_ADMIN_EMAIL or "").strip()
     admin_password = (settings.INITIAL_ADMIN_PASSWORD or "").strip()
 

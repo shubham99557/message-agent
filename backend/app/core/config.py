@@ -10,11 +10,16 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")  # development, test, production
 
-    # JWT Security
+    # JWT Security & Encryption at Rest
     SECRET_KEY: str = os.getenv("SECRET_KEY", "acttrident-dev-secret-key-replace-in-env-at-least-32-chars")
+    CREDENTIAL_ENCRYPTION_KEY: str = os.getenv("CREDENTIAL_ENCRYPTION_KEY", "")
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))  # 30 min lifetime
     REFRESH_TOKEN_EXPIRE_DAYS: int = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "14"))  # 14 days
+
+    # Outbound Rate Limits (per minute)
+    OUTBOUND_RATE_LIMIT_EMAIL_PER_MIN: int = int(os.getenv("OUTBOUND_RATE_LIMIT_EMAIL_PER_MIN", "30"))
+    OUTBOUND_RATE_LIMIT_WA_PER_MIN: int = int(os.getenv("OUTBOUND_RATE_LIMIT_WA_PER_MIN", "10"))
 
     # Initial Admin Bootstrap (from environment only; never hardcoded in source)
     INITIAL_ADMIN_EMAIL: str = os.getenv("INITIAL_ADMIN_EMAIL", "admin@acttrident.ai")
@@ -103,12 +108,18 @@ class Settings(BaseSettings):
     )
 
     def validate_production_security(self) -> None:
-        """Validates that production environment is not using insecure default credentials or wildcards."""
-        if self.ENVIRONMENT.lower() == "production":
+        """Validates that production/staging environments never run with insecure defaults or wildcards."""
+        env = self.ENVIRONMENT.lower()
+        if env in ("production", "staging"):
             if "replace-in-env" in self.SECRET_KEY or len(self.SECRET_KEY) < 32:
                 raise ValueError("CRITICAL SECURITY ERROR: Production SECRET_KEY must be a unique key of at least 32 characters.")
             if "*" in self.BACKEND_CORS_ORIGINS:
                 raise ValueError("CRITICAL SECURITY ERROR: Wildcard CORS is strictly forbidden in production.")
+        if env == "production":
+            if not self.CREDENTIAL_ENCRYPTION_KEY or len(self.CREDENTIAL_ENCRYPTION_KEY.strip()) < 16:
+                raise ValueError("CRITICAL SECURITY ERROR: Production requires CREDENTIAL_ENCRYPTION_KEY (at least 16 characters).")
+            if self.DATABASE_URL.lower().startswith("sqlite"):
+                raise ValueError("CRITICAL SECURITY ERROR: SQLite is forbidden in production; configure PostgreSQL DATABASE_URL.")
 
 
 settings = Settings()
