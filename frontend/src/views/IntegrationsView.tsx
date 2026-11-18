@@ -6,6 +6,7 @@ import {
   Lock,
   Mail,
   MessageSquare,
+  Linkedin,
   Sparkles,
   Save,
   Key
@@ -33,16 +34,19 @@ export const IntegrationsView: React.FC = () => {
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [savedIntegrations, setSavedIntegrations] = useState<any[]>([]);
   const [gmailStatus, setGmailStatus] = useState<any>(null);
+  const [linkedinStatus, setLinkedinStatus] = useState<any>(null);
   const [syncingGmail, setSyncingGmail] = useState(false);
 
   const loadIntegrations = async () => {
     try {
-      const [list, gStatus] = await Promise.all([
+      const [list, gStatus, liStatus] = await Promise.all([
         api.getIntegrations().catch(() => []),
         api.getGmailStatus().catch(() => null),
+        api.getLinkedInStatus().catch(() => null),
       ]);
       setSavedIntegrations(list || []);
       setGmailStatus(gStatus);
+      setLinkedinStatus(liStatus);
       for (const item of list || []) {
         if (item.provider === 'gemini' && item.is_active) setAiProvider('gemini');
         if (item.provider === 'openai' && item.is_active) setAiProvider('openai');
@@ -84,6 +88,25 @@ export const IntegrationsView: React.FC = () => {
     if (!confirm('Disconnect Gmail and revoke stored OAuth tokens?')) return;
     try {
       await api.disconnectGmail();
+      await loadIntegrations();
+    } catch (err: any) {
+      alert(`Disconnect error: ${err.message}`);
+    }
+  };
+
+  const handleConnectLinkedIn = async () => {
+    try {
+      const res = await api.startLinkedInOAuth();
+      window.open(res.authorization_url, '_blank', 'noopener,noreferrer');
+    } catch (err: any) {
+      alert(err.message || 'LinkedIn OAuth 2.0 is not configured on the backend.');
+    }
+  };
+
+  const handleDisconnectLinkedIn = async () => {
+    if (!confirm('Disconnect LinkedIn and clear stored OAuth tokens?')) return;
+    try {
+      await api.disconnectLinkedIn();
       await loadIntegrations();
     } catch (err: any) {
       alert(`Disconnect error: ${err.message}`);
@@ -234,6 +257,57 @@ export const IntegrationsView: React.FC = () => {
                   Disconnect
                 </button>
               </>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Official LinkedIn OAuth 2.0 Status & Controls */}
+      <div className="bg-cobalt-900/80 border border-cobalt-800 rounded-lg p-5 space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center space-x-3">
+            <div className="w-9 h-9 rounded-lg bg-sky-500/15 border border-sky-500/30 flex items-center justify-center text-sky-400">
+              <Linkedin className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center space-x-2">
+                <h3 className="text-sm font-semibold text-slate-100">LinkedIn (Official OAuth 2.0 / Authorized API)</h3>
+                <span
+                  className={`text-[10px] font-mono px-2 py-0.5 rounded uppercase border ${
+                    linkedinStatus?.connected
+                      ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                      : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                  }`}
+                >
+                  {linkedinStatus?.status || 'disconnected'}
+                </span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cobalt-950 border border-cobalt-800 text-slate-300">
+                  Mode: {linkedinStatus?.active_mode || 'manual_handoff_only'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">
+                {linkedinStatus?.connected
+                  ? `Connected LinkedIn profile: ${linkedinStatus.display_name || linkedinStatus.account_identifier}. ${linkedinStatus.mode_summary}`
+                  : linkedinStatus?.oauth_configured
+                  ? 'LinkedIn OAuth 2.0 credentials detected. Click Connect LinkedIn to authorize official OpenID scopes.'
+                  : 'Set LINKEDIN_CLIENT_ID and LINKEDIN_CLIENT_SECRET in backend environment. Zero password/cookie scraping.'}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center space-x-2 shrink-0">
+            <button
+              onClick={handleConnectLinkedIn}
+              className="px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded text-xs font-medium"
+            >
+              {linkedinStatus?.connected ? 'Reconnect LinkedIn' : 'Connect LinkedIn (OAuth 2.0)'}
+            </button>
+            {linkedinStatus?.connected && (
+              <button
+                onClick={handleDisconnectLinkedIn}
+                className="px-3 py-1.5 bg-rose-950/40 hover:bg-rose-900/50 border border-rose-700/50 text-rose-300 rounded text-xs font-medium"
+              >
+                Disconnect
+              </button>
             )}
           </div>
         </div>

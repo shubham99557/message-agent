@@ -7,6 +7,7 @@ import {
   BrainCircuit,
   Mail,
   MessageSquare,
+  Linkedin,
   Megaphone,
   CheckSquare,
   Inbox,
@@ -40,6 +41,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'research' as ViewType, label: 'AI Research', icon: BrainCircuit },
     { id: 'email' as ViewType, label: 'Email Outreach', icon: Mail },
     { id: 'whatsapp' as ViewType, label: 'WhatsApp Outreach', icon: MessageSquare },
+    { id: 'linkedin' as ViewType, label: 'LinkedIn Outreach', icon: Linkedin },
     { id: 'campaigns' as ViewType, label: 'Campaigns', icon: Megaphone },
     {
       id: 'approvals' as ViewType,

@@ -11,6 +11,7 @@ import { LeadsView } from './views/LeadsView';
 import { ResearchView } from './views/ResearchView';
 import { EmailOutreachView } from './views/EmailOutreachView';
 import { WhatsAppView } from './views/WhatsAppView';
+import { LinkedInView } from './views/LinkedInView';
 import { CampaignsView } from './views/CampaignsView';
 import { ApprovalQueueView } from './views/ApprovalQueueView';
 import { InboxView } from './views/InboxView';
@@ -145,6 +146,7 @@ export const App: React.FC = () => {
       case 'research': return { title: 'AI Research Agent', sub: '7-factor qualification & truthful company dossiers' };
       case 'email': return { title: 'Email Outreach', sub: 'Personalized AI email generation across 5 tones' };
       case 'whatsapp': return { title: 'WhatsApp Outreach', sub: 'Meta Cloud API messaging with strict consent verification' };
+      case 'linkedin': return { title: 'LinkedIn Outreach', sub: 'Official OAuth 2.0 & compliant human-assisted outreach workflow' };
       case 'campaigns': return { title: 'Campaign Management', sub: 'Multi-account sequences with daily rate limits' };
       case 'approvals': return { title: 'Human Approval Queue', sub: 'Mandatory human signoff before any outbound dispatch' };
       case 'inbox': return { title: 'Inbound Inbox & AI Replies', sub: '10-class response categorization and suggested replies' };
@@ -183,6 +185,9 @@ export const App: React.FC = () => {
           )}
           {currentView === 'whatsapp' && (
             <WhatsAppView selectedCompany={selectedCompany} onNavigate={setCurrentView} />
+          )}
+          {currentView === 'linkedin' && (
+            <LinkedInView selectedCompany={selectedCompany} />
           )}
           {currentView === 'campaigns' && <CampaignsView onNavigate={setCurrentView} />}
           {currentView === 'approvals' && <ApprovalQueueView />}

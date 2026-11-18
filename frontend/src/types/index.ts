@@ -5,6 +5,7 @@ export type ViewType =
   | 'research'
   | 'email'
   | 'whatsapp'
+  | 'linkedin'
   | 'campaigns'
   | 'approvals'
   | 'inbox'

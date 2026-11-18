@@ -325,13 +325,40 @@ export const api = {
   getAuditLogs: () => request<any[]>('/settings/audit-logs'),
   getSuppressionList: () => request<any[]>('/settings/suppression-list'),
 
-  // Gmail OAuth 2.0 & Channel Connections
+  // Gmail OAuth 2.0, LinkedIn OAuth 2.0 & Unified Channel Connections
+  getAllChannelStatuses: () => request<{ channels: Record<string, any> }>('/integrations/channels/status'),
   getGmailStatus: () => request<any>('/integrations/gmail/status'),
   startGmailOAuth: () => request<{ authorization_url: string; state: string; scopes: string[] }>('/integrations/gmail/oauth/start'),
   syncGmailReplies: (maxResults: number = 20) =>
     request<any>(`/integrations/gmail/sync-replies?max_results=${maxResults}`, { method: 'POST' }),
   disconnectGmail: () => request<any>('/integrations/gmail/disconnect', { method: 'POST' }),
   getDraftSendAttempts: (draftId: number) => request<any[]>(`/emails/drafts/${draftId}/attempts`),
+
+  // LinkedIn Official OAuth 2.0 & Compliant Outreach
+  getLinkedInStatus: () => request<any>('/linkedin/status'),
+  startLinkedInOAuth: () => request<{ authorization_url: string; state: string; scopes: string[] }>('/integrations/linkedin/oauth/start'),
+  disconnectLinkedIn: () => request<any>('/integrations/linkedin/disconnect', { method: 'POST' }),
+  getLinkedInMessages: (statusFilter?: string) => {
+    const query = statusFilter ? `?status=${encodeURIComponent(statusFilter)}` : '';
+    return request<any[]>(`/linkedin/messages${query}`);
+  },
+  draftLinkedInMessage: (data: {
+    company_id: number;
+    recipient_name?: string;
+    recipient_profile_url?: string;
+    message_type?: string;
+    tone?: string;
+    custom_message?: string;
+    custom_notes?: string;
+  }) => request<any>('/linkedin/draft', { method: 'POST', body: JSON.stringify(data) }),
+  updateLinkedInMessage: (id: number, data: { recipient_name?: string; recipient_profile_url?: string; message_body?: string }) =>
+    request<any>(`/linkedin/messages/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  approveLinkedInMessage: (id: number) => request<any>(`/linkedin/approve/${id}`, { method: 'POST' }),
+  rejectLinkedInMessage: (id: number, reason: string) =>
+    request<any>(`/linkedin/reject/${id}`, { method: 'POST', body: JSON.stringify({ reason }) }),
+  dispatchLinkedInMessage: (id: number) => request<any>(`/linkedin/dispatch/${id}`, { method: 'POST' }),
+  confirmLinkedInManualSend: (id: number, notes?: string) =>
+    request<any>(`/linkedin/confirm-manual-send/${id}`, { method: 'POST', body: JSON.stringify({ notes }) }),
 
   // Background Jobs & Queue Automation
   getQueueHealth: () => request<any>('/jobs/health'),
