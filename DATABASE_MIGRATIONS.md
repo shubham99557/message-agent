@@ -71,3 +71,4 @@ cp acttrident_backup_YYYYMMDD_HHMMSS.db acttrident.db
 | Revision ID | Phase | Description |
 | :--- | :---: | :--- |
 | `0001_phase1_foundation` | Phase 1 | Baseline schema verification, `users.token_version` for immediate JWT revocation, `approval_records` immutable ledger, and non-destructive upgrade support for existing databases. |
+| `0002_phase2_email_connections` | Phase 2 | Adds `channel_connections` (Fernet-encrypted OAuth tokens & status), `email_send_attempts` (send attempt ledger separate from delivery outcomes), `email_drafts.provider_thread_id`/`idempotency_key`, and `replies.provider_message_id`/`provider_thread_id`/`campaign_id`. |

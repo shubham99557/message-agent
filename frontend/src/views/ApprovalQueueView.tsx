@@ -24,12 +24,17 @@ export const ApprovalQueueView: React.FC = () => {
   const [editingDraft, setEditingDraft] = useState<EmailDraft | null>(null);
   const [editSubject, setEditSubject] = useState('');
   const [editBody, setEditBody] = useState('');
+  const [emailMode, setEmailMode] = useState<any>(null);
 
   const loadQueue = async () => {
     setLoading(true);
     try {
-      const data = await api.getApprovalQueue(statusFilter);
+      const [data, mode] = await Promise.all([
+        api.getApprovalQueue(statusFilter),
+        api.getGmailStatus().catch(() => null),
+      ]);
       setDrafts(data.items);
+      setEmailMode(mode);
       setSelectedIds([]);
     } catch (err) {
       console.error(err);
@@ -154,6 +159,26 @@ export const ApprovalQueueView: React.FC = () => {
           </select>
         </div>
       </div>
+
+      {/* Honest Simulation / Provider Mode Banner */}
+      {emailMode && (
+        <div
+          className={`p-3 rounded-lg border text-xs flex items-center justify-between ${
+            emailMode.is_simulation
+              ? 'bg-amber-500/10 border-amber-500/30 text-amber-200'
+              : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200'
+          }`}
+        >
+          <span>
+            {emailMode.is_simulation
+              ? 'SIMULATION MODE ACTIVE: Emails sent from this queue are recorded as simulated locally and will NOT be transmitted externally.'
+              : `LIVE EMAIL PROVIDER CONNECTED: Dispatching via ${emailMode.active_mode.toUpperCase()}${emailMode.gmail?.account_email ? ` (${emailMode.gmail.account_email})` : ''}.`}
+          </span>
+          <span className="font-mono text-[10px] uppercase px-2 py-0.5 rounded bg-black/30">
+            {emailMode.active_mode}
+          </span>
+        </div>
+      )}
 
       {/* Drafts List / Cards */}
       {loading ? (

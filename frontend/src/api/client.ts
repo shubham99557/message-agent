@@ -306,6 +306,14 @@ export const api = {
   getAuditLogs: () => request<any[]>('/settings/audit-logs'),
   getSuppressionList: () => request<any[]>('/settings/suppression-list'),
 
+  // Gmail OAuth 2.0 & Channel Connections
+  getGmailStatus: () => request<any>('/integrations/gmail/status'),
+  startGmailOAuth: () => request<{ authorization_url: string; state: string; scopes: string[] }>('/integrations/gmail/oauth/start'),
+  syncGmailReplies: (maxResults: number = 20) =>
+    request<any>(`/integrations/gmail/sync-replies?max_results=${maxResults}`, { method: 'POST' }),
+  disconnectGmail: () => request<any>('/integrations/gmail/disconnect', { method: 'POST' }),
+  getDraftSendAttempts: (draftId: number) => request<any[]>(`/emails/drafts/${draftId}/attempts`),
+
   // Background Jobs & Queue Automation
   getQueueHealth: () => request<any>('/jobs/health'),
   getTaskHistory: (category?: string, status?: string) => {

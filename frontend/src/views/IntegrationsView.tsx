@@ -32,11 +32,17 @@ export const IntegrationsView: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [savedIntegrations, setSavedIntegrations] = useState<any[]>([]);
+  const [gmailStatus, setGmailStatus] = useState<any>(null);
+  const [syncingGmail, setSyncingGmail] = useState(false);
 
   const loadIntegrations = async () => {
     try {
-      const list = await api.getIntegrations();
+      const [list, gStatus] = await Promise.all([
+        api.getIntegrations().catch(() => []),
+        api.getGmailStatus().catch(() => null),
+      ]);
       setSavedIntegrations(list || []);
+      setGmailStatus(gStatus);
       for (const item of list || []) {
         if (item.provider === 'gemini' && item.is_active) setAiProvider('gemini');
         if (item.provider === 'openai' && item.is_active) setAiProvider('openai');
@@ -51,6 +57,38 @@ export const IntegrationsView: React.FC = () => {
   useEffect(() => {
     loadIntegrations();
   }, []);
+
+  const handleConnectGmail = async () => {
+    try {
+      const res = await api.startGmailOAuth();
+      window.open(res.authorization_url, '_blank', 'noopener,noreferrer');
+    } catch (err: any) {
+      alert(err.message || 'Gmail OAuth 2.0 is not configured on the backend.');
+    }
+  };
+
+  const handleSyncGmail = async () => {
+    setSyncingGmail(true);
+    try {
+      const res = await api.syncGmailReplies();
+      alert(`Gmail sync complete: ${res.synced_replies} new replies, ${res.bounces_recorded} bounces recorded.`);
+      await loadIntegrations();
+    } catch (err: any) {
+      alert(`Sync error: ${err.message}`);
+    } finally {
+      setSyncingGmail(false);
+    }
+  };
+
+  const handleDisconnectGmail = async () => {
+    if (!confirm('Disconnect Gmail and revoke stored OAuth tokens?')) return;
+    try {
+      await api.disconnectGmail();
+      await loadIntegrations();
+    } catch (err: any) {
+      alert(`Disconnect error: ${err.message}`);
+    }
+  };
 
   const handleSaveAI = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -135,6 +173,71 @@ export const IntegrationsView: React.FC = () => {
           <span>Integration credentials updated and encrypted in secure storage.</span>
         </div>
       )}
+
+      {/* Gmail API OAuth 2.0 Status & Controls */}
+      <div className="bg-cobalt-900/80 border border-cobalt-800 rounded-lg p-5 space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center space-x-3">
+            <div className="w-9 h-9 rounded-lg bg-cobalt-950 border border-cobalt-700 flex items-center justify-center text-cobalt-400">
+              <Mail className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center space-x-2">
+                <h3 className="text-sm font-semibold text-slate-100">Gmail API (Google OAuth 2.0)</h3>
+                <span
+                  className={`text-[10px] font-mono px-2 py-0.5 rounded uppercase border ${
+                    gmailStatus?.gmail?.status === 'connected'
+                      ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                      : gmailStatus?.gmail?.status === 'reauth_required'
+                      ? 'bg-rose-500/15 text-rose-300 border-rose-500/30'
+                      : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                  }`}
+                >
+                  {gmailStatus?.gmail?.status || 'disconnected'}
+                </span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cobalt-950 border border-cobalt-800 text-slate-300">
+                  Active Mode: {gmailStatus?.active_mode || 'mock_simulation'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">
+                {gmailStatus?.gmail?.account_email
+                  ? `Connected mailbox: ${gmailStatus.gmail.account_email}${gmailStatus.gmail.last_synced_at ? ` • Last synced: ${new Date(gmailStatus.gmail.last_synced_at).toLocaleString()}` : ''}`
+                  : gmailStatus?.gmail?.oauth_configured
+                  ? 'OAuth credentials detected. Click Connect Gmail to authorize least-privilege send & reply sync scopes.'
+                  : 'Set GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET in backend environment to enable Google OAuth 2.0.'}
+              </p>
+              {gmailStatus?.gmail?.last_error && (
+                <p className="text-[11px] text-rose-300 mt-1 font-mono">Provider Error: {gmailStatus.gmail.last_error}</p>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center space-x-2 shrink-0">
+            <button
+              onClick={handleConnectGmail}
+              className="px-3 py-1.5 bg-cobalt-600 hover:bg-cobalt-500 text-white rounded text-xs font-medium"
+            >
+              {gmailStatus?.gmail?.status === 'connected' ? 'Reconnect Gmail' : 'Connect Gmail (OAuth 2.0)'}
+            </button>
+            {gmailStatus?.gmail?.status === 'connected' && (
+              <>
+                <button
+                  onClick={handleSyncGmail}
+                  disabled={syncingGmail}
+                  className="px-3 py-1.5 bg-cobalt-950 hover:bg-cobalt-850 border border-cobalt-700 text-slate-200 rounded text-xs font-medium disabled:opacity-50"
+                >
+                  {syncingGmail ? 'Syncing...' : 'Sync Replies'}
+                </button>
+                <button
+                  onClick={handleDisconnectGmail}
+                  className="px-3 py-1.5 bg-rose-950/40 hover:bg-rose-900/50 border border-rose-700/50 text-rose-300 rounded text-xs font-medium"
+                >
+                  Disconnect
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
 
       {savedIntegrations.length > 0 && (
         <div className="bg-cobalt-900/60 border border-cobalt-800 rounded-lg p-3.5 flex flex-wrap items-center gap-2 text-xs">
