@@ -23,14 +23,77 @@ from app.services.whatsapp_service import (
 )
 from app.services.company_service import get_company
 from app.core.config import settings
+from app.core.audit import record_audit_log
+from app.integrations.whatsapp_adapter import (
+    get_whatsapp_connection_status,
+    check_meta_connection_health,
+    sync_meta_templates,
+    MetaWhatsAppError,
+)
 
 router = APIRouter()
 
 
+@router.get("/status")
+def whatsapp_connection_status(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Returns honest Meta WhatsApp Cloud API connection and simulation status."""
+    return get_whatsapp_connection_status(db)
+
+
+@router.post("/health-check")
+def whatsapp_health_check(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["admin", "manager"]))
+):
+    """Queries Meta Graph API to validate credentials and phone number health."""
+    try:
+        res = check_meta_connection_health(db)
+        record_audit_log(
+            db=db,
+            action="whatsapp_health_check",
+            entity_type="channel_connection",
+            user_id=current_user.id,
+            details={"status": res["status"], "verified_name": res.get("verified_name")}
+        )
+        return res
+    except MetaWhatsAppError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+
+
+@router.post("/templates/sync")
+def sync_whatsapp_templates_from_meta(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["admin", "manager"]))
+):
+    """Synchronizes WhatsApp templates and their ACTUAL Meta approval statuses from Meta Graph API."""
+    try:
+        res = sync_meta_templates(db)
+        record_audit_log(
+            db=db,
+            action="whatsapp_templates_synced",
+            entity_type="whatsapp_template",
+            user_id=current_user.id,
+            details=res
+        )
+        return res
+    except MetaWhatsAppError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+
+
 @router.get("/templates", response_model=List[WhatsAppTemplateResponse])
-def get_approved_templates(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def get_approved_templates(
+    include_all: bool = Query(False),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
     seed_default_meta_templates(db)
-    return db.query(WhatsAppTemplate).filter(WhatsAppTemplate.status == "APPROVED").all()
+    query = db.query(WhatsAppTemplate)
+    if not include_all:
+        query = query.filter(WhatsAppTemplate.status == "APPROVED")
+    return query.order_by(WhatsAppTemplate.synced_from_meta.desc(), WhatsAppTemplate.id.asc()).all()
 
 
 @router.post("/consent", response_model=ContactConsentResponse, status_code=status.HTTP_201_CREATED)

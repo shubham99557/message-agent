@@ -8,10 +8,13 @@ class WhatsAppTemplate(Base):
     __tablename__ = "whatsapp_templates"
 
     id = Column(Integer, primary_key=True, index=True)
+    meta_template_id = Column(String(255), nullable=True, index=True)
     meta_template_name = Column(String(255), unique=True, nullable=False)
-    category = Column(String(50), default="UTILITY")  # UTILITY, MARKETING
-    language = Column(String(10), default="en")
-    status = Column(String(50), default="APPROVED")  # APPROVED, PENDING, REJECTED
+    category = Column(String(50), default="UTILITY")  # UTILITY, MARKETING, AUTHENTICATION
+    language = Column(String(20), default="en")
+    status = Column(String(50), default="PENDING")  # APPROVED, PENDING, REJECTED, PAUSED, DISABLED (synced from Meta)
+    synced_from_meta = Column(Boolean, default=False, nullable=False)
+    last_synced_at = Column(DateTime, nullable=True)
     header_text = Column(String(255), nullable=True)
     body_text = Column(Text, nullable=False)
     footer_text = Column(String(255), nullable=True)
@@ -49,8 +52,9 @@ class WhatsAppMessage(Base):
     approved_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     approved_at = Column(DateTime, nullable=True)
     
-    meta_message_id = Column(String(255), nullable=True)
-    delivery_status = Column(String(50), default="draft")  # draft, queued, sent, delivered, read, failed, simulated
+    meta_message_id = Column(String(255), nullable=True, index=True)
+    idempotency_key = Column(String(128), unique=True, nullable=True, index=True)
+    delivery_status = Column(String(50), default="draft")  # draft, queued, sending, sent, delivered, read, failed, simulated
     error_message = Column(Text, nullable=True)
     sent_at = Column(DateTime, nullable=True)
     

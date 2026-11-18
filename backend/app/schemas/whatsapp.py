@@ -5,10 +5,13 @@ from pydantic import BaseModel, ConfigDict
 
 class WhatsAppTemplateResponse(BaseModel):
     id: int
+    meta_template_id: Optional[str] = None
     meta_template_name: str
     category: str
     language: str
     status: str
+    synced_from_meta: bool = False
+    last_synced_at: Optional[datetime] = None
     header_text: Optional[str] = None
     body_text: str
     footer_text: Optional[str] = None

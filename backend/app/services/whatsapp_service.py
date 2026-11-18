@@ -202,15 +202,33 @@ def create_whatsapp_message(
 
 
 def approve_whatsapp_message_internal(db: Session, msg: WhatsAppMessage, user_id: int) -> WhatsAppMessage:
-    if not msg.has_valid_consent:
+    from app.models.email import ApprovalRecord
+
+    # Re-verify live consent at approval time
+    has_consent, consent_rec = verify_active_whatsapp_consent(db, msg.company_id, msg.recipient_phone)
+    if not has_consent:
+        msg.has_valid_consent = False
+        db.commit()
         raise ValueError("Unsolicited WhatsApp outreach is forbidden. Documented consent is mandatory before approval.")
-    
+
     current_hash = compute_content_hash([msg.message_text])
+    msg.has_valid_consent = True
+    msg.consent_id = consent_rec.id if consent_rec else msg.consent_id
     msg.content_hash = current_hash
     msg.approved_content_hash = current_hash
     msg.approval_status = "approved"
     msg.approved_by_id = user_id
     msg.approved_at = datetime.now(timezone.utc)
+
+    db.add(ApprovalRecord(
+        entity_type="whatsapp_message",
+        entity_id=msg.id,
+        approver_id=user_id,
+        action="approved",
+        content_version=msg.version or 1,
+        content_hash=current_hash,
+        created_at=datetime.now(timezone.utc),
+    ))
     db.commit()
     db.refresh(msg)
     return msg
@@ -219,12 +237,33 @@ def approve_whatsapp_message_internal(db: Session, msg: WhatsAppMessage, user_id
 def send_approved_whatsapp_message(
     db: Session,
     message_id: int,
-    user_id: int
+    user_id: int,
+    http_client: Optional[httpx.Client] = None,
 ) -> Tuple[bool, str]:
-    """Dispatches message via official Meta WhatsApp Business Cloud API strictly if eligible."""
+    """
+    Dispatches a WhatsApp template message strictly after validating:
+    1. Idempotency (already sent with wamid)
+    2. Explicit Human Approval
+    3. Immutable SHA-256 Content Hash
+    4. LIVE re-verification of documented opt-in consent immediately before dispatch
+    5. Global suppression list check
+    6. Atomic approved -> sending state lock
+    7. Template approval status & numerically ordered parameters (via Meta adapter)
+    """
+    from app.integrations.whatsapp_adapter import (
+        is_meta_wa_configured,
+        send_meta_template_message,
+        validate_and_order_template_parameters,
+        MetaWhatsAppError,
+    )
+
     msg = db.query(WhatsAppMessage).filter(WhatsAppMessage.id == message_id).first()
     if not msg:
         return False, "WhatsApp message record not found"
+
+    # Idempotency guard: prevent duplicate dispatch
+    if msg.approval_status == "sent" and msg.meta_message_id:
+        return False, f"Idempotency Guard: WhatsApp message already dispatched (meta_message_id={msg.meta_message_id})."
 
     # Rule 1: Mandatory Human Approval
     if msg.approval_status != "approved":
@@ -240,75 +279,92 @@ def send_approved_whatsapp_message(
         db.commit()
         return False, "Security Block: Message content changed after approval. Re-approval required."
 
-    # Rule 3: Strict Consent Check
-    if not msg.has_valid_consent:
-        return False, "Blocked: Promotional WhatsApp messages require documented valid permission. Automated send forbidden."
+    # Rule 3: LIVE Consent Re-Check immediately before dispatch (catches post-draft opt-outs)
+    live_consent, _ = verify_active_whatsapp_consent(db, msg.company_id, msg.recipient_phone)
+    if not live_consent:
+        msg.has_valid_consent = False
+        msg.delivery_status = "failed"
+        msg.error_message = "Blocked: Consent revoked or no valid documented WhatsApp opt-in exists."
+        db.commit()
+        return False, "Blocked: Promotional WhatsApp messages require active documented permission. Automated send forbidden."
 
     # Rule 4: Global Suppression Check
+    clean_phone = normalize_phone_number(msg.recipient_phone) or msg.recipient_phone
     suppressed = db.query(SuppressionList).filter(
-        SuppressionList.identifier == msg.recipient_phone
+        (SuppressionList.identifier == msg.recipient_phone) | (SuppressionList.identifier == clean_phone)
     ).first()
     if suppressed:
         msg.delivery_status = "failed"
-        msg.error_message = "Blocked by global suppression list"
+        msg.error_message = f"Blocked by global suppression list: {suppressed.reason}"
         db.commit()
         return False, "Recipient is on the suppression list"
 
-    # Rule 5: Dispatch via Meta Cloud API or Test Provider
-    if settings.META_WA_ACCESS_TOKEN and settings.META_WA_PHONE_NUMBER_ID:
+    # Rule 5: Validate template approval & parameter ordering before claiming lock
+    if msg.template:
+        params_dict = json.loads(msg.parameters_json) if msg.parameters_json else {}
         try:
-            url = f"https://graph.facebook.com/v19.0/{settings.META_WA_PHONE_NUMBER_ID}/messages"
-            headers = {
-                "Authorization": f"Bearer {settings.META_WA_ACCESS_TOKEN}",
-                "Content-Type": "application/json"
-            }
-            payload = {
-                "messaging_product": "whatsapp",
-                "to": msg.recipient_phone,
-                "type": "template",
-                "template": {
-                    "name": msg.template.meta_template_name,
-                    "language": {"code": msg.template.language}
-                }
-            }
-            if msg.parameters_json:
-                params_dict = json.loads(msg.parameters_json)
-                body_params = [{"type": "text", "text": v} for k, v in params_dict.items()]
-                payload["template"]["components"] = [{"type": "body", "parameters": body_params}]
-
-            resp = httpx.post(url, headers=headers, json=payload, timeout=10.0)
-            if resp.status_code in (200, 201):
-                data = resp.json()
-                meta_msg_id = data.get("messages", [{}])[0].get("id", "wamid.success")
-                msg.delivery_status = "sent"
-                msg.sent_at = datetime.now(timezone.utc)
-                msg.meta_message_id = meta_msg_id
-                db.commit()
-
-                record_audit_log(
-                    db=db,
-                    action="send_whatsapp_message",
-                    entity_type="whatsapp_message",
-                    entity_id=str(msg.id),
-                    user_id=user_id,
-                    details={"recipient": msg.recipient_phone, "meta_id": meta_msg_id}
-                )
-                return True, "WhatsApp message dispatched successfully via Meta Cloud API"
-            else:
-                msg.delivery_status = "failed"
-                msg.error_message = f"Meta API Error ({resp.status_code}): {resp.text}"
-                db.commit()
-                return False, msg.error_message
-        except Exception as e:
+            validate_and_order_template_parameters(msg.template, params_dict, require_meta_approved=True)
+        except MetaWhatsAppError as exc:
             msg.delivery_status = "failed"
-            msg.error_message = f"Connection error: {e}"
+            msg.error_message = str(exc)
             db.commit()
-            return False, str(e)
+            return False, str(exc)
+
+    # Rule 6: Atomic dispatch lock (prevents race-condition duplicate sends)
+    idem_key = f"wa-msg-{msg.id}-v{msg.version or 1}-{current_hash[:16]}"
+    claimed = (
+        db.query(WhatsAppMessage)
+        .filter(
+            WhatsAppMessage.id == message_id,
+            WhatsAppMessage.approval_status == "approved",
+            WhatsAppMessage.approved_content_hash == current_hash,
+        )
+        .update({"approval_status": "sending", "delivery_status": "sending", "idempotency_key": idem_key}, synchronize_session="fetch")
+    )
+    db.commit()
+    if claimed == 0:
+        return False, "Race Condition Block: Message is already sending, already sent, or modified concurrently."
+    db.refresh(msg)
+
+    # Rule 7: Dispatch via Official Meta Cloud API or Explicit Simulation Mode
+    if is_meta_wa_configured():
+        try:
+            meta_msg_id = send_meta_template_message(db=db, msg=msg, http_client=http_client)
+            now_utc = datetime.now(timezone.utc)
+            msg.approval_status = "sent"
+            msg.delivery_status = "sent"
+            msg.sent_at = now_utc
+            msg.meta_message_id = meta_msg_id
+            msg.error_message = None
+            db.commit()
+
+            record_audit_log(
+                db=db,
+                action="send_whatsapp_message",
+                entity_type="whatsapp_message",
+                entity_id=str(msg.id),
+                user_id=user_id,
+                details={"recipient": msg.recipient_phone, "meta_id": meta_msg_id},
+            )
+            return True, f"WhatsApp message dispatched via Meta Cloud API (Message ID: {meta_msg_id})"
+        except MetaWhatsAppError as exc:
+            msg.approval_status = "failed"
+            msg.delivery_status = "failed"
+            msg.error_message = str(exc)
+            db.commit()
+            return False, str(exc)
+        except Exception as exc:
+            msg.approval_status = "failed"
+            msg.delivery_status = "failed"
+            msg.error_message = f"Connection error: {exc}"
+            db.commit()
+            return False, str(exc)
     else:
-        # Mock / Test Mode: NEVER report simulated messages as real "sent" or "delivered"
+        # Mock / Simulation Mode: NEVER report simulated messages as real 'sent'/'delivered' and NEVER fabricate wamid
         msg.approval_status = "simulated"
         msg.delivery_status = "simulated"
-        msg.meta_message_id = f"sim-wa-{int(datetime.now().timestamp())}"
+        msg.meta_message_id = None
+        msg.error_message = None
         db.commit()
         record_audit_log(
             db=db,
@@ -316,9 +372,9 @@ def send_approved_whatsapp_message(
             entity_type="whatsapp_message",
             entity_id=str(msg.id),
             user_id=user_id,
-            details={"recipient": msg.recipient_phone, "mode": "simulated"}
+            details={"recipient": msg.recipient_phone, "mode": "simulated"},
         )
-        return True, "Simulated WhatsApp dispatch (test environment; no live Meta Cloud API message sent)"
+        return True, "SIMULATION MODE: WhatsApp dispatch simulated locally (no live Meta Cloud API message sent)"
 
 
 def process_incoming_meta_webhook(
@@ -327,13 +383,21 @@ def process_incoming_meta_webhook(
     payload: Dict[str, Any],
     signature_header: Optional[str] = None
 ) -> Tuple[bool, str]:
-    """Processes Meta WhatsApp webhook with HMAC-SHA256 signature verification and idempotent deduplication."""
+    """
+    Processes Meta WhatsApp webhook with:
+    1. HMAC-SHA256 signature verification using META_APP_SECRET
+    2. Idempotent webhook event persistence & deduplication
+    3. Delivery/read/failed status updates with error reason extraction
+    4. Inbound reply classification, STOP opt-out enforcement, and per-message deduplication
+    """
+    from app.services.reply_classifier_service import ingest_inbound_reply
+
     # 1. HMAC Signature Verification
     if settings.META_APP_SECRET:
         if not verify_meta_hmac_signature(raw_body, signature_header, settings.META_APP_SECRET):
             logger.warning("Rejected forged or invalid Meta webhook signature.")
             return False, "Invalid signature"
-    elif settings.ENVIRONMENT == "production":
+    elif settings.ENVIRONMENT.lower() == "production":
         logger.error("META_APP_SECRET is required in production for webhook verification.")
         return False, "Webhook secret not configured"
 
@@ -360,40 +424,47 @@ def process_incoming_meta_webhook(
             changes = e.get("changes", [])
             for c in changes:
                 value = c.get("value", {})
-                
+
                 # Status updates (sent, delivered, read, failed)
                 statuses = value.get("statuses", [])
                 for s in statuses:
                     meta_id = s.get("id")
-                    status_name = s.get("status")  # sent, delivered, read, failed
+                    status_name = (s.get("status") or "").lower()
+                    if not meta_id or not status_name:
+                        continue
                     wa_msg = db.query(WhatsAppMessage).filter(WhatsAppMessage.meta_message_id == meta_id).first()
-                    if wa_msg:
+                    if wa_msg and wa_msg.delivery_status != "simulated":
                         wa_msg.delivery_status = status_name
+                        if status_name == "failed":
+                            errs = s.get("errors") or []
+                            if errs:
+                                first_err = errs[0]
+                                wa_msg.error_message = f"Meta delivery error {first_err.get('code', '')}: {first_err.get('title', '')} {first_err.get('message', '')}".strip()
                         db.commit()
 
                 # Inbound replies
                 messages = value.get("messages", [])
+                display_num = (value.get("metadata") or {}).get("display_phone_number", "ActTrident WA")
                 for m in messages:
-                    sender = m.get("from")
-                    text_body = m.get("text", {}).get("body", "")
-                    cleaned_sender = normalize_phone_number(sender) or sender
-                    
-                    # Match company by phone
-                    company = db.query(Company).filter(
-                        (Company.public_whatsapp == cleaned_sender) | (Company.public_phone == cleaned_sender)
-                    ).first()
+                    wamid = m.get("id")
+                    if wamid and db.query(Reply).filter(Reply.provider_message_id == wamid).first():
+                        continue  # Duplicate inbound message
 
-                    reply = Reply(
-                        company_id=company.id if company else None,
+                    sender = m.get("from", "")
+                    text_body = (m.get("text") or {}).get("body", "") or (m.get("button") or {}).get("text", "")
+                    cleaned_sender = normalize_phone_number(sender) or sender
+
+                    reply = ingest_inbound_reply(
+                        db=db,
                         channel="whatsapp",
                         sender_identifier=cleaned_sender,
-                        recipient_identifier=value.get("metadata", {}).get("display_phone_number", "ActTrident WA"),
+                        recipient_identifier=display_num,
+                        subject="WhatsApp Inbound Message",
                         message_body=text_body,
-                        classification="unclassified",
-                        is_handled=False
                     )
-                    db.add(reply)
-                    db.commit()
+                    if wamid:
+                        reply.provider_message_id = wamid
+                        db.commit()
 
         event_record.status = "processed"
         event_record.processed_at = datetime.now(timezone.utc)
