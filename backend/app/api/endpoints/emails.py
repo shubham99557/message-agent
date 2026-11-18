@@ -1,10 +1,11 @@
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, get_current_user, require_role
 from app.models.user import User
-from app.models.email import EmailDraft
+from app.models.email import EmailDraft, EmailSendAttempt
 from app.schemas.email import (
     EmailGenerateRequest,
     EmailDraftResponse,
@@ -13,11 +14,17 @@ from app.schemas.email import (
 )
 from app.services.email_generator_service import generate_email_draft
 from app.services.approval_service import enrich_draft_response, edit_email_draft
-from app.services.email_sender_service import send_approved_email
+from app.services.email_sender_service import send_approved_email, record_provider_email_event
 from app.services.company_service import get_company
 from app.core.audit import record_audit_log
 
 router = APIRouter()
+
+
+class ProviderEmailEventPayload(BaseModel):
+    provider_message_id: str
+    event_type: str  # delivered, bounced, complaint, opened, clicked
+    details: Optional[str] = None
 
 
 @router.post("/generate", response_model=EmailDraftResponse, status_code=status.HTTP_201_CREATED)
@@ -99,3 +106,62 @@ def send_email_endpoint(
     if result.status == "failed":
         raise HTTPException(status_code=400, detail=result.message)
     return result
+
+
+@router.get("/drafts/{draft_id}/attempts")
+def get_draft_send_attempts(
+    draft_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Returns separate send-attempt audit records for a draft."""
+    attempts = (
+        db.query(EmailSendAttempt)
+        .filter(EmailSendAttempt.draft_id == draft_id)
+        .order_by(EmailSendAttempt.attempt_number.asc())
+        .all()
+    )
+    return [
+        {
+            "id": a.id,
+            "draft_id": a.draft_id,
+            "attempt_number": a.attempt_number,
+            "idempotency_key": a.idempotency_key,
+            "provider": a.provider,
+            "outcome": a.outcome,
+            "provider_message_id": a.provider_message_id,
+            "provider_thread_id": a.provider_thread_id,
+            "error_code": a.error_code,
+            "error_message": a.error_message,
+            "created_at": a.created_at,
+        }
+        for a in attempts
+    ]
+
+
+@router.post("/events/provider")
+def ingest_provider_email_event(
+    payload: ProviderEmailEventPayload,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["admin", "manager"]))
+):
+    """Records a provider-confirmed delivery, bounce, or complaint event."""
+    try:
+        draft = record_provider_email_event(
+            db=db,
+            provider_message_id=payload.provider_message_id,
+            event_type=payload.event_type,
+            details=payload.details,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    if not draft:
+        raise HTTPException(status_code=404, detail="No email draft matches that provider_message_id.")
+
+    return {
+        "draft_id": draft.id,
+        "approval_status": draft.approval_status,
+        "provider_message_id": draft.provider_message_id,
+        "event_type": payload.event_type,
+    }

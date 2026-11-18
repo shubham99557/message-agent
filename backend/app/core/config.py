@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     SMTP_USE_TLS: bool = True
     GMAIL_CLIENT_ID: str = os.getenv("GMAIL_CLIENT_ID", "")
     GMAIL_CLIENT_SECRET: str = os.getenv("GMAIL_CLIENT_SECRET", "")
+    GMAIL_REDIRECT_URI: str = os.getenv("GMAIL_REDIRECT_URI", "http://localhost:8000/api/v1/integrations/gmail/oauth/callback")
     GMAIL_REFRESH_TOKEN: str = os.getenv("GMAIL_REFRESH_TOKEN", "")
     GMAIL_ACCESS_TOKEN: str = os.getenv("GMAIL_ACCESS_TOKEN", "")
 

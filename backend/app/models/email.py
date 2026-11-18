@@ -4,6 +4,23 @@ from sqlalchemy.orm import relationship
 from app.core.database import Base
 
 
+EMAIL_STATES = [
+    "draft",
+    "awaiting_approval",
+    "approved",
+    "queued",
+    "sending",
+    "sent",
+    "delivered",
+    "bounced",
+    "failed",
+    "rejected",
+    "skipped",
+    "cancelled",
+    "simulated"
+]
+
+
 class EmailDraft(Base):
     __tablename__ = "email_drafts"
 
@@ -33,7 +50,9 @@ class EmailDraft(Base):
     # Sending Details
     sent_at = Column(DateTime, nullable=True)
     provider = Column(String(50), default="smtp")  # smtp, gmail, mock
-    provider_message_id = Column(String(255), nullable=True)
+    provider_message_id = Column(String(255), nullable=True, index=True)
+    provider_thread_id = Column(String(255), nullable=True, index=True)
+    idempotency_key = Column(String(128), unique=True, nullable=True, index=True)
     error_message = Column(Text, nullable=True)
     
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
@@ -44,6 +63,7 @@ class EmailDraft(Base):
     contact = relationship("CompanyContact")
     approved_by = relationship("User")
     events = relationship("EmailEvent", back_populates="email_draft", cascade="all, delete-orphan")
+    send_attempts = relationship("EmailSendAttempt", back_populates="email_draft", cascade="all, delete-orphan")
 
 
 class EmailEvent(Base):
@@ -73,3 +93,24 @@ class ApprovalRecord(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
 
     approver = relationship("User")
+
+
+class EmailSendAttempt(Base):
+    """Records every discrete outbound send attempt separately from delivery outcomes."""
+    __tablename__ = "email_send_attempts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    draft_id = Column(Integer, ForeignKey("email_drafts.id", ondelete="CASCADE"), nullable=False, index=True)
+    attempt_number = Column(Integer, default=1, nullable=False)
+    idempotency_key = Column(String(128), nullable=False, index=True)
+    provider = Column(String(50), nullable=False)  # gmail, smtp, mock
+    outcome = Column(String(50), nullable=False, index=True)  # sent, smtp_accepted, simulated, failed, reauth_required, rate_limited
+    provider_message_id = Column(String(255), nullable=True)
+    provider_thread_id = Column(String(255), nullable=True)
+    error_code = Column(String(100), nullable=True)
+    error_message = Column(Text, nullable=True)
+    attempted_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    email_draft = relationship("EmailDraft", back_populates="send_attempts")
+    attempted_by = relationship("User")

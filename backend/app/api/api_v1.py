@@ -2,7 +2,7 @@ from fastapi import APIRouter
 from app.api.endpoints import (
     auth, companies, crm, discovery, qualification,
     research, emails, approvals, campaigns, whatsapp, replies,
-    analytics, settings, jobs
+    analytics, settings, jobs, integrations
 )
 
 api_router = APIRouter()
@@ -21,3 +21,4 @@ api_router.include_router(replies.router, prefix="/replies", tags=["Inbox & AI R
 api_router.include_router(analytics.router, prefix="/analytics", tags=["Analytics & Reporting"])
 api_router.include_router(settings.router, prefix="/settings", tags=["Settings & Audit Logs"])
 api_router.include_router(jobs.router, prefix="/jobs", tags=["Background Jobs & Queue Engine"])
+api_router.include_router(integrations.router, prefix="/integrations", tags=["Channel OAuth & Provider Integrations"])
