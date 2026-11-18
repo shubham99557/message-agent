@@ -26,6 +26,8 @@ export const ResearchView: React.FC<ResearchViewProps> = ({ selectedCompany, onN
   const [qualification, setQualification] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [qualifying, setQualifying] = useState(false);
+  const [verifying, setVerifying] = useState(false);
+  const [verifyMessage, setVerifyMessage] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadCompaniesList() {
@@ -83,6 +85,28 @@ export const ResearchView: React.FC<ResearchViewProps> = ({ selectedCompany, onN
       alert(`Qualification error: ${err.message}`);
     } finally {
       setQualifying(false);
+    }
+  };
+
+  const handleMarkVerified = async () => {
+    if (!activeCompany) return;
+    setVerifying(true);
+    setVerifyMessage(null);
+    try {
+      const updated = await api.verifyCompany(activeCompany.id, {
+        verification_status: 'verified',
+        verification_method: 'manual_analyst_review',
+        source_url: activeCompany.website || undefined,
+        notes: 'Verified by analyst in Research View',
+      });
+      setActiveCompany(updated);
+      const rep = await api.generateResearchReport(activeCompany.id);
+      setReport(rep);
+      setVerifyMessage('Record marked as verified and research report refreshed.');
+    } catch (err: any) {
+      alert(`Verification failed: ${err.message}`);
+    } finally {
+      setVerifying(false);
     }
   };
 
@@ -199,29 +223,60 @@ export const ResearchView: React.FC<ResearchViewProps> = ({ selectedCompany, onN
 
             {/* Quick Profile Snapshot */}
             <div className="bg-cobalt-900/80 border border-cobalt-800 rounded-lg p-5 text-xs space-y-3">
-              <h3 className="text-xs font-semibold text-slate-200 uppercase tracking-wider">Company Snapshot</h3>
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-semibold text-slate-200 uppercase tracking-wider">Company Snapshot</h3>
+                <span
+                  className={`px-2 py-0.5 rounded text-[10px] font-mono border ${
+                    activeCompany.is_demo || activeCompany.verification_status === 'demo_fixture'
+                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                      : activeCompany.verification_status === 'verified'
+                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                      : 'bg-cobalt-950 text-slate-300 border-cobalt-700'
+                  }`}
+                >
+                  {activeCompany.is_demo || activeCompany.verification_status === 'demo_fixture'
+                    ? 'DEMO FIXTURE'
+                    : (activeCompany.verification_status || 'unverified')}
+                </span>
+              </div>
               <div className="space-y-2 text-slate-300">
                 <div className="flex justify-between">
                   <span className="text-slate-400">Location:</span>
-                  <span>{activeCompany.city}, {activeCompany.state}</span>
+                  <span>{activeCompany.city}{activeCompany.state ? `, ${activeCompany.state}` : ''}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-400">Industry:</span>
-                  <span>{activeCompany.industry}</span>
+                  <span>{activeCompany.industry || 'Unspecified'}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-400">Verified Laptops:</span>
-                  <span className="font-mono text-emerald-400">{activeCompany.laptop_count_verified ?? 'Under Audit'}</span>
+                  <span className="font-mono text-emerald-400">{activeCompany.laptop_count_verified ?? 'Unknown'}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-400">Decision Maker:</span>
-                  <span>{activeCompany.decision_maker_name || 'IT Leadership'}</span>
+                  <span>{activeCompany.decision_maker_name || 'Unverified'}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-400">Official Channel:</span>
-                  <span className="font-mono text-cobalt-300">{activeCompany.public_email || activeCompany.public_phone}</span>
+                  <span className="font-mono text-cobalt-300">{activeCompany.public_email || activeCompany.public_phone || 'None verified'}</span>
                 </div>
               </div>
+              {!(activeCompany.is_demo || activeCompany.verification_status === 'demo_fixture') &&
+                activeCompany.verification_status !== 'verified' && (
+                  <button
+                    onClick={handleMarkVerified}
+                    disabled={verifying}
+                    className="w-full py-1.5 bg-emerald-600/90 hover:bg-emerald-500 disabled:opacity-50 text-white rounded text-xs font-medium transition-colors flex items-center justify-center space-x-1.5"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>{verifying ? 'Verifying...' : 'Mark Record Verified'}</span>
+                  </button>
+                )}
+              {verifyMessage && (
+                <div className="text-[11px] text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 rounded p-2">
+                  {verifyMessage}
+                </div>
+              )}
             </div>
           </div>
 
@@ -290,9 +345,28 @@ export const ResearchView: React.FC<ResearchViewProps> = ({ selectedCompany, onN
                     </div>
                   </div>
 
+                  {report.missing_information && (
+                    <div className="bg-amber-500/10 border border-amber-500/30 rounded p-3">
+                      <div className="flex items-center justify-between mb-1">
+                        <h4 className="font-semibold text-amber-200 flex items-center space-x-1.5">
+                          <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+                          <span>Missing / Unverified Information</span>
+                        </h4>
+                        {typeof report.confidence_level === 'number' && (
+                          <span className="text-[11px] font-mono text-amber-300">
+                            Evidence Confidence: {Math.round(report.confidence_level * 100)}%
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-amber-200/90 leading-relaxed">
+                        {report.missing_information}
+                      </p>
+                    </div>
+                  )}
+
                   <div>
-                    <h4 className="font-semibold text-slate-400 mb-1">Verified Information Sources</h4>
-                    <p className="text-[11px] font-mono text-slate-400 bg-cobalt-950/60 p-2.5 rounded border border-cobalt-800/80 truncate">
+                    <h4 className="font-semibold text-slate-400 mb-1">Recorded Information Sources</h4>
+                    <p className="text-[11px] font-mono text-slate-400 bg-cobalt-950/60 p-2.5 rounded border border-cobalt-800/80 break-all">
                       {report.sources_summary}
                     </p>
                   </div>

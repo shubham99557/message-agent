@@ -172,16 +172,33 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onSelectCompany }) => {
                 {companies.map((c) => (
                   <tr key={c.id} className="hover:bg-cobalt-850/50 transition-colors">
                     <td className="py-3 px-3">
-                      <div className="font-semibold text-slate-100">{c.name}</div>
+                      <div className="flex items-center space-x-1.5 flex-wrap">
+                        <span className="font-semibold text-slate-100">{c.name}</span>
+                        {(c.is_demo || c.verification_status === 'demo_fixture') ? (
+                          <span className="px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[9px] font-mono uppercase">
+                            DEMO FIXTURE
+                          </span>
+                        ) : (
+                          <span
+                            className={`px-1.5 py-0.5 rounded text-[9px] font-mono border ${
+                              c.verification_status === 'verified'
+                                ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                                : 'bg-cobalt-950 text-slate-400 border-cobalt-800'
+                            }`}
+                          >
+                            {c.verification_status || 'unverified'}
+                          </span>
+                        )}
+                      </div>
                       {c.public_email && <div className="text-[11px] text-slate-400 font-mono">{c.public_email}</div>}
                     </td>
                     <td className="py-3 px-3">
                       <div>{c.city}, {c.state || c.country}</div>
-                      <div className="text-[11px] text-slate-400">{c.industry || 'Tech'}</div>
+                      <div className="text-[11px] text-slate-400">{c.industry || 'Unspecified'}</div>
                     </td>
                     <td className="py-3 px-3">
-                      <div className="font-medium text-slate-200">{c.decision_maker_name || 'IT Director'}</div>
-                      <div className="text-[11px] text-slate-400">{c.decision_maker_role || 'Leadership'}</div>
+                      <div className="font-medium text-slate-200">{c.decision_maker_name || 'Unverified'}</div>
+                      <div className="text-[11px] text-slate-400">{c.decision_maker_role || 'Role not verified'}</div>
                     </td>
                     <td className="py-3 px-3">
                       {c.has_verified_5_plus_laptops ? (

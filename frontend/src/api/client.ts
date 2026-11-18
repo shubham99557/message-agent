@@ -165,6 +165,18 @@ export const api = {
   createCompany: (company: any) => request<any>('/companies', { method: 'POST', body: JSON.stringify(company) }),
   getCompany: (id: number) => request<any>(`/companies/${id}`),
   updateCompany: (id: number, updates: any) => request<any>(`/companies/${id}`, { method: 'PUT', body: JSON.stringify(updates) }),
+  verifyCompany: (
+    id: number,
+    data: {
+      verification_status: string;
+      verification_method: string;
+      laptop_count_verified?: number;
+      laptop_count_evidence?: string;
+      employee_size_evidence?: string;
+      source_url?: string;
+      notes?: string;
+    }
+  ) => request<any>(`/companies/${id}/verify`, { method: 'POST', body: JSON.stringify(data) }),
   uploadCSV: async (file: File) => {
     const formData = new FormData();
     formData.append('file', file);
@@ -188,7 +200,11 @@ export const api = {
   },
 
   // Discovery
-  searchDiscovery: (params: { city: string; industry?: string; query?: string; min_devices?: number }) =>
+  getDiscoverySources: async () => {
+    const res = await request<{ sources?: any[] } | any[]>('/discovery/sources');
+    return Array.isArray(res) ? res : (res.sources || []);
+  },
+  searchDiscovery: (params: { city: string; industry?: string; query?: string; min_devices?: number; include_demo?: boolean }) =>
     request<any[]>('/discovery/search', { method: 'POST', body: JSON.stringify(params) }),
   importDiscoveredLead: (lead: any) => request<any>('/discovery/import', { method: 'POST', body: JSON.stringify(lead) }),
   batchImportDiscoveredLeads: (companies: any[]) =>

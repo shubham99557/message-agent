@@ -39,6 +39,9 @@ export interface Company {
   qualification_status: string;
   qualification_reason?: string;
   qualification_factors?: string;
+  is_demo?: boolean;
+  verification_status?: string;
+  verification_method?: string;
   date_last_verified: string;
   created_at: string;
   sources: ContactSource[];
@@ -49,6 +52,8 @@ export interface ContactSource {
   field_name: string;
   source_url: string;
   source_type: string;
+  verification_status?: string;
+  verification_method?: string;
   verified_at: string;
   notes?: string;
 }

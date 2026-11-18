@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { api } from '../api/client';
 import {
   Search,
@@ -10,7 +10,8 @@ import {
   Plus,
   Filter,
   FileSpreadsheet,
-  AlertCircle
+  AlertCircle,
+  AlertTriangle
 } from 'lucide-react';
 
 interface DiscoveryViewProps {
@@ -22,6 +23,8 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onCompanyImported 
   const [industry, setIndustry] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [minDevices, setMinDevices] = useState(5);
+  const [includeDemo, setIncludeDemo] = useState(false);
+  const [sources, setSources] = useState<any[]>([]);
   const [results, setResults] = useState<any[]>([]);
   const [searching, setSearching] = useState(false);
   const [importingId, setImportingId] = useState<string | null>(null);
@@ -33,6 +36,10 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onCompanyImported 
   const [crawling, setCrawling] = useState(false);
   const [crawlResult, setCrawlResult] = useState<any>(null);
 
+  useEffect(() => {
+    api.getDiscoverySources().then(setSources).catch(() => {});
+  }, []);
+
   const handleSearch = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setSearching(true);
@@ -42,7 +49,8 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onCompanyImported 
         city,
         industry: industry === 'All' ? undefined : industry,
         query: searchQuery || undefined,
-        min_devices: minDevices
+        min_devices: minDevices,
+        include_demo: includeDemo
       });
       setResults(data);
     } catch (err: any) {
@@ -129,9 +137,26 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onCompanyImported 
         <div>
           <h2 className="text-base font-bold text-slate-100 tracking-tight">Public Company Discovery & Lead Research</h2>
           <p className="text-xs text-slate-400 mt-0.5">
-            Discover verified SMBs in target geographies. Only public channels and legitimate directories are utilized.
+            Discover real SMBs from permitted public sources, CSV imports, and website scans. Demo fixtures are strictly separated and labeled.
           </p>
         </div>
+        {sources.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            {sources.map((src) => (
+              <span
+                key={src.name}
+                title={src.description}
+                className={`px-2 py-0.5 rounded text-[10px] font-mono border ${
+                  src.configured
+                    ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                    : 'bg-cobalt-950 text-slate-400 border-cobalt-800'
+                }`}
+              >
+                {src.label}: {src.configured ? 'Active' : 'Unconfigured'}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* CSV Upload Section */}
@@ -278,7 +303,16 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onCompanyImported 
           />
         </div>
 
-        <div className="flex items-end">
+        <div className="flex flex-col justify-end space-y-1.5">
+          <label className="flex items-center space-x-1.5 text-[11px] text-amber-300/90 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={includeDemo}
+              onChange={(e) => setIncludeDemo(e.target.checked)}
+              className="rounded border-cobalt-700 bg-cobalt-950 text-amber-500 focus:ring-0"
+            />
+            <span>Include Demo Fixtures (dev only)</span>
+          </label>
           <button
             type="submit"
             disabled={searching}
@@ -345,10 +379,19 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onCompanyImported 
                 </tr>
               </thead>
               <tbody className="divide-y divide-cobalt-800/40 text-slate-200">
-                {results.map((comp, idx) => (
+                {results.map((comp, idx) => {
+                  const isDemoItem = comp.is_demo || comp.verification_status === 'demo_fixture';
+                  return (
                   <tr key={idx} className="hover:bg-cobalt-850/50 transition-colors">
                     <td className="py-3 px-3">
-                      <div className="font-semibold text-slate-100">{comp.name}</div>
+                      <div className="flex items-center space-x-1.5">
+                        <span className="font-semibold text-slate-100">{comp.name}</span>
+                        {isDemoItem && (
+                          <span className="px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[9px] font-mono uppercase">
+                            DEMO FIXTURE
+                          </span>
+                        )}
+                      </div>
                       {comp.website && (
                         <a
                           href={comp.website}
@@ -362,26 +405,39 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onCompanyImported 
                       )}
                     </td>
                     <td className="py-3 px-3">
-                      <div className="font-medium">{comp.city}, {comp.state}</div>
-                      <div className="text-[11px] text-slate-400">{comp.industry}</div>
+                      <div className="font-medium">{comp.city}{comp.state ? `, ${comp.state}` : ''}</div>
+                      <div className="text-[11px] text-slate-400">{comp.industry || 'Unspecified'}</div>
                     </td>
                     <td className="py-3 px-3 space-y-0.5 font-mono text-[11px]">
                       {comp.public_email && <div className="text-slate-300">✉ {comp.public_email}</div>}
                       {comp.public_phone && <div className="text-slate-400">☎ {comp.public_phone}</div>}
+                      {!comp.public_email && !comp.public_phone && <div className="text-slate-500">Not publicly listed</div>}
                     </td>
                     <td className="py-3 px-3">
-                      <div className="flex items-center space-x-1.5 text-emerald-400 font-mono font-medium">
-                        <Laptop className="w-3.5 h-3.5" />
-                        <span>{comp.laptop_count_verified} Laptops</span>
-                      </div>
+                      {comp.laptop_count_verified ? (
+                        <div className={`flex items-center space-x-1.5 font-mono font-medium ${isDemoItem ? 'text-amber-300' : 'text-emerald-400'}`}>
+                          <Laptop className="w-3.5 h-3.5" />
+                          <span>{comp.laptop_count_verified} Laptops</span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center space-x-1.5 text-slate-400 font-mono">
+                          <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+                          <span>Unknown</span>
+                        </div>
+                      )}
                       <div className="text-[10px] text-slate-400 truncate max-w-[200px]" title={comp.laptop_count_evidence}>
-                        {comp.laptop_count_evidence}
+                        {comp.laptop_count_evidence || 'Pending manual verification'}
                       </div>
                     </td>
-                    <td className="py-3 px-3 text-[11px]">
-                      <span className="px-2 py-0.5 rounded bg-cobalt-950 border border-cobalt-800 text-slate-300 font-mono">
-                        {comp.source_type}
-                      </span>
+                    <td className="py-3 px-3 text-[11px] space-y-1">
+                      <div>
+                        <span className="px-2 py-0.5 rounded bg-cobalt-950 border border-cobalt-800 text-slate-300 font-mono">
+                          {comp.source_type}
+                        </span>
+                      </div>
+                      <div className="text-[10px] font-mono text-slate-400">
+                        status: {comp.verification_status || (isDemoItem ? 'demo_fixture' : 'unverified')}
+                      </div>
                     </td>
                     <td className="py-3 px-3 text-right">
                       <button
@@ -394,7 +450,8 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onCompanyImported 
                       </button>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
