@@ -175,12 +175,15 @@ def ingest_inbound_reply(
     )
     db.add(reply)
 
-    # 4. Update CRM Pipeline based on reply
+    # 4. Global Opt-Out Enforcement (MUST run even if no Lead record exists yet!)
+    if classification in ["unsubscribe", "not_interested"]:
+        handle_opt_out(db, identifier=sender_identifier, channel=channel, reason=classification)
+
+    # 5. Update CRM Pipeline based on reply
     if company.lead:
         company.lead.last_contact_date = datetime.now(timezone.utc)
         if classification in ["unsubscribe", "not_interested"]:
-            # Opt-out immediately halts promotional follow-ups!
-            handle_opt_out(db, identifier=sender_identifier, channel=channel, reason=classification)
+            company.lead.pipeline_status = "do_not_contact"
         elif classification in ["interested", "requests_demonstration", "requests_pricing"]:
             company.lead.pipeline_status = "interested"
         elif classification == "out_of_office":

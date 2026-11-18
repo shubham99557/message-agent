@@ -126,10 +126,14 @@ SUSPICIOUS_PROMPT_PATTERNS = [
 
 
 def sanitize_untrusted_text(content: str, max_chars: int = 4000) -> str:
-    """Sanitizes text retrieved from untrusted external websites to neutralize prompt injections."""
+    """Sanitizes text retrieved from untrusted external websites to neutralize XSS and prompt injections."""
     if not content:
         return ""
     text = content[:max_chars]
+    # Strip executable HTML/script/style/iframe blocks and javascript: URIs
+    text = re.sub(r"(?is)<(script|style|iframe|object|embed)[^>]*>.*?</\1>", " ", text)
+    text = re.sub(r"(?is)<(script|style|iframe|object|embed)[^>]*>", " ", text)
+    text = re.sub(r"(?i)javascript\s*:", "[FILTERED_URI]", text)
     for pattern in SUSPICIOUS_PROMPT_PATTERNS:
         text = re.sub(pattern, "[FILTERED_INSTRUCTION]", text, flags=re.IGNORECASE)
-    return text
+    return text.strip()
