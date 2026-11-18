@@ -266,6 +266,14 @@ export const api = {
     request<any>(`/campaigns/${campaignId}/batch-draft`, { method: 'POST', body: JSON.stringify({ tone }) }),
   sendApprovedCampaignEmails: (campaignId: number) =>
     request<any>(`/campaigns/${campaignId}/dispatch-approved`, { method: 'POST' }),
+  enqueueApprovedCampaignEmails: (campaignId: number) =>
+    request<any>(`/campaigns/${campaignId}/enqueue-approved`, { method: 'POST' }),
+  pauseCampaign: (campaignId: number) =>
+    request<any>(`/campaigns/${campaignId}/pause`, { method: 'POST' }),
+  resumeCampaign: (campaignId: number) =>
+    request<any>(`/campaigns/${campaignId}/resume`, { method: 'POST' }),
+  stopCampaign: (campaignId: number) =>
+    request<any>(`/campaigns/${campaignId}/stop`, { method: 'POST' }),
 
   // CRM Pipeline
   getLeads: (status?: string, city?: string) => {
@@ -324,6 +332,9 @@ export const api = {
   saveIntegration: (config: any) => request<any>('/settings/integrations', { method: 'POST', body: JSON.stringify(config) }),
   getAuditLogs: () => request<any[]>('/settings/audit-logs'),
   getSuppressionList: () => request<any[]>('/settings/suppression-list'),
+  getKillSwitch: () => request<{ active: boolean; reason?: string; updated_at?: string }>('/settings/kill-switch'),
+  toggleKillSwitch: (active: boolean, reason?: string) =>
+    request<any>('/settings/kill-switch', { method: 'POST', body: JSON.stringify({ active, reason }) }),
 
   // Gmail OAuth 2.0, LinkedIn OAuth 2.0 & Unified Channel Connections
   getAllChannelStatuses: () => request<{ channels: Record<string, any> }>('/integrations/channels/status'),
@@ -373,4 +384,9 @@ export const api = {
   cancelTask: (taskId: string) => request<any>(`/jobs/cancel/${taskId}`, { method: 'POST' }),
   getDeadLetterQueue: () => request<any[]>('/jobs/dead-letter'),
   retryDeadLetterTask: (dlqId: number) => request<any>(`/jobs/dead-letter/${dlqId}/retry`, { method: 'POST' }),
+  getOutbox: (statusFilter?: string) => {
+    const query = statusFilter ? `?status=${encodeURIComponent(statusFilter)}` : '';
+    return request<any[]>(`/jobs/outbox${query}`);
+  },
+  processOutbox: (limit: number = 20) => request<any>(`/jobs/outbox/process?limit=${limit}`, { method: 'POST' }),
 };

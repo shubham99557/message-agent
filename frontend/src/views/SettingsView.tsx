@@ -4,7 +4,9 @@ import {
   FileText,
   Ban,
   UserCheck,
-  Shield
+  Shield,
+  OctagonAlert,
+  CheckCircle2
 } from 'lucide-react';
 
 export const SettingsView: React.FC = () => {
@@ -12,20 +14,25 @@ export const SettingsView: React.FC = () => {
   const [suppressed, setSuppressed] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
   const [currentUser, setCurrentUser] = useState<any>(null);
+  const [killSwitch, setKillSwitch] = useState<{ active: boolean; reason?: string; updated_at?: string } | null>(null);
+  const [ksReason, setKsReason] = useState('');
+  const [togglingKs, setTogglingKs] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const loadData = async () => {
     try {
-      const [me, logs, supp, userList] = await Promise.all([
+      const [me, logs, supp, userList, ks] = await Promise.all([
         api.getMe().catch(() => null),
         api.getAuditLogs().catch(() => []),
         api.getSuppressionList().catch(() => []),
-        api.getUsers().catch(() => [])
+        api.getUsers().catch(() => []),
+        api.getKillSwitch().catch(() => ({ active: false }))
       ]);
       setCurrentUser(me);
       setAuditLogs(logs);
       setSuppressed(supp);
       setUsers(userList);
+      setKillSwitch(ks);
     } catch (err) {
       console.error(err);
     } finally {
@@ -36,6 +43,25 @@ export const SettingsView: React.FC = () => {
   useEffect(() => {
     loadData();
   }, []);
+
+  const handleToggleKillSwitch = async () => {
+    if (!killSwitch) return;
+    const nextState = !killSwitch.active;
+    if (nextState && !confirm('ACTIVATE EMERGENCY KILL SWITCH? This will immediately halt ALL outbound sending across Email, WhatsApp, LinkedIn, and background workers.')) {
+      return;
+    }
+    setTogglingKs(true);
+    try {
+      const updated = await api.toggleKillSwitch(nextState, ksReason || undefined);
+      setKillSwitch(updated);
+      setKsReason('');
+      await loadData();
+    } catch (err: any) {
+      alert(`Kill switch error: ${err.message}`);
+    } finally {
+      setTogglingKs(false);
+    }
+  };
 
   const handleToggleUserStatus = async (userId: number, currentActive: boolean) => {
     try {
@@ -61,8 +87,77 @@ export const SettingsView: React.FC = () => {
       <div>
         <h2 className="text-base font-bold text-slate-100 tracking-tight">Security Audit Logs, Users & Compliance Settings</h2>
         <p className="text-xs text-slate-400 mt-0.5">
-          Role-based access administration, tamper-evident system activity logging, and global suppression management.
+          Emergency outbound safety controls, role-based access administration, tamper-evident activity logging, and suppression registry.
         </p>
+      </div>
+
+      {/* Global Emergency Kill Switch Card */}
+      <div
+        className={`rounded-lg p-4 border ${
+          killSwitch?.active
+            ? 'bg-rose-950/50 border-rose-500/60'
+            : 'bg-cobalt-900/80 border-cobalt-800'
+        }`}
+      >
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-start space-x-3">
+            <div
+              className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 border ${
+                killSwitch?.active
+                  ? 'bg-rose-500/20 border-rose-500/40 text-rose-300'
+                  : 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+              }`}
+            >
+              {killSwitch?.active ? <OctagonAlert className="w-5 h-5" /> : <CheckCircle2 className="w-5 h-5" />}
+            </div>
+            <div>
+              <div className="flex items-center space-x-2">
+                <h3 className="text-sm font-bold text-slate-100">Global Emergency Outbound Kill Switch</h3>
+                <span
+                  className={`px-2 py-0.5 rounded text-[10px] font-mono uppercase border ${
+                    killSwitch?.active
+                      ? 'bg-rose-500/25 text-rose-200 border-rose-400/50'
+                      : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                  }`}
+                >
+                  {killSwitch?.active ? 'ALL SENDING HALTED' : 'Normal Operation'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-300 mt-0.5">
+                {killSwitch?.active
+                  ? `Outbound sending is globally blocked across Email, WhatsApp, LinkedIn, Outbox, and Follow-ups. Reason: ${killSwitch.reason || 'Operator halt'}`
+                  : 'Immediately halts all outbound sending across Email, WhatsApp, LinkedIn, and background workers if an issue is detected.'}
+              </p>
+            </div>
+          </div>
+
+          {(currentUser?.role === 'admin' || currentUser?.role === 'manager') && (
+            <div className="flex items-center space-x-2 shrink-0">
+              <input
+                type="text"
+                placeholder="Reason (optional)..."
+                value={ksReason}
+                onChange={(e) => setKsReason(e.target.value)}
+                className="bg-cobalt-950 border border-cobalt-700 rounded px-2.5 py-1.5 text-xs text-slate-200 w-44"
+              />
+              <button
+                onClick={handleToggleKillSwitch}
+                disabled={togglingKs}
+                className={`px-3.5 py-1.5 rounded text-xs font-semibold transition-colors ${
+                  killSwitch?.active
+                    ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                    : 'bg-rose-600 hover:bg-rose-500 text-white'
+                }`}
+              >
+                {togglingKs
+                  ? 'Updating...'
+                  : killSwitch?.active
+                  ? 'Resume Sending'
+                  : 'Stop All Outbound Sending'}
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Admin User & Role Management Card */}
