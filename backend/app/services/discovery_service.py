@@ -9,6 +9,11 @@ import httpx
 
 from app.core.config import settings
 from app.core.security import is_safe_external_url, sanitize_untrusted_text
+from app.integrations.discovery_adapters import (
+    is_demo_domain,
+    TavilyDiscoveryAdapter,
+    SerpApiDiscoveryAdapter,
+)
 from app.schemas.research import DiscoveredCompanyItem, DiscoveryQuery
 
 logger = logging.getLogger(__name__)
@@ -438,6 +443,7 @@ def parse_csv_discovery_file(content_bytes: bytes, filename: str = "upload.csv")
         emp_min = int(emp_min_str) if emp_min_str and emp_min_str.isdigit() else None
         emp_max = int(emp_max_str) if emp_max_str and emp_max_str.isdigit() else None
 
+        demo_row = is_demo_domain(website) or is_demo_domain(email)
         item = DiscoveredCompanyItem(
             name=sanitize_untrusted_text(name),
             website=website,
@@ -453,12 +459,14 @@ def parse_csv_discovery_file(content_bytes: bytes, filename: str = "upload.csv")
             decision_maker_role=dm_role,
             employee_count_min=emp_min,
             employee_count_max=emp_max,
-            employee_size_evidence=f"Imported from {filename} line {idx}",
+            employee_size_evidence=f"Imported from {filename} line {idx}" if (emp_min or emp_max) else "Unknown",
             laptop_count_verified=laptops,
             laptop_count_evidence=laptop_evidence,
             source_url=f"csv://{filename}#line={idx}",
             source_type="csv_import",
-            confidence_level=0.90,
+            is_demo=demo_row,
+            verification_status="demo_fixture" if demo_row else "unverified",
+            confidence_level=0.0 if demo_row else 0.70,
             retrieval_timestamp=datetime.now(timezone.utc)
         )
         items.append(item)
@@ -466,33 +474,55 @@ def parse_csv_discovery_file(content_bytes: bytes, filename: str = "upload.csv")
     return items
 
 
-def search_public_company_directory(query_params: DiscoveryQuery) -> List[DiscoveredCompanyItem]:
+def search_public_company_directory(
+    query_params: DiscoveryQuery,
+    http_client: Optional[httpx.Client] = None,
+) -> List[DiscoveredCompanyItem]:
     """
-    Unified multi-source discovery search combining:
-    1. Verified regional business directory catalog
-    2. Active search providers (if API keys are configured)
+    Unified multi-source discovery orchestrator:
+    1. Queries configured permitted real search adapters (Tavily, SerpAPI) — returns real unverified leads (is_demo=False).
+    2. Includes quarantined .example.com demo fixtures ONLY when query_params.include_demo=True in non-production,
+       always explicitly tagged with is_demo=True and verification_status='demo_fixture'.
     """
     results: List[DiscoveredCompanyItem] = []
-    seen_names = set()
+    seen_keys = set()
 
-    city_filter = (query_params.city or "").lower()
-    industry_filter = (query_params.industry or "").lower()
-    keyword = (query_params.query or "").lower()
+    def _add_unique(item: DiscoveredCompanyItem):
+        key = (item.name.strip().lower(), (item.website or "").strip().lower())
+        if key not in seen_keys:
+            seen_keys.add(key)
+            results.append(item)
 
-    # 1. Catalog Search
-    for item in DISCOVERY_CATALOG:
-        if city_filter and city_filter != "all" and city_filter not in item.city.lower():
-            continue
-        if industry_filter and industry_filter != "all" and industry_filter not in (item.industry or "").lower():
-            continue
-        if keyword:
-            text = f"{item.name} {item.description or ''} {item.city} {item.industry or ''}".lower()
-            if keyword not in text:
+    # 1. Real Permitted Search Adapters (never .example.com)
+    for adapter in (TavilyDiscoveryAdapter(), SerpApiDiscoveryAdapter()):
+        if adapter.is_configured():
+            for item in adapter.search(query_params, limit=8, http_client=http_client):
+                _add_unique(item)
+
+    # 2. Quarantined Demo Fixtures (STRICTLY labelled is_demo=True, verification_status='demo_fixture', never in production)
+    allow_demo = query_params.include_demo and settings.ENVIRONMENT.lower() != "production"
+    if allow_demo:
+        city_filter = (query_params.city or "").lower()
+        industry_filter = (query_params.industry or "").lower()
+        keyword = (query_params.query or "").lower()
+
+        for item in DISCOVERY_CATALOG:
+            if city_filter and city_filter != "all" and city_filter not in item.city.lower():
                 continue
-        if query_params.min_devices and (item.laptop_count_verified or 0) < query_params.min_devices:
-            continue
+            if industry_filter and industry_filter != "all" and industry_filter not in (item.industry or "").lower():
+                continue
+            if keyword:
+                text = f"{item.name} {item.description or ''} {item.city} {item.industry or ''}".lower()
+                if keyword not in text:
+                    continue
+            if query_params.min_devices and (item.laptop_count_verified or 0) < query_params.min_devices:
+                continue
 
-        results.append(item)
-        seen_names.add(item.name.lower())
+            demo_flagged = item.model_copy(update={
+                "is_demo": True,
+                "verification_status": "demo_fixture",
+                "source_type": "demo_fixture",
+            })
+            _add_unique(demo_flagged)
 
     return results

@@ -16,10 +16,17 @@ from app.services.discovery_service import (
     crawl_company_website_for_contacts,
     parse_csv_discovery_file
 )
+from app.integrations.discovery_adapters import list_discovery_source_statuses
 from app.services.company_service import create_company, find_duplicate_company
 from app.core.audit import record_audit_log
 
 router = APIRouter()
+
+
+@router.get("/sources")
+def get_discovery_sources(current_user: User = Depends(get_current_user)):
+    """Returns configured status of all modular public discovery adapters."""
+    return {"sources": list_discovery_source_statuses()}
 
 
 @router.post("/search", response_model=List[DiscoveredCompanyItem])
@@ -80,7 +87,8 @@ def import_discovered_lead(
         laptop_count_verified=item.laptop_count_verified,
         laptop_count_evidence=item.laptop_count_evidence,
         source_url=item.source_url,
-        source_notes=f"Discovered via {item.source_type}"
+        source_notes=f"Discovered via {item.source_type}",
+        is_demo=item.is_demo,
     )
 
     company = create_company(db, company_create)

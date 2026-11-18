@@ -10,6 +10,7 @@ from app.models.user import User
 from app.schemas.company import (
     CompanyCreate,
     CompanyUpdate,
+    CompanyVerifyRequest,
     CompanyResponse,
     ContactSourceCreate,
     ContactSourceResponse,
@@ -20,6 +21,7 @@ from app.services.company_service import (
     get_company,
     list_companies,
     update_company,
+    verify_company_record,
     add_contact_source,
     import_companies_from_csv
 )
@@ -113,6 +115,37 @@ def update_existing_company(
         user_id=current_user.id
     )
     return updated
+
+
+@router.post("/{company_id}/verify", response_model=CompanyResponse)
+def verify_company_endpoint(
+    company_id: int,
+    verify_in: CompanyVerifyRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Records user verification and evidence corrections with full audit trail."""
+    try:
+        company = verify_company_record(db, company_id, verify_in)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    if not company:
+        raise HTTPException(status_code=404, detail="Company not found")
+
+    record_audit_log(
+        db=db,
+        action="verify_company_record",
+        entity_type="company",
+        entity_id=str(company.id),
+        user_id=current_user.id,
+        details={
+            "verification_status": company.verification_status,
+            "verification_method": company.verification_method,
+            "notes": verify_in.notes,
+        }
+    )
+    return company
 
 
 @router.post("/{company_id}/sources", response_model=ContactSourceResponse, status_code=status.HTTP_201_CREATED)

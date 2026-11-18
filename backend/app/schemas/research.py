@@ -35,6 +35,8 @@ class ResearchReportBase(BaseModel):
     relevant_decision_maker_role: Optional[str] = None
     recommended_outreach_approach: Optional[str] = None
     sources_summary: Optional[str] = None
+    missing_information: Optional[str] = None
+    confidence_level: Optional[float] = 0.5
 
 
 class ResearchReportResponse(ResearchReportBase):
@@ -49,6 +51,7 @@ class DiscoveryQuery(BaseModel):
     industry: Optional[str] = None
     query: Optional[str] = None
     min_devices: Optional[int] = 5
+    include_demo: bool = True  # Explicitly separates .example.com demo fixtures from real sources
 
 
 class DiscoveredCompanyItem(BaseModel):
@@ -71,7 +74,9 @@ class DiscoveredCompanyItem(BaseModel):
     laptop_count_evidence: Optional[str] = None
     source_url: str
     source_type: str = "business_directory"
-    confidence_level: float = 1.0
+    is_demo: bool = False
+    verification_status: str = "unverified"  # verified, unverified, inferred, unknown, demo_fixture
+    confidence_level: float = 0.5
     retrieval_timestamp: Optional[datetime] = None
 
 

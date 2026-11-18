@@ -169,10 +169,16 @@ def qualify_company(db: Session, company: Company) -> QualificationResult:
         reason = "Does not align with ActTrident target criteria for managed laptop deployments."
         action = "Archive lead record to suppression list."
 
+    v_status = getattr(company, "verification_status", None) or ("demo_fixture" if company.is_demo else "unverified")
+    if company.is_demo or v_status == "demo_fixture":
+        reason = f"[DEMO FIXTURE — NOT FOR LIVE OUTREACH] {reason}"
+
     distinction_note = (
-        f"Employee count ({company.employee_count_min or 'N/A'}-{company.employee_count_max or 'N/A'}) "
-        f"is distinct from verified laptop count ({company.laptop_count_verified or 'None verified'}). "
-        "Per ActTrident compliance guidelines, 5+ laptops are only certified when supported by documented evidence."
+        f"Verification status: {v_status}. "
+        f"Employee count ({company.employee_count_min or 'Unknown'}-{company.employee_count_max or 'Unknown'}) "
+        f"is distinct from verified laptop count ({company.laptop_count_verified or 'Unknown / None verified'}). "
+        "This score is a transparent heuristic prioritization aid based on currently recorded evidence, not objective certainty. "
+        "Per ActTrident truthfulness guidelines, 5+ laptops are only certified when supported by documented evidence."
     )
 
     now_utc = datetime.now(timezone.utc)

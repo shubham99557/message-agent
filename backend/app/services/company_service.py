@@ -8,7 +8,8 @@ from sqlalchemy import or_, and_
 from app.models.company import Company, CompanyContact, ContactSource
 from app.models.consent import ContactConsent
 from app.models.lead import Lead
-from app.schemas.company import CompanyCreate, CompanyUpdate, ContactSourceCreate, CSVImportSummary
+from app.schemas.company import CompanyCreate, CompanyUpdate, CompanyVerifyRequest, ContactSourceCreate, CSVImportSummary
+from app.integrations.discovery_adapters import is_demo_domain
 
 
 def normalize_domain(url_or_domain: Optional[str]) -> Optional[str]:
@@ -44,6 +45,15 @@ def create_company(db: Session, comp_in: CompanyCreate, user_id: Optional[int] =
     # Validate verified laptops: never label as having 5+ laptops without evidence
     has_5_laptops = bool(comp_in.laptop_count_verified and comp_in.laptop_count_verified >= 5 and comp_in.laptop_count_evidence)
 
+    # Quarantine .example.com / demo fixtures so fictional domains are never marked as verified real businesses
+    auto_demo = bool(
+        comp_in.is_demo
+        or is_demo_domain(comp_in.website)
+        or is_demo_domain(comp_in.public_email)
+    )
+    verif_status = "demo_fixture" if auto_demo else "unverified"
+    verif_method = "demo_fixture" if auto_demo else ("official_website" if comp_in.website else "manual_entry")
+
     company = Company(
         name=comp_in.name.strip(),
         website=comp_in.website.strip() if comp_in.website else None,
@@ -66,7 +76,9 @@ def create_company(db: Session, comp_in: CompanyCreate, user_id: Optional[int] =
         decision_maker_role=comp_in.decision_maker_role,
         decision_maker_email=comp_in.decision_maker_email,
         decision_maker_linkedin=comp_in.decision_maker_linkedin,
-        is_demo=comp_in.is_demo,
+        is_demo=auto_demo,
+        verification_status=verif_status,
+        verification_method=verif_method,
         created_by_id=user_id,
         date_last_verified=datetime.now(timezone.utc)
     )
@@ -180,6 +192,58 @@ def update_company(db: Session, company_id: int, comp_update: CompanyUpdate) -> 
         )
 
     company.date_last_verified = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(company)
+    return company
+
+
+def verify_company_record(
+    db: Session,
+    company_id: int,
+    verify_in: CompanyVerifyRequest,
+) -> Optional[Company]:
+    """
+    Allows sales/admin users to manually verify or correct a company's evidence and contacts.
+    Strictly forbids marking .example.com demo fixtures as verified real companies.
+    """
+    allowed_statuses = {"verified", "unverified", "inferred", "unknown"}
+    if verify_in.verification_status not in allowed_statuses:
+        raise ValueError(f"Invalid verification_status '{verify_in.verification_status}'. Allowed: {sorted(allowed_statuses)}")
+
+    company = get_company(db, company_id)
+    if not company:
+        return None
+
+    # Never allow marking fictional .example.com fixtures as verified real companies
+    if verify_in.verification_status == "verified" and (
+        company.is_demo or is_demo_domain(company.website) or is_demo_domain(company.public_email)
+    ):
+        raise ValueError("Demo fixtures or .example.com records cannot be marked as verified genuine companies.")
+
+    if verify_in.public_email is not None:
+        company.public_email = verify_in.public_email.strip()
+    if verify_in.public_phone is not None:
+        company.public_phone = verify_in.public_phone.strip()
+    if verify_in.decision_maker_name is not None:
+        company.decision_maker_name = verify_in.decision_maker_name.strip()
+    if verify_in.decision_maker_role is not None:
+        company.decision_maker_role = verify_in.decision_maker_role.strip()
+    if verify_in.laptop_count_verified is not None:
+        company.laptop_count_verified = verify_in.laptop_count_verified
+    if verify_in.laptop_count_evidence is not None:
+        company.laptop_count_evidence = verify_in.laptop_count_evidence.strip()
+
+    company.has_verified_5_plus_laptops = bool(
+        company.laptop_count_verified and company.laptop_count_verified >= 5 and company.laptop_count_evidence
+    )
+    company.verification_status = verify_in.verification_status
+    company.verification_method = verify_in.verification_method
+    company.date_last_verified = datetime.now(timezone.utc)
+
+    for src in company.sources:
+        src.verification_status = verify_in.verification_status
+        src.verification_method = verify_in.verification_method
+
     db.commit()
     db.refresh(company)
     return company

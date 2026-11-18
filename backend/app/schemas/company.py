@@ -19,6 +19,8 @@ class ContactSourceResponse(ContactSourceBase):
     id: int
     company_id: int
     contact_id: Optional[int] = None
+    verification_status: str = "unverified"
+    verification_method: Optional[str] = None
     retrieved_at: Optional[datetime] = None
     confidence: Optional[float] = 1.0
     model_config = ConfigDict(from_attributes=True)
@@ -106,8 +108,22 @@ class CompanyUpdate(BaseModel):
     is_demo: Optional[bool] = None
 
 
+class CompanyVerifyRequest(BaseModel):
+    verification_status: str  # verified, unverified, inferred, unknown
+    verification_method: str = "manual_review"
+    notes: Optional[str] = None
+    laptop_count_verified: Optional[int] = None
+    laptop_count_evidence: Optional[str] = None
+    public_email: Optional[str] = None
+    public_phone: Optional[str] = None
+    decision_maker_name: Optional[str] = None
+    decision_maker_role: Optional[str] = None
+
+
 class CompanyResponse(CompanyBase):
     id: int
+    verification_status: str = "unverified"
+    verification_method: Optional[str] = None
     qualification_score: float
     qualification_status: str
     qualification_reason: Optional[str] = None

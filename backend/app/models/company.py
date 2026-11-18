@@ -44,8 +44,10 @@ class Company(Base):
     qualification_reason = Column(Text, nullable=True)
     qualification_factors = Column(Text, nullable=True)  # JSON formatted factors
     
-    # Demo vs Real Prospect Records Separation
+    # Demo vs Real Prospect Records Separation & Provenance
     is_demo = Column(Boolean, default=False, nullable=False, index=True)
+    verification_status = Column(String(50), default="unverified", nullable=False, index=True)  # verified, unverified, inferred, unknown, demo_fixture
+    verification_method = Column(String(100), nullable=True)  # manual_review, official_website_crawl, csv_import, demo_fixture
     created_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
     # Metadata
@@ -92,6 +94,8 @@ class ContactSource(Base):
     source_type = Column(String(100), nullable=False)  # official_website, mca_registry, linkedin_public, directory
     extracted_text = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
+    verification_status = Column(String(50), default="unverified", nullable=False)  # verified, unverified, inferred, unknown, demo_fixture
+    verification_method = Column(String(100), nullable=True)
     confidence = Column(Float, default=1.0)
     retrieved_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
