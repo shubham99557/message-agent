@@ -27,27 +27,49 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
   const [metrics, setMetrics] = useState<any>(null);
   const [cityStats, setCityStats] = useState<any[]>([]);
   const [queueHealth, setQueueHealth] = useState<any>(null);
+  const [recentJobs, setRecentJobs] = useState<any[]>([]);
+  const [runningJob, setRunningJob] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    async function loadData() {
-      try {
-        const [dashMetrics, cities, queue] = await Promise.all([
-          api.getDashboardAnalytics(),
-          api.getCityAnalytics(),
-          api.getQueueHealth().catch(() => null)
-        ]);
-        setMetrics(dashMetrics);
-        setCityStats(cities);
-        setQueueHealth(queue);
-      } catch (err) {
-        console.error('Failed to load dashboard data', err);
-      } finally {
-        setLoading(false);
-      }
+  const loadData = async () => {
+    try {
+      const [dashMetrics, cities, queue, history] = await Promise.all([
+        api.getDashboardAnalytics(),
+        api.getCityAnalytics(),
+        api.getQueueHealth().catch(() => null),
+        api.getTaskHistory().catch(() => [])
+      ]);
+      setMetrics(dashMetrics);
+      setCityStats(cities);
+      setQueueHealth(queue);
+      setRecentJobs(Array.isArray(history) ? history.slice(0, 6) : []);
+    } catch (err) {
+      console.error('Failed to load dashboard data', err);
+    } finally {
+      setLoading(false);
     }
+  };
+
+  useEffect(() => {
     loadData();
   }, []);
+
+  const handleRunJob = async (category: string, payload: any = {}) => {
+    setRunningJob(category);
+    try {
+      const res = await api.triggerBackgroundTask({
+        category,
+        payload,
+        execute_sync: true
+      });
+      await loadData();
+      alert(`Job '${category}' finished with status: ${res.status}`);
+    } catch (err: any) {
+      alert(`Job error: ${err.message}`);
+    } finally {
+      setRunningJob(null);
+    }
+  };
 
   return (
     <div className="p-6 space-y-6">
@@ -361,6 +383,57 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
             <span className="text-lg font-mono font-bold text-slate-200">{queueHealth?.tasks?.failure_rate_24h_percent ?? 0}%</span>
           </div>
         </div>
+
+        {/* Interactive Automation Job Controls */}
+        <div className="mt-4 pt-4 border-t border-cobalt-800 flex flex-wrap items-center justify-between gap-2 text-xs">
+          <span className="text-slate-400 font-medium">Run Autonomous Pipelines On-Demand:</span>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => handleRunJob('company_discovery', { cities: ['Siliguri', 'Gangtok', 'Patna', 'Bhagalpur'] })}
+              disabled={runningJob !== null}
+              className="px-2.5 py-1.5 bg-cobalt-950 hover:bg-cobalt-850 border border-cobalt-700 text-slate-200 rounded disabled:opacity-50"
+            >
+              {runningJob === 'company_discovery' ? 'Running...' : 'Run Regional Discovery'}
+            </button>
+            <button
+              onClick={() => handleRunJob('lead_qualification', { recheck_stale_only: false })}
+              disabled={runningJob !== null}
+              className="px-2.5 py-1.5 bg-cobalt-950 hover:bg-cobalt-850 border border-cobalt-700 text-slate-200 rounded disabled:opacity-50"
+            >
+              {runningJob === 'lead_qualification' ? 'Running...' : 'Qualify All Prospects'}
+            </button>
+            <button
+              onClick={() => handleRunJob('followup_scheduling', {})}
+              disabled={runningJob !== null}
+              className="px-2.5 py-1.5 bg-cobalt-950 hover:bg-cobalt-850 border border-cobalt-700 text-slate-200 rounded disabled:opacity-50"
+            >
+              {runningJob === 'followup_scheduling' ? 'Running...' : 'Run Follow-Up Engine'}
+            </button>
+            <button
+              onClick={() => handleRunJob('daily_reporting', {})}
+              disabled={runningJob !== null}
+              className="px-2.5 py-1.5 bg-cobalt-600 hover:bg-cobalt-500 text-white rounded disabled:opacity-50"
+            >
+              {runningJob === 'daily_reporting' ? 'Generating...' : 'Generate Daily Digest'}
+            </button>
+          </div>
+        </div>
+
+        {recentJobs.length > 0 && (
+          <div className="mt-4 pt-3 border-t border-cobalt-800/80">
+            <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2">Recent Background Executions</div>
+            <div className="space-y-1.5 text-[11px] font-mono">
+              {recentJobs.map((job) => (
+                <div key={job.id} className="flex items-center justify-between bg-cobalt-950/60 px-3 py-1.5 rounded border border-cobalt-800/70">
+                  <span className="text-cobalt-300">{job.category}</span>
+                  <span className={job.status === 'completed' ? 'text-emerald-400' : job.status === 'failed' ? 'text-rose-400' : 'text-amber-400'}>
+                    {job.status}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

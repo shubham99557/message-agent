@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { api } from '../api/client';
 import {
   Layers,
@@ -31,6 +31,26 @@ export const IntegrationsView: React.FC = () => {
 
   const [saving, setSaving] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [savedIntegrations, setSavedIntegrations] = useState<any[]>([]);
+
+  const loadIntegrations = async () => {
+    try {
+      const list = await api.getIntegrations();
+      setSavedIntegrations(list || []);
+      for (const item of list || []) {
+        if (item.provider === 'gemini' && item.is_active) setAiProvider('gemini');
+        if (item.provider === 'openai' && item.is_active) setAiProvider('openai');
+        if (item.provider === 'smtp' && item.key_identifier) setSmtpUser(item.key_identifier);
+        if (item.provider === 'whatsapp_meta' && item.key_identifier) setWaPhoneId(item.key_identifier);
+      }
+    } catch {
+      // Non-admin users cannot read integrations
+    }
+  };
+
+  useEffect(() => {
+    loadIntegrations();
+  }, []);
 
   const handleSaveAI = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -113,6 +133,24 @@ export const IntegrationsView: React.FC = () => {
         <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded text-xs text-emerald-300 flex items-center space-x-2">
           <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
           <span>Integration credentials updated and encrypted in secure storage.</span>
+        </div>
+      )}
+
+      {savedIntegrations.length > 0 && (
+        <div className="bg-cobalt-900/60 border border-cobalt-800 rounded-lg p-3.5 flex flex-wrap items-center gap-2 text-xs">
+          <span className="text-slate-400 font-medium mr-1">Configured Integrations:</span>
+          {savedIntegrations.map((item) => (
+            <span
+              key={item.id}
+              className={`px-2 py-0.5 rounded font-mono text-[11px] border ${
+                item.is_active
+                  ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                  : 'bg-slate-800 text-slate-400 border-slate-700'
+              }`}
+            >
+              {item.provider} ({item.is_active ? 'ACTIVE' : 'INACTIVE'})
+            </span>
+          ))}
         </div>
       )}
 

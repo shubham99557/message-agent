@@ -27,11 +27,18 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({ onNavigate }) => {
   const [targetIndustry, setTargetIndustry] = useState('Software Development');
   const [dailyEmailLimit, setDailyEmailLimit] = useState(50);
   const [processingId, setProcessingId] = useState<number | null>(null);
+  const [recipientModalCampaign, setRecipientModalCampaign] = useState<any | null>(null);
+  const [allCompanies, setAllCompanies] = useState<any[]>([]);
+  const [selectedCompanyIds, setSelectedCompanyIds] = useState<number[]>([]);
 
   const loadCampaigns = async () => {
     try {
-      const data = await api.getCampaigns();
+      const [data, comps] = await Promise.all([
+        api.getCampaigns(),
+        api.getCompanies({ limit: 100 }).catch(() => ({ items: [] }))
+      ]);
       setCampaigns(data);
+      setAllCompanies(comps.items || []);
     } catch (err) {
       console.error(err);
     } finally {
@@ -79,10 +86,28 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({ onNavigate }) => {
     setProcessingId(campaignId);
     try {
       const res = await api.sendApprovedCampaignEmails(campaignId);
-      alert(`Campaign dispatch complete: ${res.sent} approved emails sent!`);
+      const sent = res.sent ?? 0;
+      const simulated = res.simulated ?? 0;
+      alert(`Campaign dispatch complete: ${sent} sent, ${simulated} simulated.`);
       loadCampaigns();
     } catch (err: any) {
       alert(`Dispatch error: ${err.message}`);
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const handleAddRecipients = async () => {
+    if (!recipientModalCampaign || selectedCompanyIds.length === 0) return;
+    setProcessingId(recipientModalCampaign.id);
+    try {
+      const res = await api.addCampaignRecipients(recipientModalCampaign.id, selectedCompanyIds);
+      alert(`Added ${res.added ?? selectedCompanyIds.length} recipients to "${recipientModalCampaign.name}".`);
+      setRecipientModalCampaign(null);
+      setSelectedCompanyIds([]);
+      loadCampaigns();
+    } catch (err: any) {
+      alert(`Add recipients error: ${err.message}`);
     } finally {
       setProcessingId(null);
     }
@@ -152,12 +177,22 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({ onNavigate }) => {
             {/* Action Buttons */}
             <div className="flex items-center space-x-2 pt-2 border-t border-cobalt-800">
               <button
+                onClick={() => {
+                  setRecipientModalCampaign(camp);
+                  setSelectedCompanyIds([]);
+                }}
+                className="py-1.5 px-2.5 bg-cobalt-950 hover:bg-cobalt-850 border border-cobalt-700 text-slate-200 rounded text-xs font-medium flex items-center space-x-1"
+              >
+                <Users className="w-3.5 h-3.5 text-cobalt-400" />
+                <span>Add Leads</span>
+              </button>
+              <button
                 onClick={() => handleGenerateDrafts(camp.id)}
-                disabled={processingId === camp.id}
-                className="flex-1 py-1.5 bg-cobalt-950 hover:bg-cobalt-850 border border-cobalt-700 text-slate-200 rounded text-xs font-medium flex items-center justify-center space-x-1"
+                disabled={processingId === camp.id || camp.recipients_count === 0}
+                className="flex-1 py-1.5 bg-cobalt-950 hover:bg-cobalt-850 disabled:opacity-40 border border-cobalt-700 text-slate-200 rounded text-xs font-medium flex items-center justify-center space-x-1"
               >
                 <Sparkles className="w-3.5 h-3.5 text-cobalt-400" />
-                <span>Batch Generate Drafts</span>
+                <span>Generate Drafts</span>
               </button>
               <button
                 onClick={() => handleSendApproved(camp.id)}
@@ -243,6 +278,53 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({ onNavigate }) => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Add Recipients Modal */}
+      {recipientModalCampaign && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-cobalt-900 border border-cobalt-700 rounded-lg p-5 w-full max-w-lg space-y-4 text-xs">
+            <div className="flex items-center justify-between border-b border-cobalt-800 pb-3">
+              <h3 className="font-bold text-slate-100 text-sm">Add Companies to "{recipientModalCampaign.name}"</h3>
+              <button onClick={() => setRecipientModalCampaign(null)} className="text-slate-400 hover:text-white">✕</button>
+            </div>
+            <div className="max-h-72 overflow-y-auto space-y-1.5 pr-1">
+              {allCompanies.map((c) => {
+                const checked = selectedCompanyIds.includes(c.id);
+                return (
+                  <label key={c.id} className="flex items-center justify-between p-2 rounded bg-cobalt-950/70 border border-cobalt-800 cursor-pointer hover:border-cobalt-600">
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() =>
+                          setSelectedCompanyIds((prev) =>
+                            checked ? prev.filter((id) => id !== c.id) : [...prev, c.id]
+                          )
+                        }
+                      />
+                      <div>
+                        <div className="font-semibold text-slate-200">{c.name}</div>
+                        <div className="text-[10px] text-slate-400">{c.city} • {c.public_email || 'No email'}</div>
+                      </div>
+                    </div>
+                    <span className="font-mono text-[10px] text-emerald-400">{c.laptop_count_verified ?? '?'} laptops</span>
+                  </label>
+                );
+              })}
+            </div>
+            <div className="flex justify-end space-x-2 pt-2 border-t border-cobalt-800">
+              <button onClick={() => setRecipientModalCampaign(null)} className="px-3 py-1.5 bg-cobalt-950 text-slate-300 rounded">Cancel</button>
+              <button
+                onClick={handleAddRecipients}
+                disabled={selectedCompanyIds.length === 0 || processingId === recipientModalCampaign.id}
+                className="px-3.5 py-1.5 bg-cobalt-600 hover:bg-cobalt-500 disabled:opacity-40 text-white rounded font-medium"
+              >
+                Add Selected ({selectedCompanyIds.length})
+              </button>
+            </div>
           </div>
         </div>
       )}

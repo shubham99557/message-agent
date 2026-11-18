@@ -163,6 +163,22 @@ export const api = {
     formData.append('file', file);
     return request<any>('/companies/import-csv', { method: 'POST', body: formData });
   },
+  exportCompaniesCsv: async () => {
+    const token = getAuthToken();
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const res = await fetch(`${API_BASE}/companies/export/csv`, { headers });
+    if (!res.ok) throw new Error('Failed to export CSV');
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'acttrident_companies.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  },
 
   // Discovery
   searchDiscovery: (params: { city: string; industry?: string; query?: string; min_devices?: number }) =>
@@ -260,6 +276,13 @@ export const api = {
       body: JSON.stringify({ reply_id: replyId, approved, edited_response: text, approved_text: text })
     });
   },
+  ingestInboundReply: (data: {
+    channel: string;
+    sender_identifier: string;
+    recipient_identifier: string;
+    subject?: string;
+    message_body: string;
+  }) => request<any>('/replies/inbound', { method: 'POST', body: JSON.stringify(data) }),
 
   // Analytics
   getDashboardAnalytics: (campaignId?: number) => {
@@ -268,6 +291,7 @@ export const api = {
   },
   getCityAnalytics: () => request<any[]>('/analytics/cities'),
   getCampaignAnalytics: () => request<any[]>('/analytics/campaigns'),
+  getDailyDigest: () => request<any>('/analytics/daily-digest'),
 
   // Settings & Integrations
   getIntegrations: () => request<any[]>('/settings/integrations'),

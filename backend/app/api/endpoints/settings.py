@@ -42,6 +42,19 @@ def save_integration(
 
     db.commit()
     db.refresh(cred)
+
+    # Apply immediately to runtime settings so no restart is required
+    from app.main import apply_saved_integrations
+    from app.core.audit import record_audit_log
+    apply_saved_integrations(db)
+    record_audit_log(
+        db=db,
+        action="save_integration",
+        entity_type="integration",
+        entity_id=str(cred.id),
+        user_id=current_user.id,
+        details={"provider": cred.provider, "is_active": cred.is_active}
+    )
     return cred
 
 

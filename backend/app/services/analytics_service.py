@@ -179,8 +179,8 @@ def generate_daily_operational_digest(db: Session) -> dict:
     # 2. Email & WhatsApp Dispatches (Real vs Simulated)
     emails_sent_real = db.query(EmailDraft).filter(EmailDraft.approval_status == "sent").count()
     emails_simulated = db.query(EmailDraft).filter(EmailDraft.approval_status == "simulated").count()
-    wa_sent_real = db.query(WhatsAppMessage).filter(WhatsAppMessage.status == "sent").count()
-    wa_simulated = db.query(WhatsAppMessage).filter(WhatsAppMessage.status == "simulated").count()
+    wa_sent_real = db.query(WhatsAppMessage).filter(WhatsAppMessage.approval_status == "sent").count()
+    wa_simulated = db.query(WhatsAppMessage).filter(WhatsAppMessage.approval_status == "simulated").count()
 
     # 3. Replies by Category (all 10 classes)
     reply_counts_by_cat = {}

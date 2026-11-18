@@ -1,16 +1,17 @@
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import List, Dict, Any, Optional
+from typing import Dict, Any
 from sqlalchemy.orm import Session
 
 from app.models.lead import Lead, Followup
-from app.models.company import Company
 from app.models.activity import SuppressionList
-from app.models.consent import ContactConsent
-from app.models.email import EmailDraft
-from app.models.whatsapp import WhatsAppMessage
+from app.schemas.whatsapp import WhatsAppDraftRequest
 from app.services.email_generator_service import generate_email_draft
-from app.services.whatsapp_service import generate_whatsapp_draft, check_contact_consent
+from app.services.whatsapp_service import (
+    create_whatsapp_message,
+    verify_active_whatsapp_consent,
+    seed_default_meta_templates
+)
 
 logger = logging.getLogger(__name__)
 
@@ -21,9 +22,9 @@ CADENCE_DAYS = {
 }
 
 CADENCE_TONES = {
-    1: "friendly_professional",
-    2: "technical",
-    3: "formal"
+    1: "Friendly professional",
+    2: "Technical",
+    3: "Follow-up"
 }
 
 
@@ -33,7 +34,7 @@ def process_autonomous_followups(db: Session) -> Dict[str, Any]:
     respecting multi-touch cadence, consent, suppression, and channel switching.
     """
     now = datetime.now(timezone.utc)
-    
+
     # Candidate leads: currently 'contacted', followups < 3
     leads = db.query(Lead).filter(
         Lead.pipeline_status == "contacted",
@@ -49,10 +50,12 @@ def process_autonomous_followups(db: Session) -> Dict[str, Any]:
             continue
 
         # 1. Stop if on Suppression List
-        suppressed = db.query(SuppressionList).filter(
-            (SuppressionList.company_id == company.id) |
-            (SuppressionList.identifier == (company.public_email or "").strip().lower())
-        ).first()
+        clean_email = (company.public_email or "").strip().lower()
+        suppressed = None
+        if clean_email:
+            suppressed = db.query(SuppressionList).filter(
+                SuppressionList.identifier == clean_email
+            ).first()
         if suppressed:
             lead.pipeline_status = "do_not_contact"
             lead.notes = f"{(lead.notes or '')}\nStopped follow-ups: on suppression list ({suppressed.reason})".strip()
@@ -60,7 +63,9 @@ def process_autonomous_followups(db: Session) -> Dict[str, Any]:
             continue
 
         # 2. Check timing against cadence
-        last_contact = lead.last_contact_date or lead.updated_at
+        last_contact = lead.last_contact_date or lead.updated_at or now
+        if last_contact.tzinfo is None:
+            last_contact = last_contact.replace(tzinfo=timezone.utc)
         touch_num = (lead.followup_count or 0) + 1
         wait_days = CADENCE_DAYS.get(touch_num, 3)
 
@@ -68,31 +73,35 @@ def process_autonomous_followups(db: Session) -> Dict[str, Any]:
             continue  # Not yet due for next touch
 
         # 3. Determine Channel (Channel Switching)
-        # Touch 2: If WhatsApp consent verified, try WhatsApp; otherwise Email
         has_wa_consent = False
         target_phone = company.public_whatsapp or company.public_phone
         if target_phone:
-            has_wa_consent = check_contact_consent(db, target_phone, channel="whatsapp")
+            has_wa_consent, _ = verify_active_whatsapp_consent(db, company.id, target_phone)
 
         channel = "whatsapp" if (touch_num == 2 and has_wa_consent) else "email"
-        tone = CADENCE_TONES.get(touch_num, "friendly_professional")
+        tone = CADENCE_TONES.get(touch_num, "Follow-up")
 
-        # 4. Generate Draft
+        # 4. Generate Draft (strictly in draft status awaiting human approval)
         if channel == "whatsapp" and target_phone:
-            wa_draft = generate_whatsapp_draft(
-                db=db,
-                company=company,
+            seed_default_meta_templates(db)
+            wa_req = WhatsAppDraftRequest(
+                company_id=company.id,
+                template_name="acttrident_followup_formal",
                 recipient_phone=target_phone,
-                template_name="acttrident_followup_formal"
+                parameters={
+                    "1": company.decision_maker_name or "Team Lead",
+                    "2": company.name
+                }
             )
+            wa_draft = create_whatsapp_message(db, company, wa_req)
             created_draft_id = f"wa-{wa_draft.id}"
         else:
             channel = "email"
             email_draft = generate_email_draft(
                 db=db,
                 company=company,
-                campaign=None,
-                style=tone
+                campaign_id=None,
+                tone=tone
             )
             email_draft.subject = f"Follow-up: ActTrident 90-Day Evaluation for {company.name}"
             db.commit()

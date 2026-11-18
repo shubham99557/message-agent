@@ -12,7 +12,8 @@ import {
   BrainCircuit,
   Mail,
   ChevronRight,
-  ExternalLink
+  ExternalLink,
+  Plus
 } from 'lucide-react';
 
 interface LeadsViewProps {
@@ -25,6 +26,22 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onSelectCompany }) => {
   const [cityFilter, setCityFilter] = useState('All');
   const [searchTerm, setSearchTerm] = useState('');
   const [total, setTotal] = useState(0);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newCompany, setNewCompany] = useState({
+    name: '',
+    website: '',
+    city: 'Siliguri',
+    state: 'West Bengal',
+    industry: 'Software Development',
+    public_email: '',
+    public_phone: '',
+    decision_maker_name: '',
+    decision_maker_role: '',
+    laptop_count_verified: '',
+    laptop_count_evidence: '',
+    source_url: ''
+  });
+  const [creating, setCreating] = useState(false);
 
   const loadCompanies = async () => {
     setLoading(true);
@@ -63,14 +80,26 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onSelectCompany }) => {
           </p>
         </div>
         <div className="flex items-center space-x-2">
-          <a
-            href="/api/v1/companies/export/csv"
-            download
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="px-3 py-1.5 bg-cobalt-600 hover:bg-cobalt-500 text-white rounded text-xs font-medium transition-colors flex items-center space-x-1.5"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>Add Company</span>
+          </button>
+          <button
+            onClick={async () => {
+              try {
+                await api.exportCompaniesCsv();
+              } catch (err: any) {
+                alert(`Export error: ${err.message}`);
+              }
+            }}
             className="px-3 py-1.5 bg-cobalt-900 hover:bg-cobalt-850 border border-cobalt-700 text-slate-200 rounded text-xs font-medium transition-colors flex items-center space-x-1.5"
           >
             <Download className="w-3.5 h-3.5 text-cobalt-400" />
             <span>Export CSV</span>
-          </a>
+          </button>
         </div>
       </div>
 
@@ -222,6 +251,95 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onSelectCompany }) => {
           </div>
         )}
       </div>
+
+      {/* Add Company Modal */}
+      {showAddModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-cobalt-900 border border-cobalt-700 rounded-lg p-5 w-full max-w-lg space-y-4 text-xs">
+            <div className="flex items-center justify-between border-b border-cobalt-800 pb-3">
+              <h3 className="font-bold text-slate-100 text-sm">Add Verified B2B Prospect</h3>
+              <button onClick={() => setShowAddModal(false)} className="text-slate-400 hover:text-white">✕</button>
+            </div>
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                setCreating(true);
+                try {
+                  await api.createCompany({
+                    name: newCompany.name,
+                    website: newCompany.website || undefined,
+                    city: newCompany.city,
+                    state: newCompany.state || undefined,
+                    industry: newCompany.industry || undefined,
+                    public_email: newCompany.public_email || undefined,
+                    public_phone: newCompany.public_phone || undefined,
+                    decision_maker_name: newCompany.decision_maker_name || undefined,
+                    decision_maker_role: newCompany.decision_maker_role || undefined,
+                    laptop_count_verified: newCompany.laptop_count_verified ? Number(newCompany.laptop_count_verified) : undefined,
+                    laptop_count_evidence: newCompany.laptop_count_evidence || undefined,
+                    source_url: newCompany.source_url || newCompany.website || 'Manual Entry',
+                    is_demo: false
+                  });
+                  setShowAddModal(false);
+                  setNewCompany({
+                    name: '', website: '', city: 'Siliguri', state: 'West Bengal',
+                    industry: 'Software Development', public_email: '', public_phone: '',
+                    decision_maker_name: '', decision_maker_role: '',
+                    laptop_count_verified: '', laptop_count_evidence: '', source_url: ''
+                  });
+                  loadCompanies();
+                } catch (err: any) {
+                  alert(`Create error: ${err.message}`);
+                } finally {
+                  setCreating(false);
+                }
+              }}
+              className="space-y-3"
+            >
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] text-slate-400 mb-1">Company Name *</label>
+                  <input required type="text" value={newCompany.name} onChange={(e) => setNewCompany({ ...newCompany, name: e.target.value })} className="w-full bg-cobalt-950 border border-cobalt-800 rounded px-2.5 py-1.5 text-slate-200" />
+                </div>
+                <div>
+                  <label className="block text-[11px] text-slate-400 mb-1">Official Website</label>
+                  <input type="url" placeholder="https://..." value={newCompany.website} onChange={(e) => setNewCompany({ ...newCompany, website: e.target.value })} className="w-full bg-cobalt-950 border border-cobalt-800 rounded px-2.5 py-1.5 text-slate-200" />
+                </div>
+                <div>
+                  <label className="block text-[11px] text-slate-400 mb-1">City *</label>
+                  <input required type="text" value={newCompany.city} onChange={(e) => setNewCompany({ ...newCompany, city: e.target.value })} className="w-full bg-cobalt-950 border border-cobalt-800 rounded px-2.5 py-1.5 text-slate-200" />
+                </div>
+                <div>
+                  <label className="block text-[11px] text-slate-400 mb-1">Industry</label>
+                  <input type="text" value={newCompany.industry} onChange={(e) => setNewCompany({ ...newCompany, industry: e.target.value })} className="w-full bg-cobalt-950 border border-cobalt-800 rounded px-2.5 py-1.5 text-slate-200" />
+                </div>
+                <div>
+                  <label className="block text-[11px] text-slate-400 mb-1">Public Business Email</label>
+                  <input type="email" value={newCompany.public_email} onChange={(e) => setNewCompany({ ...newCompany, public_email: e.target.value })} className="w-full bg-cobalt-950 border border-cobalt-800 rounded px-2.5 py-1.5 text-slate-200" />
+                </div>
+                <div>
+                  <label className="block text-[11px] text-slate-400 mb-1">Public Phone</label>
+                  <input type="text" value={newCompany.public_phone} onChange={(e) => setNewCompany({ ...newCompany, public_phone: e.target.value })} className="w-full bg-cobalt-950 border border-cobalt-800 rounded px-2.5 py-1.5 text-slate-200" />
+                </div>
+                <div>
+                  <label className="block text-[11px] text-slate-400 mb-1">Verified Laptop Count</label>
+                  <input type="number" min="0" value={newCompany.laptop_count_verified} onChange={(e) => setNewCompany({ ...newCompany, laptop_count_verified: e.target.value })} className="w-full bg-cobalt-950 border border-cobalt-800 rounded px-2.5 py-1.5 text-slate-200" />
+                </div>
+                <div>
+                  <label className="block text-[11px] text-slate-400 mb-1">Laptop Evidence Source</label>
+                  <input type="text" placeholder="e.g. Careers page / MCA filing" value={newCompany.laptop_count_evidence} onChange={(e) => setNewCompany({ ...newCompany, laptop_count_evidence: e.target.value })} className="w-full bg-cobalt-950 border border-cobalt-800 rounded px-2.5 py-1.5 text-slate-200" />
+                </div>
+              </div>
+              <div className="flex justify-end space-x-2 pt-2">
+                <button type="button" onClick={() => setShowAddModal(false)} className="px-3 py-1.5 bg-cobalt-950 text-slate-300 rounded">Cancel</button>
+                <button type="submit" disabled={creating} className="px-4 py-1.5 bg-cobalt-600 hover:bg-cobalt-500 text-white rounded font-medium">
+                  {creating ? 'Saving...' : 'Save Company'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

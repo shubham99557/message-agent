@@ -117,7 +117,7 @@ def execute_task_logic(category: str, payload: Dict[str, Any], db) -> Dict[str, 
         comp = db.query(Company).filter(Company.id == company_id).first()
         if not comp:
             return {"status": "not_found", "company_id": company_id}
-        comp.last_researched_at = datetime.now(timezone.utc)
+        comp.date_last_verified = datetime.now(timezone.utc)
         db.commit()
         return {"company_id": comp.id, "name": comp.name, "enriched": True}
 
@@ -145,10 +145,10 @@ def execute_task_logic(category: str, payload: Dict[str, Any], db) -> Dict[str, 
             return {"error": f"Company {company_id} not found"}
         
         # Batch qualification
-        query = db.query(Company).filter(Company.is_demo == False)
+        query = db.query(Company)
         if recheck_stale:
             stale_threshold = datetime.now(timezone.utc) - timedelta(days=30)
-            query = query.filter((Company.last_verified_at == None) | (Company.last_verified_at < stale_threshold))
+            query = query.filter((Company.date_last_verified == None) | (Company.date_last_verified < stale_threshold))
         companies = query.limit(50).all()
         results = []
         for c in companies:
@@ -158,27 +158,33 @@ def execute_task_logic(category: str, payload: Dict[str, Any], db) -> Dict[str, 
 
     elif category == "email_generation":
         from app.models.company import Company
-        from app.models.campaign import Campaign
         from app.services.email_generator_service import generate_email_draft
         company_id = payload.get("company_id")
         campaign_id = payload.get("campaign_id")
-        style = payload.get("style", "friendly_professional")
+        style = payload.get("style", "Friendly professional")
         comp = db.query(Company).filter(Company.id == company_id).first()
-        campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first() if campaign_id else None
         if not comp:
             return {"error": f"Company {company_id} not found"}
-        draft = generate_email_draft(db, comp, campaign, style)
-        return {"draft_id": draft.id, "subject": draft.subject, "status": draft.status}
+        draft = generate_email_draft(db=db, company=comp, campaign_id=campaign_id, tone=style)
+        return {"draft_id": draft.id, "subject": draft.subject, "status": draft.approval_status}
 
     elif category == "whatsapp_generation":
         from app.models.company import Company
-        from app.services.whatsapp_service import generate_whatsapp_draft
+        from app.schemas.whatsapp import WhatsAppDraftRequest
+        from app.services.whatsapp_service import create_whatsapp_message, seed_default_meta_templates
         company_id = payload.get("company_id")
         comp = db.query(Company).filter(Company.id == company_id).first()
         if not comp:
             return {"error": f"Company {company_id} not found"}
-        draft = generate_whatsapp_draft(db, comp, payload.get("recipient_phone") or comp.public_whatsapp or comp.public_phone)
-        return {"whatsapp_id": draft.id, "status": draft.status}
+        seed_default_meta_templates(db)
+        req = WhatsAppDraftRequest(
+            company_id=comp.id,
+            template_name=payload.get("template_name", "acttrident_intro_utility_v1"),
+            recipient_phone=payload.get("recipient_phone") or comp.public_whatsapp or comp.public_phone,
+            parameters=payload.get("parameters") or {"1": comp.decision_maker_name or "Team", "2": comp.city}
+        )
+        draft = create_whatsapp_message(db, comp, req)
+        return {"whatsapp_id": draft.id, "status": draft.approval_status}
 
     elif category == "email_dispatch":
         from app.models.email import EmailDraft
@@ -189,57 +195,56 @@ def execute_task_logic(category: str, payload: Dict[str, Any], db) -> Dict[str, 
         if not draft:
             return {"error": f"Draft {draft_id} not found"}
         
-        # Enforce rate limit (30 per min)
-        if not check_rate_limit("email_dispatch", settings.OUTBOUND_RATE_LIMIT_EMAIL_PER_MIN, 60):
+        email_limit = getattr(settings, "OUTBOUND_RATE_LIMIT_EMAIL_PER_MIN", 30)
+        if not check_rate_limit("email_dispatch", email_limit, 60):
             raise RuntimeError("Email dispatch rate limit reached, retrying with backoff")
 
         result = send_email(db, draft)
-        return {"draft_id": draft_id, "result": result}
+        return {"draft_id": draft_id, "result": result.model_dump()}
 
     elif category == "whatsapp_dispatch":
         from app.models.whatsapp import WhatsAppMessage
-        from app.services.whatsapp_service import send_whatsapp_message
+        from app.services.whatsapp_service import send_approved_whatsapp_message
         from app.services.job_service import check_rate_limit
         message_id = payload.get("message_id")
         msg = db.query(WhatsAppMessage).filter(WhatsAppMessage.id == message_id).first()
         if not msg:
             return {"error": f"Message {message_id} not found"}
 
-        # Enforce rate limit (10 per min)
-        if not check_rate_limit("whatsapp_dispatch", settings.OUTBOUND_RATE_LIMIT_WA_PER_MIN, 60):
+        wa_limit = getattr(settings, "OUTBOUND_RATE_LIMIT_WA_PER_MIN", 10)
+        if not check_rate_limit("whatsapp_dispatch", wa_limit, 60):
             raise RuntimeError("WhatsApp dispatch rate limit reached, retrying with backoff")
 
-        result = send_whatsapp_message(db, msg)
-        return {"message_id": message_id, "result": result}
+        success, detail = send_approved_whatsapp_message(db, msg.id, user_id=payload.get("user_id", 1))
+        return {"message_id": message_id, "success": success, "detail": detail}
 
     elif category == "reply_ingestion":
-        from app.models.reply import InboundReply
-        from app.models.lead import Lead
-        company_id = payload.get("company_id")
-        lead = db.query(Lead).filter(Lead.company_id == company_id).first() if company_id else None
-        reply = InboundReply(
-            company_id=company_id,
-            lead_id=lead.id if lead else None,
+        from app.services.reply_classifier_service import ingest_inbound_reply
+        reply = ingest_inbound_reply(
+            db=db,
             channel=payload.get("channel", "email"),
-            sender=payload.get("sender", "unknown"),
+            sender_identifier=payload.get("sender", "unknown@example.com"),
+            recipient_identifier=payload.get("recipient", "outreach@acttrident.ai"),
             subject=payload.get("subject"),
-            body=payload.get("body", ""),
-            received_at=datetime.now(timezone.utc)
+            message_body=payload.get("body", "")
         )
-        db.add(reply)
-        db.commit()
-        db.refresh(reply)
-        return {"reply_id": reply.id, "channel": reply.channel, "sender": reply.sender}
+        return {"reply_id": reply.id, "channel": reply.channel, "classification": reply.classification}
 
     elif category == "reply_classification":
-        from app.models.reply import InboundReply
-        from app.services.reply_classifier_service import classify_inbound_reply
+        from app.models.reply import Reply
+        from app.services.reply_classifier_service import classify_reply_text
         reply_id = payload.get("reply_id")
-        reply = db.query(InboundReply).filter(InboundReply.id == reply_id).first()
+        reply = db.query(Reply).filter(Reply.id == reply_id).first()
         if not reply:
-            return {"error": f"InboundReply {reply_id} not found"}
-        classification = classify_inbound_reply(db, reply)
-        return {"reply_id": reply_id, "classification": classification}
+            return {"error": f"Reply {reply_id} not found"}
+        classification, confidence, reason, suggested, is_neg = classify_reply_text(reply.message_body)
+        reply.classification = classification
+        reply.classification_confidence = confidence
+        reply.classification_reason = reason
+        reply.suggested_response = suggested
+        reply.is_negotiation = is_neg
+        db.commit()
+        return {"reply_id": reply_id, "classification": classification, "confidence": confidence}
 
     elif category == "crm_update":
         from app.models.lead import Lead, PIPELINE_STATUSES
@@ -262,9 +267,9 @@ def execute_task_logic(category: str, payload: Dict[str, Any], db) -> Dict[str, 
         return process_autonomous_followups(db)
 
     elif category == "daily_reporting":
-        from app.services.analytics_service import calculate_funnel_metrics
-        metrics = calculate_funnel_metrics(db)
-        return {"generated_at": datetime.now(timezone.utc).isoformat(), "metrics": metrics.model_dump()}
+        from app.services.analytics_service import generate_daily_operational_digest
+        digest = generate_daily_operational_digest(db)
+        return {"generated_at": datetime.now(timezone.utc).isoformat(), "metrics": digest["summary"], "digest": digest}
 
     else:
         raise ValueError(f"Unknown task category: {category}")

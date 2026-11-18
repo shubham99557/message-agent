@@ -1,6 +1,8 @@
 import os
-from typing import List
-from pydantic_settings import BaseSettings, SettingsConfigDict
+import json
+from typing import List, Annotated, Any
+from pydantic import field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict, NoDecode
 
 
 class Settings(BaseSettings):
@@ -69,14 +71,29 @@ class Settings(BaseSettings):
     GOOGLE_SEARCH_ENGINE_ID: str = os.getenv("GOOGLE_SEARCH_ENGINE_ID", "")
 
     # CORS: Explicit allowed origins (Never wildcard in production)
-    BACKEND_CORS_ORIGINS: List[str] = [
-        origin.strip()
-        for origin in os.getenv(
-            "BACKEND_CORS_ORIGINS",
-            "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000"
-        ).split(",")
-        if origin.strip()
+    BACKEND_CORS_ORIGINS: Annotated[List[str], NoDecode] = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
     ]
+
+    @field_validator("BACKEND_CORS_ORIGINS", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, v: Any) -> List[str]:
+        if isinstance(v, list):
+            return [str(o).strip() for o in v if str(o).strip()]
+        if isinstance(v, str):
+            raw = v.strip()
+            if raw.startswith("["):
+                try:
+                    parsed = json.loads(raw)
+                    if isinstance(parsed, list):
+                        return [str(o).strip() for o in parsed if str(o).strip()]
+                except Exception:
+                    pass
+            return [o.strip() for o in raw.split(",") if o.strip()]
+        return []
 
     model_config = SettingsConfigDict(
         env_file=".env",

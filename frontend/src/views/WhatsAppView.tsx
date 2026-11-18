@@ -78,6 +78,7 @@ export const WhatsAppView: React.FC<WhatsAppViewProps> = ({ selectedCompany }) =
       const msg = await api.draftWhatsApp({
         company_id: activeCompanyId,
         template_name: selectedTemplate,
+        recipient_phone: recipientPhone || undefined,
         parameters: {
           '1': activeCompany?.decision_maker_name || 'Team Lead',
           '2': activeCompany?.city || 'Siliguri'
@@ -100,6 +101,7 @@ export const WhatsAppView: React.FC<WhatsAppViewProps> = ({ selectedCompany }) =
     try {
       await api.recordWhatsAppConsent({
         company_id: activeCompanyId,
+        contact_identifier: recipientPhone || activeCompany?.public_whatsapp || activeCompany?.public_phone || undefined,
         channel: 'whatsapp',
         consent_status: 'opted_in',
         consent_source: consentSource,
@@ -116,8 +118,8 @@ export const WhatsAppView: React.FC<WhatsAppViewProps> = ({ selectedCompany }) =
 
   const handleSendApproved = async (msgId: number) => {
     try {
-      await api.sendWhatsApp(msgId);
-      alert('Message dispatched via official Meta WhatsApp Business Cloud API!');
+      const res = await api.sendWhatsApp(msgId);
+      alert(res.message || 'WhatsApp dispatch processed.');
       const msgs = await api.getWhatsAppMessages();
       setMessages(msgs);
     } catch (err: any) {

@@ -93,9 +93,9 @@ export const ApprovalQueueView: React.FC = () => {
     try {
       await api.updateEmailDraft(editingDraft.id, {
         subject: editSubject,
-        body_text: editBody,
-        approval_status: 'approved'
+        body_text: editBody
       });
+      await api.approveEmail(editingDraft.id);
       setEditingDraft(null);
       loadQueue();
     } catch (err: any) {
@@ -147,6 +147,7 @@ export const ApprovalQueueView: React.FC = () => {
             <option value="draft">Pending Approval (Drafts)</option>
             <option value="approved">Approved</option>
             <option value="sent">Dispatched (Sent)</option>
+            <option value="simulated">Simulated (Mock)</option>
             <option value="rejected">Rejected</option>
             <option value="skipped">Skipped</option>
             <option value="All">All Records</option>
@@ -276,8 +277,8 @@ export const ApprovalQueueView: React.FC = () => {
                     <button
                       onClick={async () => {
                         try {
-                          await api.sendApprovedEmail(draft.id);
-                          alert('Email dispatched!');
+                          const res = await api.sendApprovedEmail(draft.id);
+                          alert(res.message || `Email status: ${res.status}`);
                           loadQueue();
                         } catch (err: any) {
                           alert(`Error: ${err.message}`);
