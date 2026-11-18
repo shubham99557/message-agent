@@ -19,7 +19,14 @@ pg_restore --list backup_pre_migration_*.dump | head -n 20
 
 ### SQLite (Local Development Only)
 ```bash
-cp acttrident.db "acttrident_backup_$(date +%Y%m%d_%H%M%S).db"
+# Recommended: Online safe backup with SHA-256 checksum manifest
+python backend/scripts/backup_restore_db.py backup --db-url sqlite:///./acttrident.db --output "./backups/acttrident_$(date +%Y%m%d_%H%M%S).db"
+```
+
+### Automated Restore CLI (SQLite & PostgreSQL)
+```bash
+# Verifies SHA-256 manifest before restoring
+python backend/scripts/backup_restore_db.py restore --db-url sqlite:///./acttrident.db --input ./backups/acttrident_YYYYMMDD_HHMMSS.db
 ```
 
 ---
