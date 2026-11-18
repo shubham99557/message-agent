@@ -29,37 +29,69 @@ export const WhatsAppView: React.FC<WhatsAppViewProps> = ({ selectedCompany }) =
   const [messages, setMessages] = useState<any[]>([]);
   const [draftResult, setDraftResult] = useState<any>(null);
   const [loading, setLoading] = useState(false);
+  const [waStatus, setWaStatus] = useState<any>(null);
+  const [syncingTemplates, setSyncingTemplates] = useState(false);
+  const [checkingHealth, setCheckingHealth] = useState(false);
 
   // Consent modal / recording state
   const [showConsentModal, setShowConsentModal] = useState(false);
   const [consentSource, setConsentSource] = useState('Inbound Website Contact Form');
   const [consentProof, setConsentProof] = useState('https://acttrident.ai/inbound/form-entry');
 
-  useEffect(() => {
-    async function loadData() {
-      try {
-        const [comps, tmpls, msgs] = await Promise.all([
-          api.getCompanies({ limit: 100 }),
-          api.getWhatsAppTemplates(),
-          api.getWhatsAppMessages()
-        ]);
-        setCompanies(comps.items);
-        setTemplates(tmpls);
-        setMessages(msgs);
+  const loadData = async () => {
+    try {
+      const [comps, tmpls, msgs, statusInfo] = await Promise.all([
+        api.getCompanies({ limit: 100 }),
+        api.getWhatsAppTemplates(true),
+        api.getWhatsAppMessages(),
+        api.getWhatsAppStatus().catch(() => null),
+      ]);
+      setCompanies(comps.items);
+      setTemplates(tmpls);
+      setMessages(msgs);
+      setWaStatus(statusInfo);
 
-        if (!activeCompanyId && comps.items.length > 0) {
-          setActiveCompanyId(comps.items[0].id);
-          setActiveCompany(comps.items[0]);
-          setRecipientPhone(comps.items[0].public_whatsapp || comps.items[0].public_phone || '');
-        } else if (selectedCompany) {
-          setRecipientPhone(selectedCompany.public_whatsapp || selectedCompany.public_phone || '');
-        }
-      } catch (err) {
-        console.error(err);
+      if (!activeCompanyId && comps.items.length > 0) {
+        setActiveCompanyId(comps.items[0].id);
+        setActiveCompany(comps.items[0]);
+        setRecipientPhone(comps.items[0].public_whatsapp || comps.items[0].public_phone || '');
+      } else if (selectedCompany) {
+        setRecipientPhone(selectedCompany.public_whatsapp || selectedCompany.public_phone || '');
       }
+    } catch (err) {
+      console.error(err);
     }
+  };
+
+  useEffect(() => {
     loadData();
   }, []);
+
+  const handleSyncTemplates = async () => {
+    setSyncingTemplates(true);
+    try {
+      const res = await api.syncWhatsAppTemplates();
+      alert(`Meta template sync complete: ${res.synced_templates} templates synced (${res.approved_templates} approved).`);
+      await loadData();
+    } catch (err: any) {
+      alert(`Template sync error: ${err.message}`);
+    } finally {
+      setSyncingTemplates(false);
+    }
+  };
+
+  const handleCheckHealth = async () => {
+    setCheckingHealth(true);
+    try {
+      const res = await api.checkWhatsAppHealth();
+      alert(`Meta Cloud API Connected: ${res.verified_name || res.display_phone_number} (Quality: ${res.quality_rating || 'N/A'})`);
+      await loadData();
+    } catch (err: any) {
+      alert(`Health check error: ${err.message}`);
+    } finally {
+      setCheckingHealth(false);
+    }
+  };
 
   const handleCompanyChange = (id: number) => {
     setActiveCompanyId(id);
@@ -142,6 +174,44 @@ export const WhatsAppView: React.FC<WhatsAppViewProps> = ({ selectedCompany }) =
 
   return (
     <div className="p-6 space-y-6">
+      {/* Honest Meta Cloud API / Simulation Mode Status Bar */}
+      {waStatus && (
+        <div
+          className={`p-3.5 rounded-lg border text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+            waStatus.is_simulation
+              ? 'bg-amber-500/10 border-amber-500/30 text-amber-200'
+              : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200'
+          }`}
+        >
+          <div>
+            <div className="font-semibold">
+              {waStatus.is_simulation
+                ? 'SIMULATION MODE ACTIVE — Official Meta WhatsApp Cloud API credentials not configured'
+                : `META WHATSAPP CLOUD API CONFIGURED (${waStatus.display_name || waStatus.phone_number_id})`}
+            </div>
+            <div className="text-[11px] opacity-80 mt-0.5">
+              Meta-synced templates: {waStatus.synced_templates_count} • Local seed templates: {waStatus.local_seed_templates_count} • Webhook HMAC Secret: {waStatus.webhook_secret_configured ? 'Configured' : 'Missing'}
+            </div>
+          </div>
+          <div className="flex items-center space-x-2 shrink-0">
+            <button
+              onClick={handleCheckHealth}
+              disabled={checkingHealth}
+              className="px-2.5 py-1 bg-cobalt-950 hover:bg-cobalt-850 border border-cobalt-700 text-slate-200 rounded text-[11px] font-medium disabled:opacity-50"
+            >
+              {checkingHealth ? 'Checking...' : 'Check Meta Health'}
+            </button>
+            <button
+              onClick={handleSyncTemplates}
+              disabled={syncingTemplates}
+              className="px-2.5 py-1 bg-cobalt-600 hover:bg-cobalt-500 text-white rounded text-[11px] font-medium disabled:opacity-50"
+            >
+              {syncingTemplates ? 'Syncing...' : 'Sync Meta Templates'}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="bg-cobalt-900/90 border border-cobalt-800 rounded-lg p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-center space-x-3">

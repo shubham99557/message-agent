@@ -230,7 +230,10 @@ export const api = {
     request<any>('/approvals/bulk', { method: 'POST', body: JSON.stringify({ draft_ids: draftIds, action, reason }) }),
 
   // WhatsApp
-  getWhatsAppTemplates: () => request<any[]>('/whatsapp/templates'),
+  getWhatsAppStatus: () => request<any>('/whatsapp/status'),
+  checkWhatsAppHealth: () => request<any>('/whatsapp/health-check', { method: 'POST' }),
+  syncWhatsAppTemplates: () => request<any>('/whatsapp/templates/sync', { method: 'POST' }),
+  getWhatsAppTemplates: (includeAll: boolean = true) => request<any[]>(`/whatsapp/templates?include_all=${includeAll}`),
   recordWhatsAppConsent: (consent: any) => request<any>('/whatsapp/consent', { method: 'POST', body: JSON.stringify(consent) }),
   draftWhatsApp: (data: any) => request<any>('/whatsapp/draft', { method: 'POST', body: JSON.stringify(data) }),
   approveWhatsApp: (id: number) => request<any>(`/whatsapp/approve/${id}`, { method: 'POST' }),
