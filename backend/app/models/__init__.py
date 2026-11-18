@@ -11,6 +11,7 @@ from app.models.campaign import Campaign, CampaignRecipient
 from app.models.email import EmailDraft, EmailEvent, ApprovalRecord, EmailSendAttempt, EMAIL_STATES
 from app.models.channel import ChannelConnection, CHANNEL_CONNECTION_STATUSES
 from app.models.whatsapp import WhatsAppTemplate, WhatsAppMessage, WebhookEvent
+from app.models.linkedin import LinkedInMessage, LINKEDIN_MESSAGE_TYPES, LINKEDIN_MESSAGE_STATES
 from app.models.reply import Conversation, Reply, REPLY_CATEGORIES
 from app.models.activity import AuditLog, IntegrationCredential, SuppressionList
 from app.models.job import BackgroundTaskRecord, DeadLetterTask, TASK_CATEGORIES, TASK_STATUSES
@@ -44,6 +45,9 @@ __all__ = [
     "WhatsAppTemplate",
     "WhatsAppMessage",
     "WebhookEvent",
+    "LinkedInMessage",
+    "LINKEDIN_MESSAGE_TYPES",
+    "LINKEDIN_MESSAGE_STATES",
     "Conversation",
     "Reply",
     "REPLY_CATEGORIES",

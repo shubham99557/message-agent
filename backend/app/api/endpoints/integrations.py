@@ -16,8 +16,28 @@ from app.integrations.gmail_adapter import (
     GmailIntegrationError,
     GMAIL_OAUTH_SCOPES,
 )
+from app.integrations.linkedin_adapter import (
+    build_linkedin_authorization_url,
+    verify_linkedin_oauth_state,
+    exchange_linkedin_code_for_tokens,
+    get_active_linkedin_connection,
+    disconnect_linkedin_connection,
+    get_linkedin_connection_status,
+    LinkedInIntegrationError,
+)
+from app.integrations.channel_adapter import list_all_channel_statuses
+from app.core.config import settings
 
 router = APIRouter()
+
+
+@router.get("/channels/status")
+def all_channels_status(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Returns unified honest connection status across Email, WhatsApp, and LinkedIn ChannelAdapters."""
+    return list_all_channel_statuses(db)
 
 
 @router.get("/gmail/status")
@@ -134,3 +154,92 @@ def disconnect_gmail(
         details={"account_email": conn.account_identifier}
     )
     return {"status": "disconnected", "channel": "gmail"}
+
+
+# --- Official LinkedIn OAuth 2.0 Endpoints (NEVER password or cookie collection) ---
+
+@router.get("/linkedin/status")
+def linkedin_connection_status(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Returns honest LinkedIn OAuth 2.0 connection and Partner Messaging API permission status."""
+    return get_linkedin_connection_status(db)
+
+
+@router.get("/linkedin/oauth/start")
+def start_linkedin_oauth(
+    current_user: User = Depends(require_role(["admin", "manager"])),
+):
+    """Generates a CSRF-protected Official LinkedIn OAuth 2.0 authorization URL."""
+    try:
+        auth_url, state = build_linkedin_authorization_url(current_user.id)
+        return {
+            "authorization_url": auth_url,
+            "state": state,
+            "scopes": (settings.LINKEDIN_API_SCOPES or "openid profile email").split(),
+        }
+    except LinkedInIntegrationError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+
+
+@router.get("/linkedin/oauth/callback")
+def linkedin_oauth_callback(
+    code: Optional[str] = Query(None),
+    state: Optional[str] = Query(None),
+    error: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    """Handles Official LinkedIn OAuth 2.0 callback, validates CSRF state, and persists encrypted tokens."""
+    if error:
+        raise HTTPException(status_code=400, detail=f"LinkedIn OAuth authorization denied: {error}")
+    if not code or not state:
+        raise HTTPException(status_code=400, detail="Missing OAuth 'code' or 'state' parameter.")
+
+    user_id = verify_linkedin_oauth_state(state)
+    if not user_id:
+        raise HTTPException(status_code=400, detail="Invalid or expired LinkedIn OAuth CSRF state parameter.")
+
+    try:
+        conn = exchange_linkedin_code_for_tokens(db=db, code=code, user_id=user_id)
+    except LinkedInIntegrationError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+
+    record_audit_log(
+        db=db,
+        action="linkedin_oauth_connected",
+        entity_type="channel_connection",
+        entity_id=str(conn.id),
+        user_id=user_id,
+        details={"account_identifier": conn.account_identifier, "status": conn.status},
+    )
+    return {
+        "status": "connected",
+        "channel": "linkedin",
+        "account_identifier": conn.account_identifier,
+        "display_name": conn.display_name,
+        "scopes": conn.scopes,
+        "token_expires_at": conn.token_expires_at.isoformat() if conn.token_expires_at else None,
+    }
+
+
+@router.post("/linkedin/disconnect")
+def disconnect_linkedin(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["admin"])),
+):
+    """Clears encrypted LinkedIn OAuth tokens and disconnects the account."""
+    conn = get_active_linkedin_connection(db)
+    if not conn:
+        raise HTTPException(status_code=404, detail="No LinkedIn connection exists.")
+
+    disconnect_linkedin_connection(db=db, connection=conn)
+    record_audit_log(
+        db=db,
+        action="linkedin_oauth_disconnected",
+        entity_type="channel_connection",
+        entity_id=str(conn.id),
+        user_id=current_user.id,
+        details={"account_identifier": conn.account_identifier},
+    )
+    return {"status": "disconnected", "channel": "linkedin"}

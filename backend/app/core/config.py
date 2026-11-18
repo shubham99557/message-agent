@@ -64,6 +64,14 @@ class Settings(BaseSettings):
     META_WA_VERIFY_TOKEN: str = os.getenv("META_WA_VERIFY_TOKEN", "acttrident_meta_webhook_secret_2026")
     META_APP_SECRET: str = os.getenv("META_APP_SECRET", "")  # Used for HMAC-SHA256 signature verification
 
+    # LinkedIn Official OAuth 2.0 / Authorized Partner API (NEVER password/cookie scraping)
+    LINKEDIN_CLIENT_ID: str = os.getenv("LINKEDIN_CLIENT_ID", "")
+    LINKEDIN_CLIENT_SECRET: str = os.getenv("LINKEDIN_CLIENT_SECRET", "")
+    LINKEDIN_REDIRECT_URI: str = os.getenv("LINKEDIN_REDIRECT_URI", "http://localhost:8000/api/v1/integrations/linkedin/oauth/callback")
+    LINKEDIN_API_SCOPES: str = os.getenv("LINKEDIN_API_SCOPES", "openid profile email")
+    LINKEDIN_MESSAGING_API_APPROVED: bool = os.getenv("LINKEDIN_MESSAGING_API_APPROVED", "false").lower() == "true"
+    LINKEDIN_PARTNER_MESSAGING_ENDPOINT: str = os.getenv("LINKEDIN_PARTNER_MESSAGING_ENDPOINT", "")
+
     # Conservative Safety & Sending Limits
     DEFAULT_DAILY_EMAIL_LIMIT: int = int(os.getenv("DEFAULT_DAILY_EMAIL_LIMIT", "50"))
     DEFAULT_DAILY_WHATSAPP_LIMIT: int = int(os.getenv("DEFAULT_DAILY_WHATSAPP_LIMIT", "20"))
