@@ -15,6 +15,7 @@ from app.models.linkedin import LinkedInMessage, LINKEDIN_MESSAGE_TYPES, LINKEDI
 from app.models.reply import Conversation, Reply, REPLY_CATEGORIES
 from app.models.activity import AuditLog, IntegrationCredential, SuppressionList
 from app.models.job import BackgroundTaskRecord, DeadLetterTask, TASK_CATEGORIES, TASK_STATUSES
+from app.models.orchestration import SystemSetting, OutboundDispatchOutbox, OUTBOX_STATUSES
 
 __all__ = [
     "Base",
@@ -56,5 +57,8 @@ __all__ = [
     "BackgroundTaskRecord",
     "DeadLetterTask",
     "TASK_CATEGORIES",
-    "TASK_STATUSES"
+    "TASK_STATUSES",
+    "SystemSetting",
+    "OutboundDispatchOutbox",
+    "OUTBOX_STATUSES"
 ]

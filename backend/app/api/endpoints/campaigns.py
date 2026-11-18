@@ -11,6 +11,14 @@ from app.models.company import Company
 from app.schemas.campaign import CampaignCreate, CampaignUpdate, CampaignResponse, CampaignRecipientResponse
 from app.services.email_generator_service import generate_email_draft
 from app.services.email_sender_service import send_approved_email
+from app.services.orchestration_service import (
+    pause_campaign,
+    resume_campaign,
+    stop_campaign,
+    is_kill_switch_active,
+    check_campaign_allows_dispatch,
+    enqueue_outbox_dispatch,
+)
 from app.core.audit import record_audit_log
 
 router = APIRouter()
@@ -243,6 +251,99 @@ def batch_generate_campaign_drafts(
     }
 
 
+@router.post("/{campaign_id}/pause", response_model=dict)
+def pause_campaign_endpoint(
+    campaign_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["admin", "manager"])),
+):
+    """Pauses a campaign immediately and cancels any pending queued outbox items."""
+    try:
+        camp, cancelled = pause_campaign(db=db, campaign_id=campaign_id, user_id=current_user.id)
+        return {
+            "id": camp.id,
+            "status": camp.status,
+            "cancelled_outbox_items": cancelled,
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/{campaign_id}/resume", response_model=dict)
+def resume_campaign_endpoint(
+    campaign_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["admin", "manager"])),
+):
+    """Resumes a paused or draft campaign to 'active' (permanently stopped campaigns cannot be resumed)."""
+    try:
+        camp = resume_campaign(db=db, campaign_id=campaign_id, user_id=current_user.id)
+        return {"id": camp.id, "status": camp.status}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/{campaign_id}/stop", response_model=dict)
+def stop_campaign_endpoint(
+    campaign_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["admin", "manager"])),
+):
+    """Permanently stops a campaign and cancels all pending outbox items."""
+    try:
+        camp, cancelled = stop_campaign(db=db, campaign_id=campaign_id, user_id=current_user.id)
+        return {
+            "id": camp.id,
+            "status": camp.status,
+            "cancelled_outbox_items": cancelled,
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/{campaign_id}/enqueue-approved", response_model=dict)
+def enqueue_approved_campaign_emails(
+    campaign_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["admin", "manager"])),
+):
+    """Enqueues approved campaign drafts into the crash-safe transactional OutboundDispatchOutbox."""
+    camp = db.query(Campaign).filter(Campaign.id == campaign_id).first()
+    if not camp:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+
+    ks_active, ks_reason = is_kill_switch_active(db)
+    if ks_active:
+        raise HTTPException(status_code=423, detail=f"Global Outbound Kill Switch is ACTIVE: {ks_reason}")
+
+    camp_ok, camp_err = check_campaign_allows_dispatch(db, campaign_id)
+    if not camp_ok:
+        raise HTTPException(status_code=409, detail=camp_err)
+
+    approved_drafts = db.query(EmailDraft).filter(
+        EmailDraft.campaign_id == campaign_id,
+        EmailDraft.approval_status == "approved"
+    ).limit(camp.daily_email_limit).all()
+
+    enqueued_ids = []
+    for d in approved_drafts:
+        row = enqueue_outbox_dispatch(
+            db=db,
+            channel="email",
+            entity_id=d.id,
+            user_id=current_user.id,
+            campaign_id=campaign_id,
+        )
+        enqueued_ids.append(row.id)
+
+    return {
+        "status": "enqueued",
+        "campaign_id": campaign_id,
+        "enqueued_count": len(enqueued_ids),
+        "outbox_ids": enqueued_ids,
+    }
+
+
 @router.post("/{campaign_id}/dispatch-approved", response_model=dict)
 @router.post("/{campaign_id}/send-approved", response_model=dict)
 def dispatch_approved_campaign_emails(
@@ -253,6 +354,14 @@ def dispatch_approved_campaign_emails(
     camp = db.query(Campaign).filter(Campaign.id == campaign_id).first()
     if not camp:
         raise HTTPException(status_code=404, detail="Campaign not found")
+
+    ks_active, ks_reason = is_kill_switch_active(db)
+    if ks_active:
+        raise HTTPException(status_code=423, detail=f"Global Outbound Kill Switch is ACTIVE: {ks_reason}")
+
+    camp_ok, camp_err = check_campaign_allows_dispatch(db, campaign_id)
+    if not camp_ok:
+        raise HTTPException(status_code=409, detail=camp_err)
 
     approved_drafts = db.query(EmailDraft).filter(
         EmailDraft.campaign_id == campaign_id,

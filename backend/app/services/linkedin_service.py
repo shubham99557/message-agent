@@ -297,6 +297,16 @@ def dispatch_approved_linkedin_message(
     msg = db.query(LinkedInMessage).filter(LinkedInMessage.id == message_id).first()
     if not msg:
         raise ValueError("LinkedIn message not found.")
+
+    from app.services.orchestration_service import is_kill_switch_active, check_campaign_allows_dispatch
+
+    ks_active, ks_reason = is_kill_switch_active(db)
+    if ks_active:
+        raise ValueError(f"Blocked: Global Outbound Kill Switch is ACTIVE ({ks_reason}).")
+
+    camp_ok, camp_err = check_campaign_allows_dispatch(db, msg.campaign_id)
+    if not camp_ok:
+        raise ValueError(camp_err or "Campaign is paused or stopped.")
     if msg.approval_status != "approved":
         raise ValueError(
             f"LinkedIn message must be explicitly 'approved' before dispatch (current: '{msg.approval_status}')."

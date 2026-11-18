@@ -1,12 +1,14 @@
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.models.lead import Lead, Followup
 from app.models.activity import SuppressionList
 from app.schemas.whatsapp import WhatsAppDraftRequest
 from app.services.email_generator_service import generate_email_draft
+from app.services.orchestration_service import is_kill_switch_active, is_within_ist_business_hours
 from app.services.whatsapp_service import (
     create_whatsapp_message,
     verify_active_whatsapp_consent,
@@ -28,12 +30,45 @@ CADENCE_TONES = {
 }
 
 
-def process_autonomous_followups(db: Session) -> Dict[str, Any]:
+def process_autonomous_followups(
+    db: Session,
+    enforce_business_hours: bool = True,
+    now_override: Optional[datetime] = None,
+) -> Dict[str, Any]:
     """
     Evaluates all contacted leads and schedules/generates appropriate follow-up touchpoints
-    respecting multi-touch cadence, consent, suppression, and channel switching.
+    respecting:
+    - Global Emergency Outbound Kill Switch
+    - Asia/Kolkata (IST) business-hours window (09:00-18:00 IST weekdays)
+    - Multi-touch cadence, consent, suppression, and channel switching
+    - Mandatory human approval (all generated drafts strictly remain in 'draft' status; NEVER auto-sent)
     """
-    now = datetime.now(timezone.utc)
+    now = now_override or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+
+    # 0. Global Emergency Kill Switch Guard
+    ks_active, ks_reason = is_kill_switch_active(db)
+    if ks_active:
+        return {
+            "timestamp": now.isoformat(),
+            "evaluated_leads": 0,
+            "followups_generated": 0,
+            "skipped_reason": f"global_kill_switch_active: {ks_reason}",
+            "items": [],
+        }
+
+    # 0b. Asia/Kolkata (IST) Business-Hours Guard
+    if enforce_business_hours:
+        in_hours, hours_msg = is_within_ist_business_hours(now_utc=now)
+        if not in_hours:
+            return {
+                "timestamp": now.isoformat(),
+                "evaluated_leads": 0,
+                "followups_generated": 0,
+                "skipped_reason": f"outside_ist_business_hours: {hours_msg}",
+                "items": [],
+            }
 
     # Candidate leads: currently 'contacted', followups < 3
     leads = db.query(Lead).filter(
@@ -47,6 +82,8 @@ def process_autonomous_followups(db: Session) -> Dict[str, Any]:
     for lead in leads:
         company = lead.company
         if not company:
+            continue
+        if settings.ENVIRONMENT.lower() == "production" and company.is_demo:
             continue
 
         # 1. Stop if on Suppression List

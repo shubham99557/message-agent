@@ -11,6 +11,7 @@ from app.schemas.job import (
     QueueHealthResponse
 )
 from app.services import job_service
+from app.services.orchestration_service import list_outbox_items, process_outbox_batch
 
 router = APIRouter()
 
@@ -99,3 +100,24 @@ def retry_dead_letter_task(
     if not task:
         raise HTTPException(status_code=404, detail="Dead letter task not found or already requeued")
     return task
+
+
+@router.get("/outbox")
+def get_dispatch_outbox(
+    status_filter: Optional[str] = Query(None, alias="status"),
+    limit: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["admin", "manager"])),
+):
+    """Lists transactional OutboundDispatchOutbox items."""
+    return list_outbox_items(db=db, status_filter=status_filter, limit=limit)
+
+
+@router.post("/outbox/process")
+def process_dispatch_outbox(
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["admin", "manager"])),
+):
+    """Processes pending transactional OutboundDispatchOutbox records respecting kill switch and campaign status."""
+    return process_outbox_batch(db=db, user_id=current_user.id, limit=limit)

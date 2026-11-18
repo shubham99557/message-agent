@@ -75,3 +75,4 @@ cp acttrident_backup_YYYYMMDD_HHMMSS.db acttrident.db
 | `0003_phase3_whatsapp_sync` | Phase 3 | Adds `whatsapp_templates.meta_template_id`, `synced_from_meta`, `last_synced_at`, and `whatsapp_messages.idempotency_key`. |
 | `0004_phase4_discovery_provenance` | Phase 4 | Adds `companies.verification_status`/`verification_method`, `contact_sources.verification_status`/`verification_method`, and `research_reports.missing_information`/`confidence_level`. |
 | `0005_phase5_linkedin_channel` | Phase 5 | Creates `linkedin_messages` table for compliant LinkedIn outreach drafts, content-hash approvals, manual handoff confirmation, and authorized partner API dispatch. |
+| `0006_phase6_orchestration_outbox` | Phase 6 | Creates `system_settings` (Global Emergency Outbound Kill Switch) and `outbound_dispatch_outbox` (transactional, idempotent multi-channel dispatch outbox). |

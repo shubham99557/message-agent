@@ -1,5 +1,6 @@
-from typing import List
+from typing import List, Optional
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, get_current_user, require_role
@@ -8,8 +9,14 @@ from app.core.audit import record_audit_log
 from app.models.user import User
 from app.models.activity import AuditLog, IntegrationCredential, SuppressionList
 from app.schemas.settings import IntegrationConfigUpdate, IntegrationConfigResponse, AuditLogResponse
+from app.services.orchestration_service import get_kill_switch_status, set_kill_switch
 
 router = APIRouter()
+
+
+class KillSwitchToggleRequest(BaseModel):
+    active: bool
+    reason: Optional[str] = None
 
 
 def _serialize_integration(cred: IntegrationCredential) -> IntegrationConfigResponse:
@@ -97,3 +104,22 @@ def get_suppression_list(
             "created_at": i.created_at
         } for i in items
     ]
+
+
+@router.get("/kill-switch")
+def read_kill_switch(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Returns live status of the Global Emergency Outbound Kill Switch."""
+    return get_kill_switch_status(db)
+
+
+@router.post("/kill-switch")
+def toggle_kill_switch(
+    req: KillSwitchToggleRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["admin", "manager"])),
+):
+    """Activates or deactivates the Global Emergency Outbound Kill Switch immediately (Admin/Manager only)."""
+    return set_kill_switch(db=db, active=req.active, user_id=current_user.id, reason=req.reason)

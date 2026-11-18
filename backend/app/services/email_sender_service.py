@@ -95,6 +95,27 @@ def send_approved_email(
             message="Email draft not found"
         )
 
+    # 0. GLOBAL EMERGENCY KILL SWITCH & CAMPAIGN LIFECYCLE GUARD
+    from app.services.orchestration_service import is_kill_switch_active, check_campaign_allows_dispatch
+
+    ks_active, ks_reason = is_kill_switch_active(db)
+    if ks_active:
+        return EmailSendResult(
+            draft_id=draft_id,
+            status="blocked_kill_switch",
+            provider=draft.provider,
+            message=f"Blocked: Global Outbound Kill Switch is ACTIVE ({ks_reason})."
+        )
+
+    camp_ok, camp_err = check_campaign_allows_dispatch(db, draft.campaign_id)
+    if not camp_ok:
+        return EmailSendResult(
+            draft_id=draft_id,
+            status="blocked_campaign_inactive",
+            provider=draft.provider,
+            message=camp_err or "Campaign is paused or stopped."
+        )
+
     # 1. IDEMPOTENCY GUARD: Prevent duplicate send if already dispatched with a provider ID
     if draft.approval_status in ("sent", "delivered") and draft.provider_message_id:
         return EmailSendResult(

@@ -261,6 +261,17 @@ def send_approved_whatsapp_message(
     if not msg:
         return False, "WhatsApp message record not found"
 
+    # Rule 0: Global Emergency Kill Switch & Campaign Pause/Stop Guard
+    from app.services.orchestration_service import is_kill_switch_active, check_campaign_allows_dispatch
+
+    ks_active, ks_reason = is_kill_switch_active(db)
+    if ks_active:
+        return False, f"Blocked: Global Outbound Kill Switch is ACTIVE ({ks_reason})."
+
+    camp_ok, camp_err = check_campaign_allows_dispatch(db, msg.campaign_id)
+    if not camp_ok:
+        return False, camp_err or "Campaign is paused or stopped."
+
     # Idempotency guard: prevent duplicate dispatch
     if msg.approval_status == "sent" and msg.meta_message_id:
         return False, f"Idempotency Guard: WhatsApp message already dispatched (meta_message_id={msg.meta_message_id})."
