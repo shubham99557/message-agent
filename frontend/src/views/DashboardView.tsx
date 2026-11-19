@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../api/client';
 import { ViewType } from '../types';
+import { AutonomousAgentModal } from '../components/AutonomousAgentModal';
 import {
   Building2,
   CheckCircle2,
@@ -16,7 +17,11 @@ import {
   Activity,
   Cpu,
   RefreshCw,
-  AlertTriangle
+  AlertTriangle,
+  BrainCircuit,
+  Sparkles,
+  Play,
+  BookOpen
 } from 'lucide-react';
 
 interface DashboardViewProps {
@@ -29,6 +34,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
   const [queueHealth, setQueueHealth] = useState<any>(null);
   const [recentJobs, setRecentJobs] = useState<any[]>([]);
   const [runningJob, setRunningJob] = useState<string | null>(null);
+  const [showAgentModal, setShowAgentModal] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const loadData = async () => {
@@ -99,6 +105,55 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
           >
             Approval Queue
           </button>
+        </div>
+      </div>
+
+      {/* Autonomous Outreach Agent (Brain) Hero Banner */}
+      <div className="bg-gradient-to-r from-indigo-950/70 via-cobalt-900/90 to-cobalt-950 border border-indigo-500/30 rounded-xl p-5 shadow-lg relative overflow-hidden">
+        <div className="absolute right-0 top-0 w-96 h-full bg-gradient-to-l from-indigo-500/10 to-transparent pointer-events-none" />
+        
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5 relative z-10">
+          <div className="flex items-start space-x-4">
+            <div className="w-12 h-12 rounded-xl bg-indigo-600/20 border border-indigo-500/40 flex items-center justify-center text-indigo-400 shrink-0 shadow-inner">
+              <BrainCircuit className="w-7 h-7 animate-pulse" />
+            </div>
+            <div className="space-y-1">
+              <div className="flex items-center space-x-2">
+                <h3 className="text-base font-bold text-slate-100 tracking-tight">ActTrident Autonomous Sales Outreach Agent (Brain)</h3>
+                <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                  END-TO-END PIPELINE READY
+                </span>
+              </div>
+              <p className="text-xs text-slate-300 max-w-3xl leading-relaxed">
+                Single-click autonomous orchestration across all 8 phases: Multi-Region Discovery ➔ Deep AI Tech Profiling ➔ 7-Factor Qualification (5+ Laptops) ➔ Campaign Enrollment ➔ Personalized 90-Day Evaluation Copywriting ➔ Staging & Dispatch ➔ CRM Pipeline.
+              </p>
+              <div className="flex flex-wrap items-center gap-3 pt-1 text-[11px] text-slate-400 font-mono">
+                <span className="flex items-center space-x-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                  <span>Target Clusters: Siliguri • Gangtok • Patna • Bhagalpur</span>
+                </span>
+                <span>•</span>
+                <span className="text-indigo-300">Channels: Email (SMTP/Gmail) • WhatsApp (Meta v22.0) • LinkedIn</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center space-x-3 shrink-0">
+            <button
+              onClick={() => onNavigate('integrations')}
+              className="px-3.5 py-2.5 bg-cobalt-950 hover:bg-cobalt-900 border border-cobalt-700 text-slate-300 rounded-lg text-xs font-medium transition-colors flex items-center space-x-1.5"
+            >
+              <BookOpen className="w-3.5 h-3.5 text-cobalt-400" />
+              <span>Channel Guide</span>
+            </button>
+            <button
+              onClick={() => setShowAgentModal(true)}
+              className="px-5 py-2.5 bg-gradient-to-r from-indigo-600 to-cobalt-600 hover:from-indigo-500 hover:to-cobalt-500 text-white font-bold rounded-lg text-xs transition-all flex items-center space-x-2 shadow-lg shadow-indigo-900/40"
+            >
+              <Play className="w-4 h-4 fill-white" />
+              <span>🚀 Launch Outreach Agent</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -435,6 +490,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
           </div>
         )}
       </div>
+
+      {/* Autonomous Outreach Agent Modal Runner */}
+      <AutonomousAgentModal
+        isOpen={showAgentModal}
+        onClose={() => setShowAgentModal(false)}
+        onNavigate={onNavigate}
+        onCycleComplete={loadData}
+      />
     </div>
   );
 };

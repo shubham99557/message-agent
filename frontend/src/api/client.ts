@@ -492,4 +492,16 @@ export const api = {
     return request<any[]>(`/jobs/outbox${query}`);
   },
   processOutbox: (limit: number = 20) => request<any>(`/jobs/outbox/process?limit=${limit}`, { method: 'POST' }),
+
+  // Autonomous Outreach Agent (Brain) Pipeline
+  getAgentStatus: () => request<any>('/agent/status'),
+  runAutonomousCycle: (data: {
+    target_city?: string;
+    campaign_id?: number;
+    channels?: string[];
+    max_prospects?: number;
+    auto_approve_simulation?: boolean;
+  }) => request<any>('/agent/run-cycle', { method: 'POST', body: JSON.stringify(data) }),
+  seedRegionalTargets: (city?: string) =>
+    request<any>(`/agent/seed-targets${city ? `?target_city=${encodeURIComponent(city)}` : ''}`, { method: 'POST' }),
 };

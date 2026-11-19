@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../api/client';
 import { Company, ViewType } from '../types';
+import { AutonomousAgentModal } from '../components/AutonomousAgentModal';
 import {
   BrainCircuit,
   CheckCircle2,
@@ -10,7 +11,8 @@ import {
   Send,
   ExternalLink,
   RefreshCw,
-  ArrowRight
+  ArrowRight,
+  Play
 } from 'lucide-react';
 
 interface ResearchViewProps {
@@ -28,6 +30,7 @@ export const ResearchView: React.FC<ResearchViewProps> = ({ selectedCompany, onN
   const [qualifying, setQualifying] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [verifyMessage, setVerifyMessage] = useState<string | null>(null);
+  const [showAgentModal, setShowAgentModal] = useState(false);
 
   useEffect(() => {
     async function loadCompaniesList() {
@@ -124,19 +127,29 @@ export const ResearchView: React.FC<ResearchViewProps> = ({ selectedCompany, onN
           </div>
         </div>
 
-        <div className="flex items-center space-x-2">
-          <label className="text-xs text-slate-400 shrink-0">Target Company:</label>
-          <select
-            value={activeCompanyId ?? ''}
-            onChange={(e) => setActiveCompanyId(Number(e.target.value))}
-            className="bg-cobalt-950 border border-cobalt-800 rounded px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-cobalt-600 min-w-[220px]"
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => setShowAgentModal(true)}
+            className="px-3.5 py-1.5 bg-gradient-to-r from-indigo-600 to-cobalt-600 hover:from-indigo-500 hover:to-cobalt-500 text-white rounded text-xs font-bold transition-all flex items-center space-x-1.5 shadow"
           >
-            {companies.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name} ({c.city})
-              </option>
-            ))}
-          </select>
+            <Play className="w-3.5 h-3.5 fill-white" />
+            <span>🚀 Run Autonomous Agent</span>
+          </button>
+
+          <div className="flex items-center space-x-2">
+            <label className="text-xs text-slate-400 shrink-0">Company:</label>
+            <select
+              value={activeCompanyId ?? ''}
+              onChange={(e) => setActiveCompanyId(Number(e.target.value))}
+              className="bg-cobalt-950 border border-cobalt-800 rounded px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-cobalt-600 min-w-[200px]"
+            >
+              {companies.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name} ({c.city})
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
 
@@ -388,6 +401,16 @@ export const ResearchView: React.FC<ResearchViewProps> = ({ selectedCompany, onN
       ) : (
         <div className="p-12 text-center text-xs text-slate-400">No company selected.</div>
       )}
+
+      {/* Autonomous Outreach Agent Modal */}
+      <AutonomousAgentModal
+        isOpen={showAgentModal}
+        onClose={() => setShowAgentModal(false)}
+        onNavigate={onNavigate}
+        onCycleComplete={() => {
+          if (activeCompanyId) fetchDossier(activeCompanyId);
+        }}
+      />
     </div>
   );
 };

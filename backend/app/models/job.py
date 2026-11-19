@@ -18,7 +18,8 @@ TASK_CATEGORIES = [
     "followup_scheduling",
     "daily_reporting",
     "outbox_dispatch",
-    "gmail_reply_sync"
+    "gmail_reply_sync",
+    "autonomous_outreach_cycle"
 ]
 
 TASK_STATUSES = [

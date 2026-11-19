@@ -188,6 +188,38 @@ async function runBrowserE2E() {
     const hasKillSwitch = settingsText.includes('Kill Switch') || settingsText.includes('Outbound') || settingsText.includes('Simulation Mode');
     console.log(`  ✓ System Settings view loaded: ${hasKillSwitch}`);
 
+    // 8. Test Autonomous Outreach Agent Brain Console
+    console.log('\n[Step 8] Testing Autonomous Sales Outreach Agent (Brain) Console on Dashboard...');
+    const clickedDashboard = await clickSidebarItem('Dashboard');
+    console.log(`  ✓ Sidebar 'Dashboard' clicked: ${clickedDashboard}`);
+    await new Promise((r) => setTimeout(r, 1000));
+
+    const dashboardText = await page.evaluate(() => document.body.innerText);
+    const hasAgentHero = dashboardText.includes('Autonomous Sales Outreach Agent') || dashboardText.includes('Launch Outreach Agent');
+    console.log(`  ✓ Autonomous Agent Brain Hero banner rendered: ${hasAgentHero}`);
+
+    // Click Launch Outreach Agent button to open modal
+    await page.evaluate(() => {
+      const btns = Array.from(document.querySelectorAll('button'));
+      const launchBtn = btns.find((b) => b.innerText && b.innerText.includes('Launch Outreach Agent'));
+      if (launchBtn) launchBtn.click();
+    });
+    await new Promise((r) => setTimeout(r, 1000));
+
+    const agentModalText = await page.evaluate(() => document.body.innerText);
+    const hasAgentModal = agentModalText.includes('BRAIN V2 ACTIVE') || agentModalText.includes('Launch Autonomous Outreach Run');
+    console.log(`  ✓ Autonomous Agent Brain Console modal opened: ${hasAgentModal}`);
+
+    // Close modal
+    await page.evaluate(() => {
+      const modal = document.querySelector('.fixed');
+      if (!modal) return;
+      const btns = Array.from(modal.querySelectorAll('button'));
+      const closeBtn = btns.find((b) => b.innerText && b.innerText.includes('Close Console'));
+      if (closeBtn) closeBtn.click();
+    });
+    await new Promise((r) => setTimeout(r, 600));
+
     console.log('\n' + '='.repeat(60));
     console.log('ALL BROWSER E2E TEST CHECKS PASSED WITH ZERO CRASHES!');
     console.log('='.repeat(60));

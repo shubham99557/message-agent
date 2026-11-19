@@ -303,6 +303,19 @@ def execute_task_logic(category: str, payload: Dict[str, Any], db) -> Dict[str, 
             max_results=int(payload.get("max_results", 25)),
         )
 
+    elif category in ("autonomous_outreach_cycle", "agent_cycle"):
+        import asyncio
+        from app.services.autonomous_agent_service import run_autonomous_outreach_cycle
+        return asyncio.run(run_autonomous_outreach_cycle(
+            db=db,
+            target_city=payload.get("target_city"),
+            campaign_id=payload.get("campaign_id"),
+            channels=payload.get("channels"),
+            max_prospects=int(payload.get("max_prospects", 10)),
+            auto_approve_simulation=bool(payload.get("auto_approve_simulation", False)),
+            user_id=int(payload.get("user_id", 1)),
+        ))
+
     else:
         raise ValueError(f"Unknown task category: {category}")
 
