@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { api } from '../api/client';
 import {
   Search,
@@ -10,7 +10,8 @@ import {
   Plus,
   Filter,
   FileSpreadsheet,
-  AlertCircle
+  AlertCircle,
+  AlertTriangle
 } from 'lucide-react';
 
 interface DiscoveryViewProps {
@@ -22,6 +23,8 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onCompanyImported 
   const [industry, setIndustry] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [minDevices, setMinDevices] = useState(5);
+  const [includeDemo, setIncludeDemo] = useState(false);
+  const [sources, setSources] = useState<any[]>([]);
   const [results, setResults] = useState<any[]>([]);
   const [searching, setSearching] = useState(false);
   const [importingId, setImportingId] = useState<string | null>(null);
@@ -29,6 +32,13 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onCompanyImported 
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [uploadingCsv, setUploadingCsv] = useState(false);
   const [csvSummary, setCsvSummary] = useState<any>(null);
+  const [crawlUrl, setCrawlUrl] = useState('');
+  const [crawling, setCrawling] = useState(false);
+  const [crawlResult, setCrawlResult] = useState<any>(null);
+
+  useEffect(() => {
+    api.getDiscoverySources().then(setSources).catch(() => {});
+  }, []);
 
   const handleSearch = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -39,7 +49,8 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onCompanyImported 
         city,
         industry: industry === 'All' ? undefined : industry,
         query: searchQuery || undefined,
-        min_devices: minDevices
+        min_devices: minDevices,
+        include_demo: includeDemo
       });
       setResults(data);
     } catch (err: any) {
@@ -79,6 +90,46 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onCompanyImported 
     }
   };
 
+  const handleCrawlWebsite = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!crawlUrl.trim()) return;
+    setCrawling(true);
+    setCrawlResult(null);
+    try {
+      const data = await api.crawlWebsite(crawlUrl.trim(), undefined, city);
+      setCrawlResult(data);
+    } catch (err: any) {
+      alert(`Website scan error: ${err.message}`);
+    } finally {
+      setCrawling(false);
+    }
+  };
+
+  const handleImportCrawled = async () => {
+    if (!crawlResult) return;
+    try {
+      await api.importDiscoveredLead({
+        name: crawlResult.title || new URL(crawlResult.website).hostname,
+        website: crawlResult.website,
+        city: city === 'All' ? 'Siliguri' : city,
+        industry: 'Technology Services',
+        description: crawlResult.description || 'Discovered via live official website scan',
+        public_email: crawlResult.emails?.[0] || undefined,
+        public_phone: crawlResult.phones?.[0] || undefined,
+        laptop_count_verified: null,
+        laptop_count_evidence: crawlResult.evidence_snippets?.join('; ') || 'Unknown - pending manual verification',
+        source_url: crawlResult.source_url,
+        source_type: 'official_website'
+      });
+      setImportSuccess(`Imported ${crawlResult.title || crawlResult.website} from live website scan!`);
+      setCrawlResult(null);
+      setCrawlUrl('');
+      if (onCompanyImported) onCompanyImported();
+    } catch (err: any) {
+      alert(`Import error: ${err.message}`);
+    }
+  };
+
   return (
     <div className="p-6 space-y-6">
       {/* Header Banner */}
@@ -86,9 +137,26 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onCompanyImported 
         <div>
           <h2 className="text-base font-bold text-slate-100 tracking-tight">Public Company Discovery & Lead Research</h2>
           <p className="text-xs text-slate-400 mt-0.5">
-            Discover verified SMBs in target geographies. Only public channels and legitimate directories are utilized.
+            Discover real SMBs from permitted public sources, CSV imports, and website scans. Demo fixtures are strictly separated and labeled.
           </p>
         </div>
+        {sources.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            {sources.map((src) => (
+              <span
+                key={src.name}
+                title={src.description}
+                className={`px-2 py-0.5 rounded text-[10px] font-mono border ${
+                  src.configured
+                    ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                    : 'bg-cobalt-950 text-slate-400 border-cobalt-800'
+                }`}
+              >
+                {src.label}: {src.configured ? 'Active' : 'Unconfigured'}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* CSV Upload Section */}
@@ -127,6 +195,53 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onCompanyImported 
               Batch Import Completed: <strong>{csvSummary.created_count}</strong> new companies added,{' '}
               <strong>{csvSummary.updated_count}</strong> duplicates updated, 0 errors.
             </span>
+          </div>
+        )}
+      </div>
+
+      {/* Live Official Website Scanner (SSRF-Protected) */}
+      <div className="bg-cobalt-900/60 border border-cobalt-800 rounded-lg p-4 space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <div className="text-xs font-semibold text-slate-200">Scan Live Company Website (SSRF-Protected Crawler)</div>
+            <div className="text-[11px] text-slate-400">Extract verified public business emails, phones, and team evidence directly from any public corporate URL</div>
+          </div>
+          <form onSubmit={handleCrawlWebsite} className="flex items-center space-x-2 flex-1 max-w-md">
+            <input
+              type="url"
+              placeholder="https://company-website.com"
+              value={crawlUrl}
+              onChange={(e) => setCrawlUrl(e.target.value)}
+              className="w-full bg-cobalt-950 border border-cobalt-800 rounded px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-cobalt-600"
+              required
+            />
+            <button
+              type="submit"
+              disabled={crawling}
+              className="px-3 py-1.5 bg-cobalt-600 hover:bg-cobalt-500 disabled:opacity-50 text-white rounded text-xs font-medium whitespace-nowrap"
+            >
+              {crawling ? 'Scanning...' : 'Scan URL'}
+            </button>
+          </form>
+        </div>
+
+        {crawlResult && (
+          <div className="p-3 bg-cobalt-950/80 border border-cobalt-700 rounded text-xs space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="font-semibold text-slate-100">{crawlResult.title || crawlResult.website}</div>
+              <button
+                onClick={handleImportCrawled}
+                className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-medium flex items-center space-x-1"
+              >
+                <Plus className="w-3 h-3" />
+                <span>Import as Lead</span>
+              </button>
+            </div>
+            {crawlResult.description && <p className="text-slate-400 text-[11px]">{crawlResult.description}</p>}
+            <div className="flex flex-wrap gap-3 font-mono text-[11px] text-slate-300">
+              <span>Emails: {crawlResult.emails?.length ? crawlResult.emails.join(', ') : 'None found publicly'}</span>
+              <span>Phones: {crawlResult.phones?.length ? crawlResult.phones.join(', ') : 'None found publicly'}</span>
+            </div>
           </div>
         )}
       </div>
@@ -188,7 +303,16 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onCompanyImported 
           />
         </div>
 
-        <div className="flex items-end">
+        <div className="flex flex-col justify-end space-y-1.5">
+          <label className="flex items-center space-x-1.5 text-[11px] text-amber-300/90 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={includeDemo}
+              onChange={(e) => setIncludeDemo(e.target.checked)}
+              className="rounded border-cobalt-700 bg-cobalt-950 text-amber-500 focus:ring-0"
+            />
+            <span>Include Demo Fixtures (dev only)</span>
+          </label>
           <button
             type="submit"
             disabled={searching}
@@ -213,7 +337,26 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onCompanyImported 
           <div className="text-xs font-semibold text-slate-200">
             Discovered Company Records ({results.length} found)
           </div>
-          <span className="text-[11px] font-mono text-slate-400">Strict Source Verification Active</span>
+          <div className="flex items-center space-x-3">
+            <span className="text-[11px] font-mono text-slate-400">Strict Source Verification Active</span>
+            {results.length > 0 && (
+              <button
+                onClick={async () => {
+                  try {
+                    const imported = await api.batchImportDiscoveredLeads(results);
+                    setImportSuccess(`Batch imported ${imported.length} new qualified leads!`);
+                    if (onCompanyImported) onCompanyImported();
+                  } catch (e: any) {
+                    alert(`Batch import failed: ${e.message}`);
+                  }
+                }}
+                className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-medium transition-colors flex items-center space-x-1"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>Import All ({results.length})</span>
+              </button>
+            )}
+          </div>
         </div>
 
         {results.length === 0 ? (
@@ -236,10 +379,19 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onCompanyImported 
                 </tr>
               </thead>
               <tbody className="divide-y divide-cobalt-800/40 text-slate-200">
-                {results.map((comp, idx) => (
+                {results.map((comp, idx) => {
+                  const isDemoItem = comp.is_demo || comp.verification_status === 'demo_fixture';
+                  return (
                   <tr key={idx} className="hover:bg-cobalt-850/50 transition-colors">
                     <td className="py-3 px-3">
-                      <div className="font-semibold text-slate-100">{comp.name}</div>
+                      <div className="flex items-center space-x-1.5">
+                        <span className="font-semibold text-slate-100">{comp.name}</span>
+                        {isDemoItem && (
+                          <span className="px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[9px] font-mono uppercase">
+                            DEMO FIXTURE
+                          </span>
+                        )}
+                      </div>
                       {comp.website && (
                         <a
                           href={comp.website}
@@ -253,26 +405,39 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onCompanyImported 
                       )}
                     </td>
                     <td className="py-3 px-3">
-                      <div className="font-medium">{comp.city}, {comp.state}</div>
-                      <div className="text-[11px] text-slate-400">{comp.industry}</div>
+                      <div className="font-medium">{comp.city}{comp.state ? `, ${comp.state}` : ''}</div>
+                      <div className="text-[11px] text-slate-400">{comp.industry || 'Unspecified'}</div>
                     </td>
                     <td className="py-3 px-3 space-y-0.5 font-mono text-[11px]">
                       {comp.public_email && <div className="text-slate-300">✉ {comp.public_email}</div>}
                       {comp.public_phone && <div className="text-slate-400">☎ {comp.public_phone}</div>}
+                      {!comp.public_email && !comp.public_phone && <div className="text-slate-500">Not publicly listed</div>}
                     </td>
                     <td className="py-3 px-3">
-                      <div className="flex items-center space-x-1.5 text-emerald-400 font-mono font-medium">
-                        <Laptop className="w-3.5 h-3.5" />
-                        <span>{comp.laptop_count_verified} Laptops</span>
-                      </div>
+                      {comp.laptop_count_verified ? (
+                        <div className={`flex items-center space-x-1.5 font-mono font-medium ${isDemoItem ? 'text-amber-300' : 'text-emerald-400'}`}>
+                          <Laptop className="w-3.5 h-3.5" />
+                          <span>{comp.laptop_count_verified} Laptops</span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center space-x-1.5 text-slate-400 font-mono">
+                          <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+                          <span>Unknown</span>
+                        </div>
+                      )}
                       <div className="text-[10px] text-slate-400 truncate max-w-[200px]" title={comp.laptop_count_evidence}>
-                        {comp.laptop_count_evidence}
+                        {comp.laptop_count_evidence || 'Pending manual verification'}
                       </div>
                     </td>
-                    <td className="py-3 px-3 text-[11px]">
-                      <span className="px-2 py-0.5 rounded bg-cobalt-950 border border-cobalt-800 text-slate-300 font-mono">
-                        {comp.source_type}
-                      </span>
+                    <td className="py-3 px-3 text-[11px] space-y-1">
+                      <div>
+                        <span className="px-2 py-0.5 rounded bg-cobalt-950 border border-cobalt-800 text-slate-300 font-mono">
+                          {comp.source_type}
+                        </span>
+                      </div>
+                      <div className="text-[10px] font-mono text-slate-400">
+                        status: {comp.verification_status || (isDemoItem ? 'demo_fixture' : 'unverified')}
+                      </div>
                     </td>
                     <td className="py-3 px-3 text-right">
                       <button
@@ -285,7 +450,8 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onCompanyImported 
                       </button>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

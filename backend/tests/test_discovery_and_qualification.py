@@ -127,3 +127,76 @@ def test_ssrf_and_prompt_injection_security():
     sanitized = sanitize_untrusted_text(payload)
     assert "[FILTERED_INSTRUCTION]" in sanitized
     assert "IGNORE ALL PREVIOUS INSTRUCTIONS" not in sanitized
+
+
+def test_csv_discovery_upload_and_attribution(client, auth_headers):
+    """Test CSV discovery upload parses records and attaches CSV line source attribution."""
+    csv_content = (
+        "company_name,website,city,industry,email,phone,laptops,employees\n"
+        "Himalaya Tech Labs,https://himalaya.example.com,Siliguri,Software Development,contact@himalaya.example.com,+91-9832012345,12,18\n"
+        "Gangtok Digital Studio,https://gangtokdigital.example.com,Gangtok,Digital Marketing,info@gangtokdigital.example.com,+91-9733054321,8,10\n"
+    )
+    files = {"file": ("leads.csv", csv_content.encode("utf-8"), "text/csv")}
+    res = client.post("/api/v1/discovery/upload-csv", files=files, headers=auth_headers)
+    assert res.status_code == 200
+    items = res.json()
+    assert len(items) == 2
+    assert items[0]["name"] == "Himalaya Tech Labs"
+    assert items[0]["city"] == "Siliguri"
+    assert items[0]["laptop_count_verified"] == 12
+    assert "csv://leads.csv#line=2" in items[0]["source_url"]
+    assert items[0]["source_type"] == "csv_import"
+
+
+def test_batch_import_discovered_leads(client, auth_headers):
+    """Test batch importing discovered leads with automatic deduplication."""
+    batch_payload = {
+        "companies": [
+            {
+                "name": "Batch Company Alpha",
+                "city": "Patna",
+                "state": "Bihar",
+                "industry": "Software Services",
+                "public_email": "alpha@batch.example.com",
+                "laptop_count_verified": 7,
+                "laptop_count_evidence": "Office IT inventory list confirms 7 laptops",
+                "source_url": "https://directory.bihar.example.com/alpha",
+                "source_type": "public_directory"
+            },
+            {
+                "name": "Batch Company Beta",
+                "city": "Bhagalpur",
+                "state": "Bihar",
+                "industry": "IT Support",
+                "public_email": "beta@batch.example.com",
+                "laptop_count_verified": 9,
+                "laptop_count_evidence": "MCA registration confirms 9 workstations",
+                "source_url": "https://mca.gov.in/beta",
+                "source_type": "mca_registry"
+            }
+        ]
+    }
+    res = client.post("/api/v1/discovery/batch-import", json=batch_payload, headers=auth_headers)
+    assert res.status_code == 200
+    imported = res.json()
+    assert len(imported) == 2
+    assert imported[0]["name"] == "Batch Company Alpha"
+    assert imported[1]["name"] == "Batch Company Beta"
+
+
+def test_crawl_website_ssrf_protection(client, auth_headers):
+    """Test website crawler blocks SSRF attempts against localhost or cloud metadata."""
+    res_local = client.post(
+        "/api/v1/discovery/crawl-website",
+        json={"website_url": "http://127.0.0.1:8000/api/v1/users"},
+        headers=auth_headers
+    )
+    assert res_local.status_code == 400
+    assert "SSRF" in res_local.json()["detail"] or "permitted" in res_local.json()["detail"]
+
+    res_meta = client.post(
+        "/api/v1/discovery/crawl-website",
+        json={"website_url": "http://169.254.169.254/latest/meta-data"},
+        headers=auth_headers
+    )
+    assert res_meta.status_code == 400

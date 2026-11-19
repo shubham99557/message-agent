@@ -10,12 +10,14 @@ class ContactConsent(Base):
     id = Column(Integer, primary_key=True, index=True)
     company_id = Column(Integer, ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
     contact_id = Column(Integer, ForeignKey("company_contacts.id", ondelete="CASCADE"), nullable=True)
+    contact_identifier = Column(String(100), nullable=True, index=True)  # Phone or Email
     channel = Column(String(50), nullable=False)  # "whatsapp", "email"
     consent_status = Column(String(50), default="unconsented")  # "opted_in", "unconsented", "opted_out"
     consent_source = Column(String(255), nullable=True)  # e.g., "Web Form", "Inbound WhatsApp Inquiry", "Explicit Business Request", "Public Listing (Unconsented)"
-    consent_date = Column(DateTime, nullable=True)
+    consent_date = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     consent_purpose = Column(String(255), nullable=True)  # "ActTrident 90-day evaluation product inquiry"
     proof_reference = Column(String(512), nullable=True)  # URL or ID of form submission / inquiry
+    evidence_url = Column(String(512), nullable=True)
     opt_out_date = Column(DateTime, nullable=True)
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

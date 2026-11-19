@@ -1,137 +1,54 @@
-# ActTrident AI Outreach & Sales Automation Agent
+# ActTrident AI Sales Outreach & Automation Agent
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688.svg)](https://fastapi.tiangolo.com/)
-[![React](https://img.shields.io/badge/Frontend-React%20%2B%20TypeScript-61DAFB.svg)](https://reactjs.org/)
-[![PostgreSQL](https://img.shields.io/badge/Database-PostgreSQL%20%2F%20SQLite-336791.svg)](https://www.postgresql.org/)
-[![Official Meta WhatsApp](https://img.shields.io/badge/WhatsApp-Meta%20Cloud%20API-25D366.svg)](https://developers.facebook.com/docs/whatsapp/cloud-api)
-
-A production-grade, enterprise B2B sales outreach and automation platform purpose-built for the **[ActTrident](https://acttrident.ai/)** business development team.
-
-The platform discovers prospective business customers across initial target cities (**Siliguri**, **Gangtok**, **Patna**, and **Bhagalpur**), conducts automated company research, identifies verified public contact information with full source attribution, evaluates managed laptop fleets (5+ devices), generates personalized multi-channel outreach presenting the proposed **90-Day Free Product Evaluation**, enforces a **Mandatory Human Approval Queue**, integrates the **Official Meta WhatsApp Business Cloud API** with strict consent verification, provides a **16-stage CRM sales pipeline**, classifies inbound replies into **10 categories**, and provides genuine campaign analytics with zero metric inflation.
+A production-ready, security-hardened, multi-channel **B2B AI Sales Outreach & Automation Platform** built for **ActTrident**, targeting SMBs with 5+ managed company laptops across **Siliguri, Gangtok, Patna, and Bhagalpur** (offering the proposed **ActTrident 90-Day Free Product Evaluation**).
 
 ---
 
-## Architecture Overview
-
-```
-+-----------------------------------------------------------------------------------+
-|                        ActTrident Enterprise Architecture                         |
-+-----------------------------------------------------------------------------------+
-|  Executive Cobalt UI  : React 18 + TypeScript + Vite + Tailwind CSS               |
-|  13 Modules           : Dashboard, Discovery, Leads, Research, Email, WhatsApp,   |
-|                         Campaigns, Approval Queue, Inbox, CRM Pipeline, Analytics,|
-|                         Integrations, Settings                                    |
-|                                                                                   |
-|  Backend API Engine   : Python 3.10+ / FastAPI / SQLAlchemy 2.0 / Pydantic v2     |
-|  AI Layer             : Provider-Agnostic (Gemini API, OpenAI-compatible, Mock)   |
-|  Dispatch Engines     : Gmail API / Configurable SMTP & Meta WhatsApp Cloud API   |
-|  Security Controls    : JWT Auth, RBAC, SSRF Guard, Prompt Injection Filter,       |
-|                         Mandatory Human Approval, Immutable DB Audit Trail        |
-+-----------------------------------------------------------------------------------+
-```
+## Key Capabilities
+- **Lead Discovery & Verification**: Modular permitted public discovery adapters (`Tavily`, `SerpAPI`, `OpenStreetMap`), SSRF-protected official website scanner, CSV batch import with line-level source attribution, strict RFC-2606 demo fixture quarantine, and human verification workflow (`POST /api/v1/companies/{id}/verify`).
+- **Truthful AI Research & 7-Factor Qualification**: Generates concise company dossiers with explicit `missing_information`, honest `confidence_level`, zero fabricated security breaches or device counts, and transparent 7-factor heuristic scoring separating employee count from verified 5+ laptop evidence.
+- **Multi-Channel Outreach (`ChannelAdapter` Architecture)**:
+  - **Email**: Official Gmail OAuth 2.0 (`gmail.send` + `gmail.readonly` reply/bounce sync), SMTP fallback (`smtp_accepted`), and honest mock simulation.
+  - **WhatsApp**: Official Meta Cloud API with live template sync, strictly ordered parameter validation, live opt-in consent re-check immediately prior to dispatch, and HMAC-SHA256 verified webhooks.
+  - **LinkedIn**: Official LinkedIn OAuth 2.0 & compliant human-assisted handoff (zero password collection, zero cookie extraction, zero scraping) + approved Partner API support.
+- **Mandatory Human Approval & Tamper-Evident Integrity**: SHA-256 content hashes, immutable `ApprovalRecord` ledger across all channels, automatic approval invalidation on edit, and atomic conditional SQL locks preventing concurrent double sends.
+- **Autonomous Sales Orchestration & Safety Controls**: Global Emergency Outbound Kill Switch (**"Stop All Outbound Sending"**), campaign `pause` / `resume` / `stop` lifecycle controls, crash-safe transactional `OutboundDispatchOutbox`, Asia/Kolkata (`IST`) business-hours follow-up guard, 10-class inbound reply classification, immediate opt-out suppression, CRM pipeline, and honest analytics.
+- **Enterprise Security**: DB-backed RBAC (`admin`, `manager`, `sales_rep`), short-lived JWTs + rotating refresh tokens, instant revocation via `token_version`, Fernet encryption at rest for all secrets/OAuth tokens, redacted structured JSON logging with `X-Request-ID`, and fail-fast production startup guards.
 
 ---
 
-## 13 Core Modules
+## Quick Start (Local Development)
 
-1. **Dashboard**: Executive KPI overview, active regional campaign telemetry, and true conversion funnel.
-2. **Discover Companies**: Multi-criteria search (Siliguri, Gangtok, Patna, Bhagalpur) + batch CSV import with duplicate detection and source logging.
-3. **Lead Database**: Verified accounts with contact source URLs, verification timestamps, and laptop fleet evidence.
-4. **AI Research**: 7-factor qualification scoring and truthful dossiers (no fabricated cyberattacks).
-5. **Email Outreach**: 5 selectable tones (*Friendly professional*, *Formal*, *Technical*, *Short introductory*, *Follow-up*) presenting the proposed 90-day evaluation.
-6. **WhatsApp Outreach**: Official Meta Cloud API with strict consent verification and fallback click-to-chat links.
-7. **Campaigns**: Multi-channel campaigns with conservative daily limits.
-8. **Approval Queue**: Mandatory human review gate (*Approve*, *Edit*, *Reject*, *Skip*, *Bulk Approve*).
-9. **Inbox & Replies**: 10-category AI classifier with human sign-off for negotiations.
-10. **CRM Pipeline**: 16-stage pipeline, meeting scheduler, and 90-day trial activations.
-11. **Analytics**: Funnel metrics calculated with authentic denominators.
-12. **Integrations**: Gemini API, OpenAI, SMTP, and Meta Cloud API connectors.
-13. **Settings**: Tamper-evident audit logs and global suppression registry.
-
----
-
-## Quick Start
-
-### 1. Prerequisites
-- Python 3.10+
-- Node.js 18+ & npm
-- (Optional) Docker & Docker Compose
-
-### 2. Native Local Setup
-
-#### Backend Setup
+### 1. Backend (FastAPI + Alembic)
 ```bash
-# Install Python dependencies
+cp .env.example .env
 pip install -r backend/requirements.txt
-
-# Seed verified sample companies, campaigns, templates, and admin user
-python backend/seed_data.py
-
-# Run FastAPI backend
+python -m alembic -c backend/alembic.ini upgrade head
 python -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
 ```
+API docs: `http://127.0.0.1:8000/docs` • Health: `http://127.0.0.1:8000/health` • Readiness: `http://127.0.0.1:8000/ready`
 
-#### Frontend Setup
+### 2. Frontend (React 18 + TypeScript + Vite 6)
 ```bash
-cd frontend
-npm install
-npm run dev
+npm install --prefix frontend
+npm run dev --prefix frontend
 ```
-Open **[http://localhost:5173](http://localhost:5173)** in your browser.
+UI: `http://localhost:5173`
 
-### 3. Docker Compose Setup
-```bash
-docker compose up --build -d
-docker compose exec backend python seed_data.py
-```
+### 3. Production Stack (Docker Compose: PostgreSQL 16 + Redis 7 + FastAPI + Celery + Nginx)
+See [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) for complete setup, secret generation, Alembic migration, and secure admin provisioning.
 
 ---
 
-## Default Login Credentials
-
-| Role | Email | Password | Access Level |
-| :--- | :--- | :--- | :--- |
-| **Administrator** | `admin@acttrident.ai` | `AdminPassword2026!` | Full platform administration |
-| **Sales Specialist** | `sales@acttrident.ai` | `SalesPassword2026!` | Sales development & outreach |
-
----
-
-## Automated Test Suite
-
-Run the full suite of 21 tests:
-```bash
-python -m pytest
-```
-
-Test coverage includes:
-- Authentication & JWT RBAC
-- Company discovery & duplicate detection
-- Contact-source attribution tracking
-- 7-factor AI lead qualification
-- SSRF prevention & prompt injection defense
-- 5-tone email generation & mandatory human approval
-- WhatsApp consent enforcement & template approval
-- Global suppression list & opt-out enforcement
-- 10-category AI reply classification
-- 16-stage CRM pipeline lifecycle & 90-day evaluation trials
-- Authentic conversion analytics
-
----
-
-## Documentation Guides
-
-- [User Manual](docs/USER_MANUAL.md): BD sales team workflows, lead qualification, and CRM stages.
-- [Security Architecture](docs/SECURITY_DOCUMENTATION.md): SSRF defense, prompt injection shielding, RBAC, audit logging.
-- [Deployment Guide](docs/DEPLOYMENT_GUIDE.md): Docker Compose, PostgreSQL configuration, production scaling.
-- [Gmail & SMTP Setup Guide](docs/GMAIL_INTEGRATION_GUIDE.md): Google Workspace App Password, OAuth, SPF/DKIM/DMARC.
-- [Meta WhatsApp Cloud API Guide](docs/WHATSAPP_CLOUD_API_GUIDE.md): Permanent system token, templates, webhook verification.
-- [AI Provider Configuration](docs/AI_PROVIDER_CONFIGURATION.md): Gemini API, OpenAI endpoints, deterministic fallback.
-- [Sample Companies CSV](sample_companies.csv): Example dataset for Siliguri, Gangtok, Patna, and Bhagalpur.
-- [Sample Templates JSON](sample_templates.json): Pre-approved email and WhatsApp outreach templates.
-
----
-
-## License
-
-This project is licensed under the MIT License.
+## Complete Documentation Index
+1. [ARCHITECTURE.md](ARCHITECTURE.md) — System architecture, data model, and invariants
+2. [SECURITY.md](SECURITY.md) — Authentication, RBAC, Fernet encryption, SSRF/XSS/HMAC defenses
+3. [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) — Production Docker Compose deployment & hardening
+4. [ENVIRONMENT_VARIABLES.md](ENVIRONMENT_VARIABLES.md) — Complete configuration reference
+5. [GMAIL_INTEGRATION_GUIDE.md](GMAIL_INTEGRATION_GUIDE.md) — Official Google OAuth 2.0 Gmail setup
+6. [WHATSAPP_CLOUD_API_GUIDE.md](WHATSAPP_CLOUD_API_GUIDE.md) — Official Meta WhatsApp Cloud API & webhook setup
+7. [LINKEDIN_INTEGRATION_GUIDE.md](LINKEDIN_INTEGRATION_GUIDE.md) — Official LinkedIn OAuth 2.0 & compliant workflow
+8. [DATABASE_MIGRATIONS.md](DATABASE_MIGRATIONS.md) — Alembic revisions (`0001`–`0006`) & backup/restore CLI
+9. [TESTING_GUIDE.md](TESTING_GUIDE.md) — Automated test suites, E2E workflow, & security penetration matrix
+10. [USER_MANUAL.md](USER_MANUAL.md) — Operational guide for Sales Reps, Managers, and Admins
+11. [TROUBLESHOOTING.md](TROUBLESHOOTING.md) — Common errors and resolutions

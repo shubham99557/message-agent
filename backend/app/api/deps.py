@@ -29,7 +29,7 @@ def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
     payload = decode_access_token(token)
-    if not payload:
+    if not payload or payload.get("type") != "access":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate credentials or token expired",
@@ -42,16 +42,32 @@ def get_current_user(
             detail="Invalid token subject",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    # Always fetch fresh user record from DB — never trust stale JWT role or active claims
     user = get_user_by_email(db, email=email)
     if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     if not user.is_active:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Inactive user")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account has been deactivated",
+        )
+    token_tv = payload.get("tv")
+    if token_tv is None or token_tv != (user.token_version or 1):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session has been revoked or missing token version claim. Please sign in again.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     return user
 
 
 def require_role(allowed_roles: list[str]):
     def role_checker(current_user: User = Depends(get_current_user)) -> User:
+        # Evaluates fresh DB-backed role only
         if current_user.role not in allowed_roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

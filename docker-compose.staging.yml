@@ -1,0 +1,158 @@
+version: '3.8'
+
+# Staging Compose Configuration
+# Features: Isolated network, controlled staging credentials, health-monitored dependencies, full background pipeline
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: acttrident_staging_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-acttrident_staging}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?CRITICAL: POSTGRES_PASSWORD must be provided}
+      POSTGRES_DB: ${POSTGRES_DB:-acttrident_staging_db}
+    volumes:
+      - pgdata_staging:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-acttrident_staging} -d ${POSTGRES_DB:-acttrident_staging_db}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - acttrident_staging_net
+
+  redis:
+    image: redis:7-alpine
+    container_name: acttrident_staging_redis
+    restart: always
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    volumes:
+      - redisdata_staging:/data
+    networks:
+      - acttrident_staging_net
+
+  migration:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    container_name: acttrident_staging_migration
+    restart: "no"
+    command: alembic upgrade head
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ENVIRONMENT: staging
+      DATABASE_URL: postgresql://${POSTGRES_USER:-acttrident_staging}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-acttrident_staging_db}
+    networks:
+      - acttrident_staging_net
+
+  backend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    container_name: acttrident_staging_backend
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migration:
+        condition: service_completed_successfully
+    environment:
+      ENVIRONMENT: staging
+      TIMEZONE: ${TIMEZONE:-Asia/Kolkata}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-acttrident_staging}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-acttrident_staging_db}
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      SECRET_KEY: ${SECRET_KEY:?CRITICAL: SECRET_KEY of at least 32 characters must be provided}
+      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:?CRITICAL: CREDENTIAL_ENCRYPTION_KEY must be provided}
+      BACKEND_CORS_ORIGINS: ${BACKEND_CORS_ORIGINS:-http://localhost,http://localhost:5173}
+      AI_PROVIDER: ${AI_PROVIDER:-mock}
+      EMAIL_PROVIDER: ${EMAIL_PROVIDER:-mock}
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    ports:
+      - "8000:8000"
+    networks:
+      - acttrident_staging_net
+
+  celery_worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    container_name: acttrident_staging_worker
+    restart: always
+    command: celery -A app.worker.celery_app.celery_app worker --loglevel=info -Q research,outreach,high_priority,default -c 3
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    environment:
+      ENVIRONMENT: staging
+      TIMEZONE: ${TIMEZONE:-Asia/Kolkata}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-acttrident_staging}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-acttrident_staging_db}
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      SECRET_KEY: ${SECRET_KEY:?CRITICAL: SECRET_KEY must be provided}
+      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:?CRITICAL: CREDENTIAL_ENCRYPTION_KEY must be provided}
+      AI_PROVIDER: ${AI_PROVIDER:-mock}
+      EMAIL_PROVIDER: ${EMAIL_PROVIDER:-mock}
+    networks:
+      - acttrident_staging_net
+
+  celery_beat:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    container_name: acttrident_staging_beat
+    restart: always
+    command: celery -A app.worker.celery_app.celery_app beat --loglevel=info
+    depends_on:
+      - celery_worker
+    environment:
+      ENVIRONMENT: staging
+      TIMEZONE: ${TIMEZONE:-Asia/Kolkata}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-acttrident_staging}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-acttrident_staging_db}
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      SECRET_KEY: ${SECRET_KEY:?CRITICAL: SECRET_KEY must be provided}
+      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:?CRITICAL: CREDENTIAL_ENCRYPTION_KEY must be provided}
+    networks:
+      - acttrident_staging_net
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend
+    container_name: acttrident_staging_frontend
+    restart: always
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+    networks:
+      - acttrident_staging_net
+
+volumes:
+  pgdata_staging:
+  redisdata_staging:
+
+networks:
+  acttrident_staging_net:
+    driver: bridge

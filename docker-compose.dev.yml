@@ -1,0 +1,128 @@
+version: '3.8'
+
+# Development Compose Configuration
+# Features: Host port mappings, live code reload for backend and frontend, development defaults
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: acttrident_dev_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-acttrident}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-acttrident_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-acttrident_dev_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata_dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-acttrident} -d ${POSTGRES_DB:-acttrident_dev_db}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - acttrident_dev_net
+
+  redis:
+    image: redis:7-alpine
+    container_name: acttrident_dev_redis
+    restart: unless-stopped
+    command: redis-server --appendonly no
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - acttrident_dev_net
+
+  backend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    container_name: acttrident_dev_backend
+    restart: unless-stopped
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    environment:
+      ENVIRONMENT: development
+      TIMEZONE: ${TIMEZONE:-Asia/Kolkata}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-acttrident}:${POSTGRES_PASSWORD:-acttrident_dev_password}@postgres:5432/${POSTGRES_DB:-acttrident_dev_db}
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      SECRET_KEY: ${SECRET_KEY:-acttrident-dev-secret-key-replace-in-env-at-least-32-chars}
+      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-dev-encryption-key-32-chars-long}
+      BACKEND_CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000
+      AI_PROVIDER: ${AI_PROVIDER:-mock}
+      EMAIL_PROVIDER: ${EMAIL_PROVIDER:-mock}
+    ports:
+      - "8000:8000"
+    networks:
+      - acttrident_dev_net
+
+  celery_worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    container_name: acttrident_dev_worker
+    restart: unless-stopped
+    command: celery -A app.worker.celery_app.celery_app worker --loglevel=info -Q research,outreach,high_priority,default -c 2
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    environment:
+      ENVIRONMENT: development
+      TIMEZONE: ${TIMEZONE:-Asia/Kolkata}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-acttrident}:${POSTGRES_PASSWORD:-acttrident_dev_password}@postgres:5432/${POSTGRES_DB:-acttrident_dev_db}
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      SECRET_KEY: ${SECRET_KEY:-acttrident-dev-secret-key-replace-in-env-at-least-32-chars}
+      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-dev-encryption-key-32-chars-long}
+      AI_PROVIDER: ${AI_PROVIDER:-mock}
+      EMAIL_PROVIDER: ${EMAIL_PROVIDER:-mock}
+    networks:
+      - acttrident_dev_net
+
+  celery_beat:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    container_name: acttrident_dev_beat
+    restart: unless-stopped
+    command: celery -A app.worker.celery_app.celery_app beat --loglevel=info
+    depends_on:
+      - celery_worker
+    volumes:
+      - ./backend:/app
+    environment:
+      ENVIRONMENT: development
+      TIMEZONE: ${TIMEZONE:-Asia/Kolkata}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-acttrident}:${POSTGRES_PASSWORD:-acttrident_dev_password}@postgres:5432/${POSTGRES_DB:-acttrident_dev_db}
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      SECRET_KEY: ${SECRET_KEY:-acttrident-dev-secret-key-replace-in-env-at-least-32-chars}
+      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-dev-encryption-key-32-chars-long}
+    networks:
+      - acttrident_dev_net
+
+volumes:
+  pgdata_dev:
+
+networks:
+  acttrident_dev_net:
+    driver: bridge

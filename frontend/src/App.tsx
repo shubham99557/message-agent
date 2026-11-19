@@ -11,6 +11,7 @@ import { LeadsView } from './views/LeadsView';
 import { ResearchView } from './views/ResearchView';
 import { EmailOutreachView } from './views/EmailOutreachView';
 import { WhatsAppView } from './views/WhatsAppView';
+import { LinkedInView } from './views/LinkedInView';
 import { CampaignsView } from './views/CampaignsView';
 import { ApprovalQueueView } from './views/ApprovalQueueView';
 import { InboxView } from './views/InboxView';
@@ -28,9 +29,9 @@ export const App: React.FC = () => {
   const [pendingApprovalsCount, setPendingApprovalsCount] = useState(0);
   const [inboxCount, setInboxCount] = useState(0);
 
-  // Login Form State
-  const [email, setEmail] = useState('admin@acttrident.ai');
-  const [password, setPassword] = useState('AdminPassword2026!');
+  // Login Form State (never embed default administrator credentials in client code)
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState<string | null>(null);
   const [loggingIn, setLoggingIn] = useState(false);
 
@@ -68,7 +69,8 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await api.logout();
     clearAuthToken();
     setIsAuthenticated(false);
   };
@@ -101,6 +103,7 @@ export const App: React.FC = () => {
               <label className="block text-[11px] font-medium text-slate-400 mb-1">Corporate Email</label>
               <input
                 type="email"
+                placeholder="name@acttrident.ai"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full bg-cobalt-950 border border-cobalt-800 rounded px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-cobalt-600"
@@ -111,6 +114,7 @@ export const App: React.FC = () => {
               <label className="block text-[11px] font-medium text-slate-400 mb-1">Password</label>
               <input
                 type="password"
+                placeholder="Enter your password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full bg-cobalt-950 border border-cobalt-800 rounded px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-cobalt-600"
@@ -142,6 +146,7 @@ export const App: React.FC = () => {
       case 'research': return { title: 'AI Research Agent', sub: '7-factor qualification & truthful company dossiers' };
       case 'email': return { title: 'Email Outreach', sub: 'Personalized AI email generation across 5 tones' };
       case 'whatsapp': return { title: 'WhatsApp Outreach', sub: 'Meta Cloud API messaging with strict consent verification' };
+      case 'linkedin': return { title: 'LinkedIn Outreach', sub: 'Official OAuth 2.0 & compliant human-assisted outreach workflow' };
       case 'campaigns': return { title: 'Campaign Management', sub: 'Multi-account sequences with daily rate limits' };
       case 'approvals': return { title: 'Human Approval Queue', sub: 'Mandatory human signoff before any outbound dispatch' };
       case 'inbox': return { title: 'Inbound Inbox & AI Replies', sub: '10-class response categorization and suggested replies' };
@@ -180,6 +185,9 @@ export const App: React.FC = () => {
           )}
           {currentView === 'whatsapp' && (
             <WhatsAppView selectedCompany={selectedCompany} onNavigate={setCurrentView} />
+          )}
+          {currentView === 'linkedin' && (
+            <LinkedInView selectedCompany={selectedCompany} />
           )}
           {currentView === 'campaigns' && <CampaignsView onNavigate={setCurrentView} />}
           {currentView === 'approvals' && <ApprovalQueueView />}

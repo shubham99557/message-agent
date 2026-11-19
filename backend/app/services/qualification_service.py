@@ -1,5 +1,6 @@
 import json
-from typing import Dict, Any, List
+from datetime import datetime, timezone, timedelta
+from typing import Dict, Any, List, Optional
 from sqlalchemy.orm import Session
 from app.models.company import Company
 from app.schemas.research import QualificationResult, QualificationFactorResult
@@ -15,6 +16,9 @@ def qualify_company(db: Session, company: Company) -> QualificationResult:
     factors: List[QualificationFactorResult] = []
     total_score = 0.0
 
+    # Primary source reference
+    primary_source = company.sources[0].source_url if (company.sources and len(company.sources) > 0) else (company.website or "Direct verification")
+
     # Factor 1: Is the company technology-related? (Weight: 20%)
     industry_str = (company.industry or "").lower()
     desc_str = (company.description or "").lower()
@@ -25,7 +29,10 @@ def qualify_company(db: Session, company: Company) -> QualificationResult:
         factor_name="Is the company technology-related?",
         passed=is_tech,
         score_weight=f1_score,
-        evidence=f"Industry '{company.industry or 'Unspecified'}' {'aligns with technology/digital sector' if is_tech else 'is non-technical or general'}"
+        evidence=f"Industry '{company.industry or 'Unspecified'}' {'aligns with technology/digital sector' if is_tech else 'is non-technical or general'}",
+        evidence_source=company.website or "Company Registry / MSME Profile",
+        confidence=0.95 if is_tech else 0.70,
+        explanation="ActTrident workspace security solutions specifically protect developers, IT staff, and digital operators handling code and cloud infrastructure."
     ))
 
     # Factor 2: Does it employ at least five people? (Weight: 15%)
@@ -38,7 +45,10 @@ def qualify_company(db: Session, company: Company) -> QualificationResult:
         factor_name="Does it employ at least five people?",
         passed=has_5_emp,
         score_weight=f2_score,
-        evidence=f"Employee range {emp_min}-{emp_max}. Evidence: {company.employee_size_evidence or 'Not documented'}"
+        evidence=f"Employee range {emp_min}-{emp_max}. Evidence: {company.employee_size_evidence or 'Not documented'}",
+        evidence_source=primary_source,
+        confidence=0.90 if has_5_emp else 0.50,
+        explanation="Separated from laptop fleet evidence. Minimum headcount confirms operational viability for team-based product trials."
     ))
 
     # Factor 3: Is there evidence of company-managed laptops? (Weight: 25%) - STRICT!
@@ -50,18 +60,27 @@ def qualify_company(db: Session, company: Company) -> QualificationResult:
     if has_laptop_evidence:
         f3_score = 25.0
         evidence_f3 = f"Verified {company.laptop_count_verified} laptops: {company.laptop_count_evidence}"
+        conf_f3 = 0.95
+        expl_f3 = "Documented proof confirms 5+ active company-managed devices eligible for the proposed 90-day evaluation."
     elif company.laptop_count_verified and company.laptop_count_verified >= 5:
         f3_score = 10.0
         evidence_f3 = f"Claimed {company.laptop_count_verified} laptops but lacks documented source evidence (Cannot verify without confirmation)"
+        conf_f3 = 0.50
+        expl_f3 = "Under ActTrident truthfulness policy, device counts require corroborated corporate evidence before dispatch."
     else:
         f3_score = 0.0
         evidence_f3 = "No documented evidence of 5+ company-managed laptops"
+        conf_f3 = 0.30
+        expl_f3 = "Fleet evidence unknown or under 5 laptops."
     total_score += f3_score
     factors.append(QualificationFactorResult(
         factor_name="Is there evidence of company-managed laptops?",
         passed=has_laptop_evidence,
         score_weight=f3_score,
-        evidence=evidence_f3
+        evidence=evidence_f3,
+        evidence_source=primary_source,
+        confidence=conf_f3,
+        explanation=expl_f3
     ))
 
     # Factor 4: Does it use browser-based workflows? (Weight: 10%)
@@ -72,7 +91,10 @@ def qualify_company(db: Session, company: Company) -> QualificationResult:
         factor_name="Does it use browser-based workflows?",
         passed=browser_workflows,
         score_weight=f4_score,
-        evidence="Web-based operations indicated by official online presence and digital service portfolio" if browser_workflows else "Limited online workflow evidence"
+        evidence="Web-based operations indicated by official online presence and digital service portfolio" if browser_workflows else "Limited online workflow evidence",
+        evidence_source=company.website or "Domain DNS records",
+        confidence=0.85,
+        explanation="Browser workspace isolation delivers immediate security against web-borne data exfiltration."
     ))
 
     # Factor 5: Does it handle customer or business information? (Weight: 10%)
@@ -83,7 +105,10 @@ def qualify_company(db: Session, company: Company) -> QualificationResult:
         factor_name="Does it handle customer or business information?",
         passed=handles_data,
         score_weight=f5_score,
-        evidence="Business model processes client deliverables, project files, and customer account credentials" if handles_data else "General business records"
+        evidence="Business model processes client deliverables, project files, and customer account credentials" if handles_data else "General business records",
+        evidence_source=company.website or "Public business description",
+        confidence=0.85,
+        explanation="Client confidentiality obligations make compliance and data security a high executive priority."
     ))
 
     # Factor 6: Does its business model make ActTrident relevant? (Weight: 10%)
@@ -94,7 +119,10 @@ def qualify_company(db: Session, company: Company) -> QualificationResult:
         factor_name="Does its business model make ActTrident relevant?",
         passed=relevance,
         score_weight=f6_score,
-        evidence="High fit for ActTrident workspace protection and managed laptop fleet oversight" if relevance else "Secondary fit pending device verification"
+        evidence="High fit for ActTrident workspace protection and managed laptop fleet oversight" if relevance else "Secondary fit pending device verification",
+        evidence_source="ActTrident Target Market Heuristic",
+        confidence=0.90,
+        explanation="Focuses outreach resources exclusively on prospects where ActTrident provides tangible ROI."
     ))
 
     # Factor 7: Is there an accessible business contact channel? (Weight: 10%)
@@ -112,32 +140,48 @@ def qualify_company(db: Session, company: Company) -> QualificationResult:
         factor_name="Is there an accessible business contact channel?",
         passed=has_contact,
         score_weight=f7_score,
-        evidence=", ".join(contact_details) if contact_details else "No public business contact channel verified"
+        evidence=", ".join(contact_details) if contact_details else "No public business contact channel verified",
+        evidence_source=primary_source,
+        confidence=1.0 if has_contact else 0.0,
+        explanation="Outreach requires an authenticated, non-private business email or WhatsApp channel."
     ))
 
-    # Determine Classification Status
+    # Determine Classification Status & Recommended Next Action
     if total_score >= 80.0 and has_laptop_evidence:
         status = "High priority"
         reason = f"Excellent candidate for ActTrident 90-day evaluation: verified {company.laptop_count_verified} managed laptops, tech sector, accessible contact."
+        action = "Generate AI email draft and route to manager approval queue for 90-day evaluation invitation."
     elif total_score >= 60.0:
         if not has_laptop_evidence:
             status = "Needs manual verification"
             reason = "Matches technology and employee size criteria, but managed laptop count (5+) requires manual confirmation."
+            action = "Dispatch research specialist to review careers page, MCA filings, or LinkedIn office tours for fleet evidence."
         else:
             status = "Medium priority"
             reason = "Meets core technology and device criteria with moderate overall fit."
+            action = "Draft introductory outreach proposing preliminary capabilities review."
     elif total_score >= 40.0:
         status = "Low priority"
         reason = "Limited technology fit or insufficient contact channels available."
+        action = "Monitor for future expansion or secondary outreach cycle."
     else:
         status = "Not suitable"
         reason = "Does not align with ActTrident target criteria for managed laptop deployments."
+        action = "Archive lead record to suppression list."
+
+    v_status = getattr(company, "verification_status", None) or ("demo_fixture" if company.is_demo else "unverified")
+    if company.is_demo or v_status == "demo_fixture":
+        reason = f"[DEMO FIXTURE — NOT FOR LIVE OUTREACH] {reason}"
 
     distinction_note = (
-        f"Employee count ({company.employee_count_min or 'N/A'}-{company.employee_count_max or 'N/A'}) "
-        f"is distinct from verified laptop count ({company.laptop_count_verified or 'None verified'}). "
-        "Per ActTrident compliance guidelines, 5+ laptops are only certified when supported by documented evidence."
+        f"Verification status: {v_status}. "
+        f"Employee count ({company.employee_count_min or 'Unknown'}-{company.employee_count_max or 'Unknown'}) "
+        f"is distinct from verified laptop count ({company.laptop_count_verified or 'Unknown / None verified'}). "
+        "This score is a transparent heuristic prioritization aid based on currently recorded evidence, not objective certainty. "
+        "Per ActTrident truthfulness guidelines, 5+ laptops are only certified when supported by documented evidence."
     )
+
+    now_utc = datetime.now(timezone.utc)
 
     result = QualificationResult(
         company_id=company.id,
@@ -146,7 +190,10 @@ def qualify_company(db: Session, company: Company) -> QualificationResult:
         reason=reason,
         factors=factors,
         has_verified_5_plus_laptops=has_laptop_evidence,
-        distinction_note=distinction_note
+        distinction_note=distinction_note,
+        recommended_next_action=action,
+        last_verified_at=now_utc,
+        is_stale=False
     )
 
     # Persist in Company record
@@ -155,6 +202,7 @@ def qualify_company(db: Session, company: Company) -> QualificationResult:
     company.qualification_reason = result.reason
     company.qualification_factors = json.dumps([f.model_dump() for f in factors])
     company.has_verified_5_plus_laptops = has_laptop_evidence
+    company.date_last_verified = now_utc
 
     # If lead exists, update pipeline status
     if company.lead:
@@ -165,3 +213,21 @@ def qualify_company(db: Session, company: Company) -> QualificationResult:
 
     db.commit()
     return result
+
+
+def reverify_stale_qualifications(db: Session, max_age_days: int = 30) -> List[QualificationResult]:
+    """
+    Scans company records whose qualification evidence is older than max_age_days
+    and re-runs the qualification engine.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
+    stale_companies = db.query(Company).filter(
+        Company.is_demo == False,
+        (Company.date_last_verified == None) | (Company.date_last_verified < cutoff)
+    ).limit(50).all()
+
+    results = []
+    for company in stale_companies:
+        res = qualify_company(db, company)
+        results.append(res)
+    return results

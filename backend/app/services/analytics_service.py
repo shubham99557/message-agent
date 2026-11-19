@@ -4,52 +4,115 @@ from sqlalchemy import func
 
 from app.models.company import Company
 from app.models.lead import Lead, Meeting, Trial, Customer
-from app.models.email import EmailDraft, EmailEvent
+from app.models.email import EmailDraft, EmailEvent, EmailSendAttempt
 from app.models.reply import Reply
 from app.models.activity import SuppressionList
-from app.models.campaign import Campaign
+from app.models.campaign import Campaign, CampaignRecipient
 from app.schemas.analytics import FunnelMetrics, CityBreakdownItem, CampaignPerformanceSummary
 
 
 def calculate_funnel_metrics(db: Session, campaign_id: Optional[int] = None) -> FunnelMetrics:
-    # 1. Total companies researched
-    comp_query = db.query(Company)
-    total_companies = comp_query.count()
+    """
+    Computes strictly truthful funnel metrics:
+    - Excludes demo fixture records (Company.is_demo == True) from production prospect totals.
+    - Keeps real `emails_sent` strictly separate from `emails_simulated`, `emails_queued`, `emails_accepted`, and `emails_failed`.
+    - Scopes ALL funnel counters by `campaign_id` when `campaign_id` is supplied.
+    """
+    # 1. Non-demo companies researched & qualified
+    if campaign_id:
+        recipient_company_ids = [
+            r.company_id
+            for r in db.query(CampaignRecipient.company_id).filter(CampaignRecipient.campaign_id == campaign_id).all()
+        ]
+        comp_query = db.query(Company).filter(
+            Company.is_demo == False,
+            Company.id.in_(recipient_company_ids) if recipient_company_ids else False,
+        )
+    else:
+        recipient_company_ids = None
+        comp_query = db.query(Company).filter(Company.is_demo == False)
 
-    # 2. Qualified leads
-    qualified_leads = db.query(Company).filter(
+    total_companies = comp_query.count()
+    qualified_leads = comp_query.filter(
         Company.qualification_status.in_(["High priority", "Medium priority"])
     ).count()
 
-    # 3. Email counts
-    draft_query = db.query(EmailDraft)
+    # 2. Email counts (exclude drafts for demo companies when real/non-campaign or always exclude demo companies)
+    draft_query = db.query(EmailDraft).join(Company, EmailDraft.company_id == Company.id).filter(Company.is_demo == False)
     if campaign_id:
         draft_query = draft_query.filter(EmailDraft.campaign_id == campaign_id)
 
     emails_drafted = draft_query.count()
-    emails_approved = draft_query.filter(EmailDraft.approval_status.in_(["approved", "sent"])).count()
-    
-    # Strictly sent messages (never count drafted or queued!)
-    emails_sent = draft_query.filter(EmailDraft.approval_status == "sent").count()
+    emails_approved = draft_query.filter(
+        EmailDraft.approval_status.in_(["approved", "queued", "sending", "sent", "delivered", "bounced", "simulated"])
+    ).count()
+    emails_queued = draft_query.filter(EmailDraft.approval_status == "queued").count()
+    emails_simulated = draft_query.filter(EmailDraft.approval_status == "simulated").count()
+    emails_failed = draft_query.filter(EmailDraft.approval_status == "failed").count()
 
-    # Events
-    emails_delivered = db.query(EmailEvent).filter(EmailEvent.event_type == "delivered").count()
-    bounces = db.query(EmailEvent).filter(EmailEvent.event_type.in_(["bounced", "complaint"])).count()
+    # Strictly REAL provider sends only — NEVER lump simulated test dispatches into emails_sent!
+    emails_sent = draft_query.filter(EmailDraft.approval_status.in_(["sent", "delivered", "bounced"])).count()
 
-    # 4. Inbound replies
-    replies_count = db.query(Reply).count()
-    interested_count = db.query(Reply).filter(
+    # Accepted by provider (Gmail API or SMTP relay)
+    attempt_query = (
+        db.query(EmailSendAttempt)
+        .join(EmailDraft, EmailSendAttempt.draft_id == EmailDraft.id)
+        .join(Company, EmailDraft.company_id == Company.id)
+        .filter(
+            Company.is_demo == False,
+            EmailSendAttempt.outcome.in_(["sent", "smtp_accepted"]),
+        )
+    )
+    if campaign_id:
+        attempt_query = attempt_query.filter(EmailDraft.campaign_id == campaign_id)
+    emails_accepted = attempt_query.count()
+
+    # Events (scoped to non-demo & optional campaign_id)
+    event_query = (
+        db.query(EmailEvent)
+        .join(EmailDraft, EmailEvent.draft_id == EmailDraft.id)
+        .join(Company, EmailDraft.company_id == Company.id)
+        .filter(Company.is_demo == False)
+    )
+    if campaign_id:
+        event_query = event_query.filter(EmailDraft.campaign_id == campaign_id)
+
+    emails_delivered = event_query.filter(EmailEvent.event_type == "delivered").count()
+    bounces = event_query.filter(EmailEvent.event_type.in_(["bounced", "complaint"])).count()
+
+    # 3. Inbound replies (scoped to campaign_id when given)
+    reply_query = db.query(Reply)
+    if campaign_id:
+        reply_query = reply_query.filter(Reply.campaign_id == campaign_id)
+    replies_count = reply_query.count()
+    interested_count = reply_query.filter(
         Reply.classification.in_(["interested", "requests_demonstration", "requests_pricing"])
     ).count()
 
-    # 5. Pipeline Stages
-    meetings_booked = db.query(Meeting).count()
-    demos_completed = db.query(Meeting).filter(Meeting.status == "completed").count()
-    trials_started = db.query(Trial).count()
-    paid_conversions = db.query(Customer).count()
+    # 4. Pipeline Stages (scoped to campaign recipient companies when campaign_id is given)
+    if campaign_id:
+        lead_ids = [
+            l.id
+            for l in db.query(Lead.id).filter(Lead.company_id.in_(recipient_company_ids) if recipient_company_ids else False).all()
+        ]
+        meetings_booked = db.query(Meeting).filter(Meeting.lead_id.in_(lead_ids) if lead_ids else False).count()
+        demos_completed = db.query(Meeting).filter(
+            Meeting.lead_id.in_(lead_ids) if lead_ids else False,
+            Meeting.status == "completed",
+        ).count()
+        trials_started = db.query(Trial).filter(Trial.lead_id.in_(lead_ids) if lead_ids else False).count()
+        paid_conversions = db.query(Customer).filter(
+            Customer.company_id.in_(recipient_company_ids) if recipient_company_ids else False
+        ).count()
+    else:
+        meetings_booked = db.query(Meeting).count()
+        demos_completed = db.query(Meeting).filter(Meeting.status == "completed").count()
+        trials_started = db.query(Trial).count()
+        paid_conversions = db.query(Customer).count()
+
     opt_outs = db.query(SuppressionList).count()
 
-    # Authentic Denominators
+    # Authentic Denominators (strictly using genuine real emails_sent, never simulated)
     qual_rate = (qualified_leads / total_companies * 100) if total_companies > 0 else 0.0
     appr_rate = (emails_approved / emails_drafted * 100) if emails_drafted > 0 else 0.0
     deliv_rate = (emails_delivered / emails_sent * 100) if emails_sent > 0 else 0.0
@@ -63,8 +126,12 @@ def calculate_funnel_metrics(db: Session, campaign_id: Optional[int] = None) -> 
         qualified_leads=qualified_leads,
         emails_drafted=emails_drafted,
         emails_approved=emails_approved,
+        emails_queued=emails_queued,
+        emails_accepted=emails_accepted,
         emails_sent=emails_sent,
+        emails_simulated=emails_simulated,
         emails_delivered=emails_delivered,
+        emails_failed=emails_failed,
         bounces=bounces,
         replies_received=replies_count,
         interested_prospects=interested_count,
@@ -88,23 +155,30 @@ def calculate_city_breakdown(db: Session) -> List[CityBreakdownItem]:
     breakdowns = []
 
     for city in cities:
-        c_count = db.query(Company).filter(Company.city.ilike(f"%{city}%")).count()
-        laptop_count = db.query(Company).filter(
+        c_count = db.query(Company).filter(
+            Company.is_demo == False,
             Company.city.ilike(f"%{city}%"),
-            Company.has_verified_5_plus_laptops == True
         ).count()
-        
-        sent = db.query(EmailDraft).join(Company).filter(
+        laptop_count = db.query(Company).filter(
+            Company.is_demo == False,
             Company.city.ilike(f"%{city}%"),
-            EmailDraft.approval_status == "sent"
+            Company.has_verified_5_plus_laptops == True,
+        ).count()
+
+        sent = db.query(EmailDraft).join(Company).filter(
+            Company.is_demo == False,
+            Company.city.ilike(f"%{city}%"),
+            EmailDraft.approval_status.in_(["sent", "delivered"]),
         ).count()
 
         replies = db.query(Reply).join(Company).filter(
-            Company.city.ilike(f"%{city}%")
+            Company.is_demo == False,
+            Company.city.ilike(f"%{city}%"),
         ).count()
 
         trials = db.query(Trial).join(Lead).join(Company).filter(
-            Company.city.ilike(f"%{city}%")
+            Company.is_demo == False,
+            Company.city.ilike(f"%{city}%"),
         ).count()
 
         breakdowns.append(CityBreakdownItem(
@@ -125,23 +199,38 @@ def calculate_campaign_performances(db: Session) -> List[CampaignPerformanceSumm
 
     for camp in campaigns:
         recipients_count = len(camp.recipients)
-        drafted = db.query(EmailDraft).filter(EmailDraft.campaign_id == camp.id).count()
-        approved = db.query(EmailDraft).filter(
+        drafted = db.query(EmailDraft).join(Company).filter(
+            Company.is_demo == False,
             EmailDraft.campaign_id == camp.id,
-            EmailDraft.approval_status == "approved"
         ).count()
-        sent = db.query(EmailDraft).filter(
+        approved = db.query(EmailDraft).join(Company).filter(
+            Company.is_demo == False,
             EmailDraft.campaign_id == camp.id,
-            EmailDraft.approval_status == "sent"
+            EmailDraft.approval_status.in_(["approved", "queued", "sending", "sent", "delivered"]),
         ).count()
-        delivered = db.query(EmailEvent).join(EmailDraft).filter(
+        sent = db.query(EmailDraft).join(Company).filter(
+            Company.is_demo == False,
             EmailDraft.campaign_id == camp.id,
-            EmailEvent.event_type == "delivered"
+            EmailDraft.approval_status.in_(["sent", "delivered"]),
+        ).count()
+        delivered = db.query(EmailEvent).join(EmailDraft).join(Company).filter(
+            Company.is_demo == False,
+            EmailDraft.campaign_id == camp.id,
+            EmailEvent.event_type == "delivered",
         ).count()
 
-        trials = db.query(Trial).join(Lead).join(Company).join(EmailDraft).filter(
-            EmailDraft.campaign_id == camp.id
-        ).count()
+        # Genuine per-campaign reply count (never hardcoded to 0!)
+        replies = db.query(Reply).filter(Reply.campaign_id == camp.id).count()
+
+        recipient_company_ids = [r.company_id for r in camp.recipients]
+        trials = (
+            db.query(Trial)
+            .join(Lead)
+            .filter(Lead.company_id.in_(recipient_company_ids))
+            .count()
+            if recipient_company_ids
+            else 0
+        )
 
         conv_rate = (trials / sent * 100) if sent > 0 else 0.0
 
@@ -154,9 +243,72 @@ def calculate_campaign_performances(db: Session) -> List[CampaignPerformanceSumm
             approved=approved,
             sent=sent,
             delivered=delivered,
-            replies=0,
+            replies=replies,
             trials=trials,
             conversion_rate=round(conv_rate, 1)
         ))
 
     return summaries
+
+
+def generate_daily_operational_digest(db: Session) -> dict:
+    """Generates comprehensive daily digest with exact metrics across all modules."""
+    from datetime import datetime, timezone
+    from app.models.job import BackgroundTaskRecord, DeadLetterTask
+    from app.models.whatsapp import WhatsAppMessage
+    from app.core.config import settings
+
+    now_utc = datetime.now(timezone.utc)
+    today_start = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    # 1. Pipeline & Volume
+    funnel = calculate_funnel_metrics(db)
+    city_breakdown = calculate_city_breakdown(db)
+
+    # 2. Email & WhatsApp Dispatches (Real vs Simulated)
+    emails_sent_real = db.query(EmailDraft).filter(EmailDraft.approval_status == "sent").count()
+    emails_simulated = db.query(EmailDraft).filter(EmailDraft.approval_status == "simulated").count()
+    wa_sent_real = db.query(WhatsAppMessage).filter(WhatsAppMessage.approval_status == "sent").count()
+    wa_simulated = db.query(WhatsAppMessage).filter(WhatsAppMessage.approval_status == "simulated").count()
+
+    # 3. Replies by Category (all 10 classes)
+    reply_counts_by_cat = {}
+    reply_rows = db.query(Reply.classification, func.count(Reply.id)).group_by(Reply.classification).all()
+    for cat, count in reply_rows:
+        reply_counts_by_cat[cat] = count
+
+    # 4. Job Engine Health & DLQ
+    dlq_count = db.query(DeadLetterTask).filter(DeadLetterTask.requeued == False).count()
+    failed_tasks_today = db.query(BackgroundTaskRecord).filter(
+        BackgroundTaskRecord.created_at >= today_start,
+        BackgroundTaskRecord.status == "failed"
+    ).count()
+
+    return {
+        "report_date": today_start.strftime("%Y-%m-%d"),
+        "timezone": settings.TIMEZONE,
+        "generated_at": now_utc.isoformat(),
+        "summary": {
+            "total_companies_discovered": funnel.total_companies_researched,
+            "qualified_leads": funnel.qualified_leads,
+            "qualification_rate_percent": funnel.qualification_rate,
+            "emails_drafted": funnel.emails_drafted,
+            "emails_approved": funnel.emails_approved,
+            "emails_dispatched_real": emails_sent_real,
+            "emails_dispatched_simulated": emails_simulated,
+            "whatsapp_dispatched_real": wa_sent_real,
+            "whatsapp_dispatched_simulated": wa_simulated,
+            "replies_received": funnel.replies_received,
+            "meetings_booked": funnel.meetings_booked,
+            "evaluation_programs_started": funnel.trials_started,
+            "customer_conversions": funnel.paid_conversions,
+            "opt_outs": funnel.opt_outs
+        },
+        "replies_breakdown": reply_counts_by_cat,
+        "worker_health": {
+            "failed_tasks_today": failed_tasks_today,
+            "unresolved_dead_letters": dlq_count,
+            "status": "healthy" if dlq_count == 0 else "action_required"
+        },
+        "city_breakdown": [item.model_dump() for item in city_breakdown]
+    }

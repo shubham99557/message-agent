@@ -13,7 +13,9 @@ import {
   ShieldCheck,
   Clock,
   Layers,
-  Save
+  Save,
+  RefreshCw,
+  Calendar
 } from 'lucide-react';
 
 export const ApprovalQueueView: React.FC = () => {
@@ -24,12 +26,17 @@ export const ApprovalQueueView: React.FC = () => {
   const [editingDraft, setEditingDraft] = useState<EmailDraft | null>(null);
   const [editSubject, setEditSubject] = useState('');
   const [editBody, setEditBody] = useState('');
+  const [emailMode, setEmailMode] = useState<any>(null);
 
   const loadQueue = async () => {
     setLoading(true);
     try {
-      const data = await api.getApprovalQueue(statusFilter);
+      const [data, mode] = await Promise.all([
+        api.getApprovalQueue(statusFilter),
+        api.getGmailStatus().catch(() => null),
+      ]);
       setDrafts(data.items);
+      setEmailMode(mode);
       setSelectedIds([]);
     } catch (err) {
       console.error(err);
@@ -71,6 +78,32 @@ export const ApprovalQueueView: React.FC = () => {
     }
   };
 
+  const handleRegenerate = async (id: number) => {
+    const tone = prompt('Select tone: Friendly professional, Formal, Technical, Short introductory, Follow-up', 'Friendly professional');
+    if (!tone) return;
+    try {
+      await api.regenerateEmailDraft(id, tone);
+      alert('Draft regenerated successfully and reset to draft status for human review.');
+      loadQueue();
+    } catch (err: any) {
+      alert(`Regeneration error: ${err.message}`);
+    }
+  };
+
+  const handleSchedule = async (id: number) => {
+    const defaultTime = new Date(Date.now() + 3600 * 1000 * 24).toISOString().slice(0, 16);
+    const timeStr = prompt('Enter scheduled dispatch time (YYYY-MM-DDTHH:MM):', defaultTime);
+    if (!timeStr) return;
+    try {
+      const scheduledIso = new Date(timeStr).toISOString();
+      await api.scheduleEmailDraft(id, scheduledIso);
+      alert(`Draft scheduled for ${timeStr} IST.`);
+      loadQueue();
+    } catch (err: any) {
+      alert(`Schedule error: ${err.message}`);
+    }
+  };
+
   const handleBulkApprove = async () => {
     if (selectedIds.length === 0) return;
     try {
@@ -93,9 +126,9 @@ export const ApprovalQueueView: React.FC = () => {
     try {
       await api.updateEmailDraft(editingDraft.id, {
         subject: editSubject,
-        body_text: editBody,
-        approval_status: 'approved'
+        body_text: editBody
       });
+      await api.approveEmail(editingDraft.id);
       setEditingDraft(null);
       loadQueue();
     } catch (err: any) {
@@ -147,12 +180,33 @@ export const ApprovalQueueView: React.FC = () => {
             <option value="draft">Pending Approval (Drafts)</option>
             <option value="approved">Approved</option>
             <option value="sent">Dispatched (Sent)</option>
+            <option value="simulated">Simulated (Mock)</option>
             <option value="rejected">Rejected</option>
             <option value="skipped">Skipped</option>
             <option value="All">All Records</option>
           </select>
         </div>
       </div>
+
+      {/* Honest Simulation / Provider Mode Banner */}
+      {emailMode && (
+        <div
+          className={`p-3 rounded-lg border text-xs flex items-center justify-between ${
+            emailMode.is_simulation
+              ? 'bg-amber-500/10 border-amber-500/30 text-amber-200'
+              : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200'
+          }`}
+        >
+          <span>
+            {emailMode.is_simulation
+              ? 'SIMULATION MODE ACTIVE: Emails sent from this queue are recorded as simulated locally and will NOT be transmitted externally.'
+              : `LIVE EMAIL PROVIDER CONNECTED: Dispatching via ${emailMode.active_mode.toUpperCase()}${emailMode.gmail?.account_email ? ` (${emailMode.gmail.account_email})` : ''}.`}
+          </span>
+          <span className="font-mono text-[10px] uppercase px-2 py-0.5 rounded bg-black/30">
+            {emailMode.active_mode}
+          </span>
+        </div>
+      )}
 
       {/* Drafts List / Cards */}
       {loading ? (
@@ -246,6 +300,24 @@ export const ApprovalQueueView: React.FC = () => {
                     <span>Edit</span>
                   </button>
 
+                  <button
+                    onClick={() => handleRegenerate(draft.id)}
+                    className="px-2.5 py-1 bg-cobalt-950 hover:bg-cobalt-850 border border-cobalt-700 text-slate-200 rounded text-xs font-medium flex items-center space-x-1"
+                    title="Request AI regeneration with different tone or notes"
+                  >
+                    <RefreshCw className="w-3 h-3 text-amber-400" />
+                    <span>Regenerate</span>
+                  </button>
+
+                  <button
+                    onClick={() => handleSchedule(draft.id)}
+                    className="px-2.5 py-1 bg-cobalt-950 hover:bg-cobalt-850 border border-cobalt-700 text-slate-200 rounded text-xs font-medium flex items-center space-x-1"
+                    title="Set target scheduled dispatch timestamp"
+                  >
+                    <Calendar className="w-3 h-3 text-cobalt-400" />
+                    <span>Schedule</span>
+                  </button>
+
                   {draft.approval_status === 'draft' && (
                     <>
                       <button
@@ -276,8 +348,8 @@ export const ApprovalQueueView: React.FC = () => {
                     <button
                       onClick={async () => {
                         try {
-                          await api.sendApprovedEmail(draft.id);
-                          alert('Email dispatched!');
+                          const res = await api.sendApprovedEmail(draft.id);
+                          alert(res.message || `Email status: ${res.status}`);
                           loadQueue();
                         } catch (err: any) {
                           alert(`Error: ${err.message}`);

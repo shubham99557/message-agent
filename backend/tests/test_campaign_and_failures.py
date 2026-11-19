@@ -20,10 +20,10 @@ def test_campaign_scheduling_and_batch_processing(client, auth_headers):
     camp_id = campaign["id"]
     assert campaign["status"] == "draft"  # All campaigns must default to draft!
 
-    # 2. Add recipients
+    # 2. Add real non-demo recipient
     c1 = client.post(
         "/api/v1/companies",
-        json={"name": "Siliguri Cloud Alpha 2", "city": "Siliguri", "public_email": "alpha2@siliguricloud.example.com"},
+        json={"name": "Siliguri Cloud Alpha 2", "city": "Siliguri", "public_email": "alpha2@siliguricloud.in", "is_demo": False},
         headers=auth_headers
     ).json()
 

@@ -8,6 +8,9 @@ class QualificationFactorResult(BaseModel):
     passed: bool
     score_weight: float
     evidence: str
+    evidence_source: Optional[str] = None
+    confidence: float = 1.0
+    explanation: Optional[str] = None
 
 
 class QualificationResult(BaseModel):
@@ -18,6 +21,9 @@ class QualificationResult(BaseModel):
     factors: List[QualificationFactorResult]
     has_verified_5_plus_laptops: bool
     distinction_note: str
+    recommended_next_action: str = "Proceed to outreach"
+    last_verified_at: Optional[datetime] = None
+    is_stale: bool = False
 
 
 class ResearchReportBase(BaseModel):
@@ -29,6 +35,8 @@ class ResearchReportBase(BaseModel):
     relevant_decision_maker_role: Optional[str] = None
     recommended_outreach_approach: Optional[str] = None
     sources_summary: Optional[str] = None
+    missing_information: Optional[str] = None
+    confidence_level: Optional[float] = 0.5
 
 
 class ResearchReportResponse(ResearchReportBase):
@@ -43,6 +51,7 @@ class DiscoveryQuery(BaseModel):
     industry: Optional[str] = None
     query: Optional[str] = None
     min_devices: Optional[int] = 5
+    include_demo: bool = True  # Explicitly separates .example.com demo fixtures from real sources
 
 
 class DiscoveredCompanyItem(BaseModel):
@@ -65,3 +74,17 @@ class DiscoveredCompanyItem(BaseModel):
     laptop_count_evidence: Optional[str] = None
     source_url: str
     source_type: str = "business_directory"
+    is_demo: bool = False
+    verification_status: str = "unverified"  # verified, unverified, inferred, unknown, demo_fixture
+    confidence_level: float = 0.5
+    retrieval_timestamp: Optional[datetime] = None
+
+
+class WebsiteCrawlRequest(BaseModel):
+    website_url: str
+    company_name: Optional[str] = None
+    city: Optional[str] = None
+
+
+class BatchImportRequest(BaseModel):
+    companies: List[DiscoveredCompanyItem]

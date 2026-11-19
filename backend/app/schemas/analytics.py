@@ -7,8 +7,12 @@ class FunnelMetrics(BaseModel):
     qualified_leads: int
     emails_drafted: int
     emails_approved: int
+    emails_queued: int = 0
+    emails_accepted: int = 0
     emails_sent: int
+    emails_simulated: int = 0
     emails_delivered: int
+    emails_failed: int = 0
     bounces: int
     replies_received: int
     interested_prospects: int

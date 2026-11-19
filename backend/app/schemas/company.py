@@ -19,16 +19,18 @@ class ContactSourceResponse(ContactSourceBase):
     id: int
     company_id: int
     contact_id: Optional[int] = None
-    verified_at: datetime
+    verification_status: str = "unverified"
+    verification_method: Optional[str] = None
+    retrieved_at: Optional[datetime] = None
+    confidence: Optional[float] = 1.0
     model_config = ConfigDict(from_attributes=True)
 
 
 class CompanyContactBase(BaseModel):
     name: str
-    title: Optional[str] = None
+    role: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
-    whatsapp: Optional[str] = None
     linkedin_url: Optional[str] = None
     is_primary: bool = False
 
@@ -41,7 +43,6 @@ class CompanyContactResponse(CompanyContactBase):
     id: int
     company_id: int
     created_at: datetime
-    sources: List[ContactSourceResponse] = []
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -71,6 +72,7 @@ class CompanyBase(BaseModel):
     decision_maker_role: Optional[str] = None
     decision_maker_email: Optional[str] = None
     decision_maker_linkedin: Optional[str] = None
+    is_demo: bool = False
 
 
 class CompanyCreate(CompanyBase):
@@ -103,10 +105,25 @@ class CompanyUpdate(BaseModel):
     qualification_status: Optional[str] = None
     qualification_score: Optional[float] = None
     qualification_reason: Optional[str] = None
+    is_demo: Optional[bool] = None
+
+
+class CompanyVerifyRequest(BaseModel):
+    verification_status: str  # verified, unverified, inferred, unknown
+    verification_method: str = "manual_review"
+    notes: Optional[str] = None
+    laptop_count_verified: Optional[int] = None
+    laptop_count_evidence: Optional[str] = None
+    public_email: Optional[str] = None
+    public_phone: Optional[str] = None
+    decision_maker_name: Optional[str] = None
+    decision_maker_role: Optional[str] = None
 
 
 class CompanyResponse(CompanyBase):
     id: int
+    verification_status: str = "unverified"
+    verification_method: Optional[str] = None
     qualification_score: float
     qualification_status: str
     qualification_reason: Optional[str] = None
@@ -114,6 +131,7 @@ class CompanyResponse(CompanyBase):
     date_last_verified: datetime
     created_at: datetime
     updated_at: datetime
+    created_by_id: Optional[int] = None
     contacts: List[CompanyContactResponse] = []
     sources: List[ContactSourceResponse] = []
     model_config = ConfigDict(from_attributes=True)

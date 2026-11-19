@@ -2,7 +2,7 @@ from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, get_current_user
+from app.api.deps import get_db, get_current_user, require_role
 from app.models.user import User
 from app.models.reply import Reply, Conversation, REPLY_CATEGORIES
 from app.schemas.reply import InboundReplyCreate, ReplyResponse, SuggestedResponseApproval
@@ -15,8 +15,10 @@ router = APIRouter()
 @router.post("/inbound", response_model=ReplyResponse, status_code=status.HTTP_201_CREATED)
 def receive_inbound_reply(
     payload: InboundReplyCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
+    """Authenticated endpoint for ingesting verified incoming customer communications."""
     reply = ingest_inbound_reply(
         db=db,
         channel=payload.channel,
@@ -24,6 +26,14 @@ def receive_inbound_reply(
         recipient_identifier=payload.recipient_identifier,
         subject=payload.subject,
         message_body=payload.message_body
+    )
+    record_audit_log(
+        db=db,
+        action="ingest_inbound_reply",
+        entity_type="reply",
+        entity_id=str(reply.id),
+        user_id=current_user.id,
+        details={"sender": reply.sender_identifier, "channel": reply.channel}
     )
     return ReplyResponse(
         id=reply.id,
@@ -62,10 +72,11 @@ def get_inbox_messages(
         query = query.filter(Reply.channel == channel)
 
     total = query.count()
-    replies = query.order_by(Reply.received_at.desc()).offset(skip).limit(limit).all()
+    items = query.order_by(Reply.received_at.desc()).offset(skip).limit(limit).all()
 
-    items = [
-        ReplyResponse(
+    enriched_items = []
+    for r in items:
+        enriched_items.append(ReplyResponse(
             id=r.id,
             conversation_id=r.conversation_id,
             company_id=r.company_id,
@@ -83,59 +94,48 @@ def get_inbox_messages(
             is_handled=r.is_handled,
             received_at=r.received_at,
             company_name=r.company.name if r.company else None
-        ) for r in replies
-    ]
+        ))
 
     return {
-        "items": items,
+        "items": enriched_items,
         "total": total,
-        "available_categories": REPLY_CATEGORIES
+        "categories": REPLY_CATEGORIES
     }
 
 
-@router.post("/{reply_id}/approve-response", response_model=ReplyResponse)
-def approve_reply_response(
-    reply_id: int,
-    payload: SuggestedResponseApproval,
+@router.post("/approve-response", response_model=dict)
+@router.post("/{reply_id}/approve-response", response_model=dict)
+def approve_suggested_response(
+    approval: SuggestedResponseApproval,
+    reply_id: Optional[int] = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role(["admin", "manager"]))
 ):
-    reply = db.query(Reply).filter(Reply.id == reply_id).first()
+    """Requires manager or admin sign-off before sending suggested responses to business negotiations."""
+    target_id = reply_id or approval.reply_id
+    reply = db.query(Reply).filter(Reply.id == target_id).first()
     if not reply:
         raise HTTPException(status_code=404, detail="Reply not found")
 
-    if payload.approved_text:
-        reply.suggested_response = payload.approved_text
-
-    reply.human_approved = True
+    reply.human_approved = approval.approved
     reply.is_handled = True
+    if approval.edited_response:
+        reply.suggested_response = approval.edited_response
     db.commit()
 
     record_audit_log(
         db=db,
-        action="approve_negotiated_reply",
+        action="approve_negotiation_reply" if reply.is_negotiation else "approve_reply_response",
         entity_type="reply",
         entity_id=str(reply.id),
         user_id=current_user.id,
-        details={"sender": reply.sender_identifier}
+        details={"approved": approval.approved}
     )
 
-    return ReplyResponse(
-        id=reply.id,
-        conversation_id=reply.conversation_id,
-        company_id=reply.company_id,
-        channel=reply.channel,
-        sender_identifier=reply.sender_identifier,
-        recipient_identifier=reply.recipient_identifier,
-        subject=reply.subject,
-        message_body=reply.message_body,
-        classification=reply.classification,
-        classification_confidence=reply.classification_confidence,
-        classification_reason=reply.classification_reason,
-        suggested_response=reply.suggested_response,
-        is_negotiation=reply.is_negotiation,
-        human_approved=reply.human_approved,
-        is_handled=reply.is_handled,
-        received_at=reply.received_at,
-        company_name=reply.company.name if reply.company else None
-    )
+    return {
+        "status": "success",
+        "reply_id": reply.id,
+        "is_negotiation": reply.is_negotiation,
+        "approved": approval.approved,
+        "human_approved": reply.human_approved
+    }

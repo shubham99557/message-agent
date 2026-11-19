@@ -17,6 +17,7 @@ class EmailDraftUpdate(BaseModel):
     body_text: Optional[str] = None
     approval_status: Optional[str] = None  # draft, approved, rejected, skipped
     rejection_reason: Optional[str] = None
+    scheduled_at: Optional[datetime] = None
 
 
 class EmailEventResponse(BaseModel):
@@ -41,6 +42,7 @@ class EmailDraftResponse(BaseModel):
     approval_status: str
     approved_by_id: Optional[int] = None
     approved_at: Optional[datetime] = None
+    scheduled_at: Optional[datetime] = None
     rejection_reason: Optional[str] = None
     sent_at: Optional[datetime] = None
     provider: str

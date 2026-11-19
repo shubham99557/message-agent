@@ -6,18 +6,18 @@ services:
     container_name: acttrident_postgres
     restart: always
     environment:
-      POSTGRES_USER: acttrident
-      POSTGRES_PASSWORD: ActTridentSecure2026!
-      POSTGRES_DB: acttrident_db
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: ${POSTGRES_USER:-acttrident}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?CRITICAL: POSTGRES_PASSWORD must be provided in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-acttrident_db}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U acttrident -d acttrident_db"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-acttrident} -d ${POSTGRES_DB:-acttrident_db}"]
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - acttrident_internal
 
   backend:
     build:
@@ -28,9 +28,18 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://acttrident:ActTridentSecure2026!@postgres:5432/acttrident_db
-      SECRET_KEY: ${SECRET_KEY:-acttrident_prod_secret_key_change_me_2026}
+      ENVIRONMENT: production
+      TIMEZONE: ${TIMEZONE:-Asia/Kolkata}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-acttrident}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-acttrident_db}
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      SECRET_KEY: ${SECRET_KEY:?CRITICAL: SECRET_KEY of at least 32 characters must be provided in .env}
+      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:?CRITICAL: CREDENTIAL_ENCRYPTION_KEY must be provided in .env}
+      BACKEND_CORS_ORIGINS: ${BACKEND_CORS_ORIGINS:-http://localhost,http://localhost:5173}
       AI_PROVIDER: ${AI_PROVIDER:-mock}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
@@ -41,14 +50,124 @@ services:
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM_NAME: ${SMTP_FROM_NAME:-ActTrident Business Development}
       SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-outreach@acttrident.ai}
+      GMAIL_CLIENT_ID: ${GMAIL_CLIENT_ID:-}
+      GMAIL_CLIENT_SECRET: ${GMAIL_CLIENT_SECRET:-}
+      GMAIL_REDIRECT_URI: ${GMAIL_REDIRECT_URI:-http://localhost:8000/api/v1/integrations/gmail/oauth/callback}
       META_WA_ACCESS_TOKEN: ${META_WA_ACCESS_TOKEN:-}
       META_WA_PHONE_NUMBER_ID: ${META_WA_PHONE_NUMBER_ID:-}
       META_WA_BUSINESS_ACCOUNT_ID: ${META_WA_BUSINESS_ACCOUNT_ID:-}
-      META_WA_VERIFY_TOKEN: ${META_WA_VERIFY_TOKEN:-acttrident_meta_webhook_secret_2026}
+      META_WA_VERIFY_TOKEN: ${META_WA_VERIFY_TOKEN:-}
+      META_APP_SECRET: ${META_APP_SECRET:-}
+      LINKEDIN_CLIENT_ID: ${LINKEDIN_CLIENT_ID:-}
+      LINKEDIN_CLIENT_SECRET: ${LINKEDIN_CLIENT_SECRET:-}
+      LINKEDIN_REDIRECT_URI: ${LINKEDIN_REDIRECT_URI:-http://localhost:8000/api/v1/integrations/linkedin/oauth/callback}
+      LINKEDIN_API_SCOPES: ${LINKEDIN_API_SCOPES:-openid profile email}
+      LINKEDIN_MESSAGING_API_APPROVED: ${LINKEDIN_MESSAGING_API_APPROVED:-false}
+      LINKEDIN_PARTNER_MESSAGING_ENDPOINT: ${LINKEDIN_PARTNER_MESSAGING_ENDPOINT:-}
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      SERPAPI_API_KEY: ${SERPAPI_API_KEY:-}
       DEFAULT_DAILY_EMAIL_LIMIT: ${DEFAULT_DAILY_EMAIL_LIMIT:-50}
       DEFAULT_DAILY_WHATSAPP_LIMIT: ${DEFAULT_DAILY_WHATSAPP_LIMIT:-20}
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
     ports:
       - "8000:8000"
+    networks:
+      - acttrident_internal
+      - acttrident_public
+
+  redis:
+    image: redis:7-alpine
+    container_name: acttrident_redis
+    restart: always
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    volumes:
+      - redisdata:/data
+    networks:
+      - acttrident_internal
+
+  celery_worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    container_name: acttrident_celery_worker
+    restart: always
+    command: celery -A app.worker.celery_app.celery_app worker --loglevel=info -Q research,outreach,high_priority,default -c 4
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      ENVIRONMENT: production
+      TIMEZONE: ${TIMEZONE:-Asia/Kolkata}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-acttrident}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-acttrident_db}
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      SECRET_KEY: ${SECRET_KEY:?CRITICAL: SECRET_KEY of at least 32 characters must be provided in .env}
+      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:?CRITICAL: CREDENTIAL_ENCRYPTION_KEY must be provided in .env}
+      BACKEND_CORS_ORIGINS: ${BACKEND_CORS_ORIGINS:-http://localhost,http://localhost:5173}
+      AI_PROVIDER: ${AI_PROVIDER:-mock}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      EMAIL_PROVIDER: ${EMAIL_PROVIDER:-mock}
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-ActTrident Business Development}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-outreach@acttrident.ai}
+      GMAIL_CLIENT_ID: ${GMAIL_CLIENT_ID:-}
+      GMAIL_CLIENT_SECRET: ${GMAIL_CLIENT_SECRET:-}
+      GMAIL_REDIRECT_URI: ${GMAIL_REDIRECT_URI:-http://localhost:8000/api/v1/integrations/gmail/oauth/callback}
+      META_WA_ACCESS_TOKEN: ${META_WA_ACCESS_TOKEN:-}
+      META_WA_PHONE_NUMBER_ID: ${META_WA_PHONE_NUMBER_ID:-}
+      META_WA_BUSINESS_ACCOUNT_ID: ${META_WA_BUSINESS_ACCOUNT_ID:-}
+      META_WA_VERIFY_TOKEN: ${META_WA_VERIFY_TOKEN:-}
+      META_APP_SECRET: ${META_APP_SECRET:-}
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      SERPAPI_API_KEY: ${SERPAPI_API_KEY:-}
+      DEFAULT_DAILY_EMAIL_LIMIT: ${DEFAULT_DAILY_EMAIL_LIMIT:-50}
+      DEFAULT_DAILY_WHATSAPP_LIMIT: ${DEFAULT_DAILY_WHATSAPP_LIMIT:-20}
+    networks:
+      - acttrident_internal
+      - acttrident_public
+
+  celery_beat:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    container_name: acttrident_celery_beat
+    restart: always
+    command: celery -A app.worker.celery_app.celery_app beat --loglevel=info
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      celery_worker:
+        condition: service_started
+    environment:
+      ENVIRONMENT: production
+      TIMEZONE: ${TIMEZONE:-Asia/Kolkata}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-acttrident}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-acttrident_db}
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      SECRET_KEY: ${SECRET_KEY:?CRITICAL: SECRET_KEY of at least 32 characters must be provided in .env}
+      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:?CRITICAL: CREDENTIAL_ENCRYPTION_KEY must be provided in .env}
+      BACKEND_CORS_ORIGINS: ${BACKEND_CORS_ORIGINS:-http://localhost,http://localhost:5173}
+    networks:
+      - acttrident_internal
 
   frontend:
     build:
@@ -60,7 +179,14 @@ services:
       - backend
     ports:
       - "80:80"
-      - "5173:80"
+    networks:
+      - acttrident_public
 
 volumes:
   pgdata:
+  redisdata:
+
+networks:
+  acttrident_internal:
+    internal: true
+  acttrident_public:
