@@ -201,7 +201,7 @@ def test_linkedin_draft_limits_approval_invalidation_and_honest_manual_handoff(
 
 
 def test_linkedin_suppression_blocks_outreach_and_authorized_partner_api_dispatch(
-    client, db_session, admin_auth_headers, test_company, monkeypatch
+    client, db_session, admin_auth_headers, test_company, monkeypatch, enable_mocked_live_send
 ):
     # 1. Suppressed LinkedIn profile is blocked
     suppressed_url = "https://www.linkedin.com/in/opted-out-exec"

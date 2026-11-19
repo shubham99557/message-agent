@@ -204,8 +204,73 @@ export const api = {
     const res = await request<{ sources?: any[] } | any[]>('/discovery/sources');
     return Array.isArray(res) ? res : (res.sources || []);
   },
-  searchDiscovery: (params: { city: string; industry?: string; query?: string; min_devices?: number; include_demo?: boolean }) =>
-    request<any[]>('/discovery/search', { method: 'POST', body: JSON.stringify(params) }),
+  getIndianStates: async () => {
+    const res = await request<{ states: Array<{ name: string; code: string; region: string }> }>('/discovery/locations/states');
+    return res.states || [];
+  },
+  getIndianRegions: async () => {
+    const res = await request<{ regions: Array<{ name: string; description: string }> }>('/discovery/locations/regions');
+    return res.regions || [];
+  },
+  getLocationPresets: async () => {
+    const res = await request<{ presets: any[] }>('/discovery/locations/presets');
+    return res.presets || [];
+  },
+  getDiscoveryIndustries: async () => {
+    const res = await request<{ industries: any[] }>('/discovery/industries');
+    return res.industries || [];
+  },
+  suggestLocations: async (params: { q?: string; state?: string; region?: string; pincode?: string; limit?: number } = {}, signal?: AbortSignal) => {
+    const query = new URLSearchParams();
+    if (params.q) query.append('q', params.q);
+    if (params.state) query.append('state', params.state);
+    if (params.region) query.append('region', params.region);
+    if (params.pincode) query.append('pincode', params.pincode);
+    if (params.limit) query.append('limit', String(params.limit));
+    const res = await request<{ suggestions: any[] }>(`/discovery/locations/suggest?${query.toString()}`, { signal });
+    return res.suggestions || [];
+  },
+  searchDiscovery: (params: {
+    city?: string;
+    state?: string;
+    country?: string;
+    scope?: string;
+    industry?: string;
+    query?: string;
+    min_devices?: number;
+    include_demo?: boolean;
+    page?: number;
+    page_size?: number;
+    sort_by?: string;
+    sort_order?: string;
+  }, signal?: AbortSignal) =>
+    request<any[]>('/discovery/search', { method: 'POST', body: JSON.stringify(params), signal }),
+  searchDiscoveryPaginated: (params: {
+    city?: string;
+    state?: string;
+    country?: string;
+    scope?: string;
+    industry?: string;
+    query?: string;
+    min_devices?: number;
+    include_demo?: boolean;
+    page?: number;
+    page_size?: number;
+    sort_by?: string;
+    sort_order?: string;
+  }, signal?: AbortSignal) =>
+    request<{
+      items: any[];
+      total: number;
+      page: number;
+      page_size: number;
+      total_pages: number;
+      scope: string;
+      search_strategy: string;
+      coverage_note: string;
+      active_providers: string[];
+      failed_providers: string[];
+    }>('/discovery/search-paginated', { method: 'POST', body: JSON.stringify(params), signal }),
   importDiscoveredLead: (lead: any) => request<any>('/discovery/import', { method: 'POST', body: JSON.stringify(lead) }),
   batchImportDiscoveredLeads: (companies: any[]) =>
     request<any[]>('/discovery/batch-import', { method: 'POST', body: JSON.stringify({ companies }) }),

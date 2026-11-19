@@ -133,7 +133,7 @@ def test_gmail_token_refresh_and_revoked_reauth_handling(db: Session, monkeypatc
 
 
 def test_gmail_send_approved_email_provider_id_attempts_and_idempotency(
-    client: TestClient, admin_auth_headers: dict, db: Session, test_company: Company
+    client: TestClient, admin_auth_headers: dict, db: Session, test_company: Company, enable_mocked_live_send
 ):
     """Gmail send persists real Google message/thread IDs, logs EmailSendAttempt, and prevents duplicate retries."""
     conn = ChannelConnection(

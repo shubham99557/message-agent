@@ -36,9 +36,21 @@ services:
     image: redis:7-alpine
     container_name: acttrident_prod_redis
     restart: always
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-}
+    command: >
+      sh -c 'if [ -n "$$REDIS_PASSWORD" ]; then
+        redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD";
+      else
+        redis-server --appendonly yes;
+      fi'
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: >
+        sh -c 'if [ -n "$$REDIS_PASSWORD" ]; then
+          redis-cli -a "$$REDIS_PASSWORD" ping | grep -q PONG;
+        else
+          redis-cli ping | grep -q PONG;
+        fi'
       interval: 5s
       timeout: 3s
       retries: 5
@@ -64,7 +76,9 @@ services:
         condition: service_healthy
     environment:
       ENVIRONMENT: production
-      DATABASE_URL: postgresql://${POSTGRES_USER:-acttrident}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-acttrident_db}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-acttrident}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-acttrident_db}
+      SECRET_KEY: ${SECRET_KEY:?CRITICAL: SECRET_KEY must be provided in production}
+      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:?CRITICAL: CREDENTIAL_ENCRYPTION_KEY must be provided in production}
     networks:
       - acttrident_internal
 
@@ -84,10 +98,10 @@ services:
     environment:
       ENVIRONMENT: production
       TIMEZONE: ${TIMEZONE:-Asia/Kolkata}
-      DATABASE_URL: postgresql://${POSTGRES_USER:-acttrident}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-acttrident_db}
-      REDIS_URL: redis://redis:6379/0
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-acttrident}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-acttrident_db}
+      REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD}@redis:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://:${REDIS_PASSWORD}@redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://:${REDIS_PASSWORD}@redis:6379/1}
       SECRET_KEY: ${SECRET_KEY:?CRITICAL: SECRET_KEY must be provided in production}
       CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:?CRITICAL: CREDENTIAL_ENCRYPTION_KEY must be provided in production}
       BACKEND_CORS_ORIGINS: ${BACKEND_CORS_ORIGINS:?CRITICAL: BACKEND_CORS_ORIGINS must be set in production}
@@ -135,12 +149,12 @@ services:
     environment:
       ENVIRONMENT: production
       TIMEZONE: ${TIMEZONE:-Asia/Kolkata}
-      DATABASE_URL: postgresql://${POSTGRES_USER:-acttrident}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-acttrident_db}
-      REDIS_URL: redis://redis:6379/0
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/1
-      SECRET_KEY: ${SECRET_KEY:?CRITICAL: SECRET_KEY must be provided}
-      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:?CRITICAL: CREDENTIAL_ENCRYPTION_KEY must be provided}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-acttrident}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-acttrident_db}
+      REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD}@redis:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://:${REDIS_PASSWORD}@redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://:${REDIS_PASSWORD}@redis:6379/1}
+      SECRET_KEY: ${SECRET_KEY:?CRITICAL: SECRET_KEY must be provided in production}
+      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:?CRITICAL: CREDENTIAL_ENCRYPTION_KEY must be provided in production}
       AI_PROVIDER: ${AI_PROVIDER:-gemini}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       EMAIL_PROVIDER: ${EMAIL_PROVIDER:-gmail}
@@ -164,11 +178,11 @@ services:
     environment:
       ENVIRONMENT: production
       TIMEZONE: ${TIMEZONE:-Asia/Kolkata}
-      DATABASE_URL: postgresql://${POSTGRES_USER:-acttrident}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-acttrident_db}
-      REDIS_URL: redis://redis:6379/0
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/1
-      SECRET_KEY: ${SECRET_KEY:?CRITICAL: SECRET_KEY must be provided}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-acttrident}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-acttrident_db}
+      REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD}@redis:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://:${REDIS_PASSWORD}@redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://:${REDIS_PASSWORD}@redis:6379/1}
+      SECRET_KEY: ${SECRET_KEY:?CRITICAL: SECRET_KEY must be provided in production}
       CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:?CRITICAL: CREDENTIAL_ENCRYPTION_KEY must be provided}
     logging:
       driver: "json-file"

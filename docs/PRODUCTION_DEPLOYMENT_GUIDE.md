@@ -46,7 +46,7 @@ In production, ActTrident runs as a multi-container isolated stack:
 ```bash
 git clone https://github.com/shubham99557/message-agent.git /opt/acttrident
 cd /opt/acttrident
-git checkout feature/complete-ai-sales-agent
+git checkout feature/production-readiness-v2
 ```
 
 ### Step 2: Configure Environment Variables

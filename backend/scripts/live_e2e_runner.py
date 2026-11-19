@@ -173,8 +173,39 @@ def run_live_e2e():
     ks_data = r_ks.json()
     print(f"  ✓ Kill Switch Status: active={ks_data.get('active')}, reason='{ks_data.get('reason')}'")
 
+    # 13. Nationwide Discovery & Location Engine Verification
+    print("\n[Step 13] Verifying Nationwide Indian Discovery & Location Endpoints...")
+    r_states = client.get("/api/v1/discovery/locations/states", headers=headers)
+    assert r_states.status_code == 200
+    states_data = r_states.json()["states"]
+    assert len(states_data) >= 36
+    print(f"  ✓ Indian States & UTs endpoint OK: {len(states_data)} states/UTs loaded")
+
+    r_presets = client.get("/api/v1/discovery/locations/presets", headers=headers)
+    assert r_presets.status_code == 200
+    print(f"  ✓ Presets endpoint OK: {len(r_presets.json()['presets'])} presets loaded")
+
+    r_sugg = client.get("/api/v1/discovery/locations/suggest?q=Ben", headers=headers)
+    assert r_sugg.status_code == 200
+    suggs = r_sugg.json()["suggestions"]
+    assert any(s["city"] == "Bengaluru" for s in suggs)
+    print(f"  ✓ Location autocomplete OK: found {len(suggs)} suggestions for 'Ben'")
+
+    r_paginated = client.post("/api/v1/discovery/search-paginated", headers=headers, json={
+        "city": "All",
+        "scope": "country",
+        "include_demo": True,
+        "page": 1,
+        "page_size": 10
+    })
+    assert r_paginated.status_code == 200
+    pdata = r_paginated.json()
+    assert pdata["total"] > 0
+    assert pdata["scope"] == "country"
+    print(f"  ✓ Nationwide paginated discovery OK: total={pdata['total']}, strategy='{pdata['search_strategy']}'")
+
     print("\n" + "="*60)
-    print("ALL 12 LIVE END-TO-END VERIFICATION CHECKS PASSED WITH ZERO DEFECTS!")
+    print("ALL 13 LIVE END-TO-END VERIFICATION CHECKS PASSED WITH ZERO DEFECTS!")
     print("="*60)
 
 if __name__ == "__main__":

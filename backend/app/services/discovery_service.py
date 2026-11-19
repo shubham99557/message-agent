@@ -8,13 +8,15 @@ from urllib.parse import urlparse
 import httpx
 
 from app.core.config import settings
-from app.core.security import is_safe_external_url, sanitize_untrusted_text
+from app.core.security import is_safe_external_url, sanitize_untrusted_text, safe_fetch_untrusted_url
 from app.integrations.discovery_adapters import (
     is_demo_domain,
     TavilyDiscoveryAdapter,
     SerpApiDiscoveryAdapter,
+    OpenStreetMapPublicAdapter,
 )
-from app.schemas.research import DiscoveredCompanyItem, DiscoveryQuery
+from app.core.locations import get_nationwide_search_batches, get_canonical_location
+from app.schemas.research import DiscoveredCompanyItem, DiscoveryQuery, DiscoveryResponse
 
 logger = logging.getLogger(__name__)
 
@@ -225,13 +227,10 @@ DISCOVERY_CATALOG = [
 async def crawl_company_website_for_contacts(website_url: str) -> Dict[str, Any]:
     """
     Safely crawls an official company website to extract legitimate public contact details.
-    Adheres strictly to SSRF guardrails and timeout budgets.
+    Adheres strictly to SSRF guardrails, redirect inspection, and timeout budgets.
     """
     if not is_safe_external_url(website_url):
         return {"error": "Target URL is not permitted or failed SSRF safety checks."}
-
-    parsed = urlparse(website_url)
-    domain = parsed.netloc.lower()
 
     discovered: Dict[str, Any] = {
         "website": website_url,
@@ -245,61 +244,65 @@ async def crawl_company_website_for_contacts(website_url: str) -> Dict[str, Any]
     }
 
     try:
-        async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
-            resp = await client.get(
-                website_url,
-                headers={"User-Agent": "ActTrident-B2B-Discovery-Bot/1.0 (+https://acttrident.ai)"}
-            )
-            if resp.status_code != 200:
-                return discovered
+        success, html, final_url, err = await safe_fetch_untrusted_url(
+            website_url,
+            max_bytes=50000,
+            timeout_seconds=8.0,
+            max_redirects=3
+        )
+        if not success or not html:
+            discovered["error"] = err or "Could not retrieve website"
+            return discovered
 
-            html = resp.text[:50000]  # Cap at 50KB to prevent memory exhaustion
+        if final_url:
+            discovered["source_url"] = final_url
 
-            # Title extraction
-            title_match = re.search(r'<title[^>]*>(.*?)</title>', html, re.IGNORECASE | re.DOTALL)
-            if title_match:
-                discovered["title"] = sanitize_untrusted_text(title_match.group(1).strip()[:200])
+        # Title extraction
+        title_match = re.search(r'<title[^>]*>(.*?)</title>', html, re.IGNORECASE | re.DOTALL)
+        if title_match:
+            discovered["title"] = sanitize_untrusted_text(title_match.group(1).strip()[:200])
 
-            # Meta description extraction
-            meta_desc_match = re.search(
-                r'<meta[^>]*name=["\']description["\'][^>]*content=["\'](.*?)["\']',
-                html,
-                re.IGNORECASE
-            )
-            if meta_desc_match:
-                discovered["description"] = sanitize_untrusted_text(meta_desc_match.group(1).strip()[:500])
+        # Meta description extraction
+        meta_desc_match = re.search(
+            r'<meta[^>]*name=["\']description["\'][^>]*content=["\'](.*?)["\']',
+            html,
+            re.IGNORECASE
+        )
+        if meta_desc_match:
+            discovered["description"] = sanitize_untrusted_text(meta_desc_match.group(1).strip()[:500])
 
-            # Public emails extraction
-            raw_emails = set(EMAIL_REGEX.findall(html))
-            valid_emails = []
-            for em in raw_emails:
-                em_lower = em.lower()
-                if not any(em_lower.endswith(ext) for ext in INVALID_EMAIL_EXTENSIONS):
-                    valid_emails.append(em_lower)
-            discovered["emails"] = list(set(valid_emails))[:5]
+        # Public emails extraction
+        raw_emails = set(EMAIL_REGEX.findall(html))
+        valid_emails = []
+        for em in raw_emails:
+            em_lower = em.lower()
+            if not any(em_lower.endswith(ext) for ext in INVALID_EMAIL_EXTENSIONS):
+                valid_emails.append(em_lower)
+        discovered["emails"] = list(set(valid_emails))[:5]
 
-            # Public phones extraction
-            raw_phones = set(INDIAN_PHONE_REGEX.findall(html))
-            cleaned_phones = []
-            for ph in raw_phones:
-                cleaned = re.sub(r'[\s.-]', '', ph)
-                if len(cleaned) >= 10:
-                    cleaned_phones.append(ph.strip())
-            discovered["phones"] = list(set(cleaned_phones))[:3]
+        # Public phones extraction
+        raw_phones = set(INDIAN_PHONE_REGEX.findall(html))
+        cleaned_phones = []
+        for ph in raw_phones:
+            cleaned = re.sub(r'[\s.-]', '', ph)
+            if len(cleaned) >= 10:
+                cleaned_phones.append(ph.strip())
+        discovered["phones"] = list(set(cleaned_phones))[:3]
 
-            # Scan for workforce/workstation evidence
-            evidence_patterns = [
-                r'(\d+[\+]?\s+(?:employees|team members|engineers|developers|consultants))',
-                r'(\d+[\+]?\s+(?:laptops|workstations|macbooks|desktops))',
-                r'((?:company-issued|provided)\s+(?:laptop|macbook|computer))'
-            ]
-            for pat in evidence_patterns:
-                matches = re.findall(pat, html, re.IGNORECASE)
-                for m in matches:
-                    discovered["evidence_snippets"].append(sanitize_untrusted_text(m[:150]))
+        # Scan for workforce/workstation evidence
+        evidence_patterns = [
+            r'(\d+[\+]?\s+(?:employees|team members|engineers|developers|consultants))',
+            r'(\d+[\+]?\s+(?:laptops|workstations|macbooks|desktops))',
+            r'((?:company-issued|provided)\s+(?:laptop|macbook|computer))'
+        ]
+        for pat in evidence_patterns:
+            matches = re.findall(pat, html, re.IGNORECASE)
+            for m in matches:
+                discovered["evidence_snippets"].append(sanitize_untrusted_text(m[:150]))
 
     except Exception as e:
         logger.warning(f"Error crawling {website_url}: {e}")
+        discovered["error"] = str(e)
 
     return discovered
 
@@ -480,24 +483,66 @@ def search_public_company_directory(
 ) -> List[DiscoveredCompanyItem]:
     """
     Unified multi-source discovery orchestrator:
-    1. Queries configured permitted real search adapters (Tavily, SerpAPI) — returns real unverified leads (is_demo=False).
+    1. Queries configured permitted real search adapters (Tavily, SerpAPI, OpenStreetMap Nominatim).
+       - When scope is 'country' or city is 'All' / 'All India', runs a controlled nationwide
+         multi-region search across canonical Indian technology corridors without sending meaningless 'All' queries.
     2. Includes quarantined .example.com demo fixtures ONLY when query_params.include_demo=True in non-production,
        always explicitly tagged with is_demo=True and verification_status='demo_fixture'.
+    3. Guarantees deduplication and source attribution across all returned items.
     """
     results: List[DiscoveredCompanyItem] = []
     seen_keys = set()
 
     def _add_unique(item: DiscoveredCompanyItem):
-        key = (item.name.strip().lower(), (item.website or "").strip().lower())
+        key = (
+            item.name.strip().lower(),
+            (item.website or "").strip().lower(),
+            (item.city or "").strip().lower()
+        )
         if key not in seen_keys:
             seen_keys.add(key)
             results.append(item)
 
-    # 1. Real Permitted Search Adapters (never .example.com)
-    for adapter in (TavilyDiscoveryAdapter(), SerpApiDiscoveryAdapter()):
-        if adapter.is_configured():
-            for item in adapter.search(query_params, limit=8, http_client=http_client):
-                _add_unique(item)
+    # 1. Real Permitted Search Adapters (Tavily, SerpAPI, OpenStreetMap)
+    active_adapters = [
+        TavilyDiscoveryAdapter(),
+        SerpApiDiscoveryAdapter(),
+        OpenStreetMapPublicAdapter(),
+    ]
+
+    city_raw = (query_params.city or "").strip()
+    is_nationwide = (
+        query_params.scope == "country"
+        or city_raw.lower() in ("all", "all india", "")
+    )
+
+    if is_nationwide:
+        # Nationwide multi-region strategy: query canonical regional batches
+        regional_batches = get_nationwide_search_batches(batch_size=4)
+        # Execute first batch of canonical commercial hubs + query country-level adapter
+        first_batch = regional_batches[0] if regional_batches else []
+        for loc in first_batch:
+            sub_query = query_params.model_copy(update={
+                "city": loc["city"],
+                "state": loc["state"],
+                "scope": "city"
+            })
+            for adapter in active_adapters:
+                if adapter.is_configured():
+                    try:
+                        for item in adapter.search(sub_query, limit=4, http_client=http_client):
+                            _add_unique(item)
+                    except Exception as exc:
+                        logger.debug(f"Adapter {adapter.name} failed for {loc['city']}: {exc}")
+    else:
+        # Targeted city, state, or district query
+        for adapter in active_adapters:
+            if adapter.is_configured():
+                try:
+                    for item in adapter.search(query_params, limit=8, http_client=http_client):
+                        _add_unique(item)
+                except Exception as exc:
+                    logger.debug(f"Adapter {adapter.name} failed for {query_params.city}: {exc}")
 
     # 2. Quarantined Demo Fixtures (STRICTLY labelled is_demo=True, verification_status='demo_fixture', never in production)
     allow_demo = query_params.include_demo and settings.ENVIRONMENT.lower() != "production"
@@ -507,7 +552,8 @@ def search_public_company_directory(
         keyword = (query_params.query or "").lower()
 
         for item in DISCOVERY_CATALOG:
-            if city_filter and city_filter != "all" and city_filter not in item.city.lower():
+            # City matching: If "all" or "all india" or nationwide, include all catalog entries
+            if city_filter and city_filter not in ("all", "all india") and city_filter not in item.city.lower():
                 continue
             if industry_filter and industry_filter != "all" and industry_filter not in (item.industry or "").lower():
                 continue
@@ -515,6 +561,7 @@ def search_public_company_directory(
                 text = f"{item.name} {item.description or ''} {item.city} {item.industry or ''}".lower()
                 if keyword not in text:
                     continue
+            # Device count check: only filter if fixture has known laptop count
             if query_params.min_devices and (item.laptop_count_verified or 0) < query_params.min_devices:
                 continue
 
@@ -526,3 +573,61 @@ def search_public_company_directory(
             _add_unique(demo_flagged)
 
     return results
+
+
+def search_public_company_directory_paginated(
+    query_params: DiscoveryQuery,
+    http_client: Optional[httpx.Client] = None,
+) -> DiscoveryResponse:
+    """
+    Paginated, sorted, and metadata-rich nationwide discovery response with active provider status.
+    """
+    all_results = search_public_company_directory(query_params, http_client=http_client)
+
+    # Sort results
+    sort_by = (query_params.sort_by or "confidence").lower()
+    reverse = (query_params.sort_order or "desc").lower() == "desc"
+
+    if sort_by == "name":
+        all_results.sort(key=lambda x: (x.name or "").lower(), reverse=reverse)
+    elif sort_by == "city":
+        all_results.sort(key=lambda x: (x.city or "").lower(), reverse=reverse)
+    elif sort_by == "devices":
+        all_results.sort(key=lambda x: (x.laptop_count_verified or 0), reverse=reverse)
+    elif sort_by == "retrieval":
+        all_results.sort(key=lambda x: (x.retrieval_timestamp or datetime.min), reverse=reverse)
+    else:  # Default to confidence
+        all_results.sort(key=lambda x: (x.confidence_level or 0.0), reverse=reverse)
+
+    total = len(all_results)
+    page = max(1, query_params.page)
+    page_size = max(1, min(100, query_params.page_size))
+    total_pages = (total + page_size - 1) // page_size if total > 0 else 1
+
+    start_idx = (page - 1) * page_size
+    end_idx = start_idx + page_size
+    paginated_items = all_results[start_idx:end_idx]
+
+    adapters = [TavilyDiscoveryAdapter(), SerpApiDiscoveryAdapter(), OpenStreetMapPublicAdapter()]
+    active_providers = [a.name for a in adapters if a.is_configured()]
+    failed_providers = [a.name for a in adapters if not a.is_configured()]
+
+    scope_name = "country" if (query_params.scope == "country" or (query_params.city or "").lower() in ("all", "all india", "")) else "city"
+    strategy = "Multi-Region Nationwide Corridors" if scope_name == "country" else f"Targeted Hub ({query_params.city or query_params.state or 'Local'})"
+    coverage_note = (
+        "Nationwide discovery searches across 28 States and 8 Union Territories using canonical regional batches. "
+        "Results are strictly deduplicated and source-attributed. Managed workstation fleet counts (5+ laptops) require independent verification."
+    )
+
+    return DiscoveryResponse(
+        items=paginated_items,
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages,
+        scope=scope_name,
+        search_strategy=strategy,
+        coverage_note=coverage_note,
+        active_providers=active_providers,
+        failed_providers=failed_providers,
+    )

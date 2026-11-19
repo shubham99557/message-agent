@@ -14,9 +14,9 @@ from app.models.company import Company
 from app.models.user import User
 
 
-@pytest.fixture(autouse=True)
-def configure_test_environment(monkeypatch):
-    """Enables live send mode for unit test harnesses with mocked HTTP providers."""
+@pytest.fixture(scope="function")
+def enable_mocked_live_send(monkeypatch):
+    """Explicit fixture for designated integration test harnesses with mocked HTTP providers."""
     monkeypatch.setattr(settings, "LIVE_SEND_ENABLED", True)
 
 

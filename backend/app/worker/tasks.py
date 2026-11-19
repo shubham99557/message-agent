@@ -74,15 +74,24 @@ def execute_task_logic(category: str, payload: Dict[str, Any], db) -> Dict[str, 
         from app.services.discovery_service import search_public_company_directory
         from app.services.company_service import create_company, find_duplicate_company
         from app.integrations.discovery_adapters import is_demo_domain
+        from app.core.locations import get_nationwide_search_batches
         from app.schemas.research import DiscoveryQuery
         from app.schemas.company import CompanyCreate
 
-        cities = payload.get("cities") or ["Siliguri", "Gangtok", "Patna", "Bhagalpur"]
+        scope = payload.get("scope", "city")
+        cities = payload.get("cities")
+        if not cities:
+            if scope == "country":
+                batches = get_nationwide_search_batches(batch_size=6)
+                cities = [loc["city"] for loc in batches[0]]
+            else:
+                cities = ["Siliguri", "Gangtok", "Patna", "Bhagalpur"]
+
         created = 0
         skipped_demo = 0
         for city in cities:
             # Strictly exclude demo fixtures from autonomous background discovery!
-            items = search_public_company_directory(DiscoveryQuery(city=city, include_demo=False))
+            items = search_public_company_directory(DiscoveryQuery(city=city, scope="city", include_demo=False))
             for item in items:
                 if item.is_demo or is_demo_domain(item.website) or is_demo_domain(item.public_email):
                     skipped_demo += 1

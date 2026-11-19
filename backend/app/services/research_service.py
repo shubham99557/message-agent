@@ -5,7 +5,7 @@ import httpx
 
 from app.models.company import Company
 from app.models.research import ResearchReport
-from app.core.security import is_safe_external_url, sanitize_untrusted_text
+from app.core.security import is_safe_external_url, sanitize_untrusted_text, safe_fetch_untrusted_url
 from app.integrations.discovery_adapters import is_demo_domain
 
 
@@ -18,15 +18,22 @@ def _strip_html_to_text(raw_html: str) -> str:
 
 
 async def fetch_website_content_safely(url: str) -> Optional[str]:
-    """Safely retrieves public web content while blocking SSRF to private/internal IPs and demo domains."""
+    """
+    Safely retrieves public web content while blocking SSRF to private/internal IPs,
+    revalidating redirect hops, and preventing memory exhaustion.
+    """
     if not url or is_demo_domain(url) or not is_safe_external_url(url):
         return None
     try:
-        async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
-            resp = await client.get(url, headers={"User-Agent": "ActTrident-Outreach-Bot/1.0"})
-            if resp.status_code == 200:
-                text = _strip_html_to_text(resp.text[:20000])
-                return sanitize_untrusted_text(text[:2000])
+        success, text, final_url, err = await safe_fetch_untrusted_url(
+            url,
+            max_bytes=20000,
+            timeout_seconds=8.0,
+            max_redirects=3
+        )
+        if success and text:
+            cleaned = _strip_html_to_text(text)
+            return sanitize_untrusted_text(cleaned[:2000])
     except Exception:
         return None
     return None

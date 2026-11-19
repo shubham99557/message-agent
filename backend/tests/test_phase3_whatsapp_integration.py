@@ -174,7 +174,7 @@ def test_whatsapp_live_consent_recheck_blocks_post_approval_opt_out(
 
 
 def test_whatsapp_meta_send_real_wamid_ordered_params_and_idempotency(
-    client: TestClient, admin_auth_headers: dict, db: Session, test_company: Company, monkeypatch
+    client: TestClient, admin_auth_headers: dict, db: Session, test_company: Company, monkeypatch, enable_mocked_live_send
 ):
     """Meta send transmits ordered template params, stores real wamid, and prevents duplicate retries."""
     monkeypatch.setattr(settings, "META_WA_ACCESS_TOKEN", "EAAG_live_sandbox_token")

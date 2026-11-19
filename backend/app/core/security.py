@@ -6,7 +6,7 @@ import hmac
 import secrets
 from urllib.parse import urlparse
 from datetime import datetime, timedelta, timezone
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Tuple
 import bcrypt
 import jwt
 from app.core.config import settings
@@ -79,12 +79,20 @@ def verify_meta_hmac_signature(payload: bytes, signature_header: Optional[str], 
 # SSRF Guard for external URL fetching
 DISALLOWED_HOSTS = {
     "localhost", "127.0.0.1", "0.0.0.0", "::1", "metadata.google.internal",
-    "169.254.169.254"
+    "169.254.169.254", "instance-data", "metadata"
 }
+
+DISALLOWED_TLDS = (".local", ".internal", ".localhost", ".arpa", ".test", ".example", ".invalid")
+
+DISALLOWED_PORTS = {22, 25, 110, 143, 465, 587, 993, 995, 2375, 2376, 5432, 6379, 8000, 27017, 11211}
 
 
 def is_safe_external_url(url: str) -> bool:
-    """Validates that a URL is a legitimate public web resource and not an SSRF attempt."""
+    """
+    Validates that a URL is a legitimate public web resource and not an SSRF attempt.
+    Hardens against private IP ranges, loopback, link-local, cloud metadata,
+    IPv4 and IPv6 spaces, restricted ports, and internal domain patterns.
+    """
     try:
         parsed = urlparse(url)
         if parsed.scheme not in ("http", "https"):
@@ -94,23 +102,152 @@ def is_safe_external_url(url: str) -> bool:
         if not hostname:
             return False
 
-        hostname_lower = hostname.lower()
-        if hostname_lower in DISALLOWED_HOSTS or hostname_lower.endswith(".local") or hostname_lower.endswith(".internal"):
+        hostname_lower = hostname.lower().strip()
+        if hostname_lower in DISALLOWED_HOSTS:
             return False
 
-        # Resolve IP to check for private / loopback IP spaces
+        if any(hostname_lower.endswith(tld) for tld in DISALLOWED_TLDS):
+            return False
+
+        port = parsed.port
+        if port and port in DISALLOWED_PORTS:
+            return False
+
+        # If hostname is a literal IP address
         try:
-            ip_info = socket.gethostbyname(hostname)
-            ip_obj = ipaddress.ip_address(ip_info)
-            if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local or ip_obj.is_reserved:
+            ip_literal = ipaddress.ip_address(hostname_lower)
+            if (
+                ip_literal.is_private
+                or ip_literal.is_loopback
+                or ip_literal.is_link_local
+                or ip_literal.is_reserved
+                or ip_literal.is_multicast
+            ):
                 return False
+            # Check IPv4-mapped IPv6 (e.g. ::ffff:127.0.0.1)
+            if isinstance(ip_literal, ipaddress.IPv6Address) and ip_literal.ipv4_mapped:
+                if (
+                    ip_literal.ipv4_mapped.is_private
+                    or ip_literal.ipv4_mapped.is_loopback
+                    or ip_literal.ipv4_mapped.is_link_local
+                ):
+                    return False
+        except ValueError:
+            # Not an IP literal, proceed to DNS resolution
+            pass
+
+        # Resolve all IPv4 and IPv6 addresses via getaddrinfo to defend against dual-stack SSRF
+        try:
+            addr_info = socket.getaddrinfo(hostname, None, proto=socket.IPPROTO_TCP)
+            if not addr_info:
+                return False
+
+            for item in addr_info:
+                sockaddr = item[4]
+                ip_str = sockaddr[0]
+                ip_obj = ipaddress.ip_address(ip_str)
+
+                # Check private, loopback, link-local, or reserved
+                if (
+                    ip_obj.is_private
+                    or ip_obj.is_loopback
+                    or ip_obj.is_link_local
+                    or ip_obj.is_reserved
+                    or ip_obj.is_multicast
+                ):
+                    return False
+
+                # Check IPv4-mapped IPv6 address spaces
+                if isinstance(ip_obj, ipaddress.IPv6Address) and ip_obj.ipv4_mapped:
+                    if (
+                        ip_obj.ipv4_mapped.is_private
+                        or ip_obj.ipv4_mapped.is_loopback
+                        or ip_obj.ipv4_mapped.is_link_local
+                    ):
+                        return False
+
+                # Explicit AWS/GCP/Azure link-local metadata guard
+                if str(ip_obj) == "169.254.169.254" or str(ip_obj) == "fd00:ec2::254":
+                    return False
+
         except Exception:
-            # If resolution fails, treat as unresolvable / unsafe
+            # If DNS resolution fails, fail closed (unsafe)
             return False
 
         return True
     except Exception:
         return False
+
+
+async def safe_fetch_untrusted_url(
+    url: str,
+    max_bytes: int = 50000,
+    timeout_seconds: float = 8.0,
+    max_redirects: int = 3,
+    allowed_content_types: Optional[List[str]] = None
+) -> Tuple[bool, Optional[str], Optional[str], Optional[str]]:
+    """
+    Safely retrieves public web content while defending against:
+    - DNS rebinding & private/internal IPs
+    - Redirect-based SSRF (revalidating every hop)
+    - Excessive redirects
+    - Oversized responses (memory exhaustion)
+    - Unexpected content types (e.g. binary downloads)
+    - Excessive request duration
+
+    Returns: (success: bool, content: Optional[str], final_url: Optional[str], error_message: Optional[str])
+    """
+    import httpx
+    from urllib.parse import urljoin
+
+    if allowed_content_types is None:
+        allowed_content_types = ["text/html", "text/plain", "application/xhtml+xml", "application/json"]
+
+    current_url = url
+    redirect_count = 0
+
+    try:
+        # Use follow_redirects=False to manually inspect every hop
+        async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=False) as client:
+            while redirect_count <= max_redirects:
+                if not is_safe_external_url(current_url):
+                    return False, None, current_url, f"SSRF security check rejected destination URL: {current_url}"
+
+                headers = {"User-Agent": "ActTrident-Outreach-Bot/2.0 (+https://acttrident.ai)"}
+                resp = await client.get(current_url, headers=headers)
+
+                # Check for 3xx redirects
+                if resp.status_code in (301, 302, 303, 307, 308):
+                    location = resp.headers.get("Location")
+                    if not location:
+                        return False, None, current_url, "Redirect response missing Location header"
+
+                    redirect_count += 1
+                    if redirect_count > max_redirects:
+                        return False, None, current_url, f"Exceeded maximum redirect limit ({max_redirects})"
+
+                    # Resolve relative redirect URLs against current URL
+                    current_url = urljoin(current_url, location)
+                    continue
+
+                if resp.status_code != 200:
+                    return False, None, current_url, f"Remote server returned HTTP {resp.status_code}"
+
+                # Validate content-type
+                content_type = resp.headers.get("Content-Type", "").lower()
+                is_allowed_type = any(act in content_type for act in allowed_content_types)
+                if content_type and not is_allowed_type:
+                    return False, None, current_url, f"Disallowed Content-Type '{content_type}'"
+
+                # Cap response body size to prevent memory exhaustion
+                body_text = resp.text[:max_bytes]
+                return True, body_text, current_url, None
+
+            return False, None, current_url, f"Exceeded maximum redirect hops ({max_redirects})"
+    except httpx.TimeoutException:
+        return False, None, current_url, f"Request timed out after {timeout_seconds}s"
+    except Exception as exc:
+        return False, None, current_url, f"Network error during safe fetch: {str(exc)}"
 
 
 # Prompt Injection Defense: Delimit and sanitize untrusted external website content

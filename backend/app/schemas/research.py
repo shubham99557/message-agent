@@ -46,12 +46,21 @@ class ResearchReportResponse(ResearchReportBase):
 
 
 class DiscoveryQuery(BaseModel):
-    city: str
+    city: Optional[str] = None
     state: Optional[str] = None
+    country: Optional[str] = "India"
+    region: Optional[str] = None
+    district: Optional[str] = None
+    pincode: Optional[str] = None
+    scope: Optional[str] = "city"  # "city", "state", "country", "region", "pincode"
     industry: Optional[str] = None
     query: Optional[str] = None
-    min_devices: Optional[int] = 5
-    include_demo: bool = True  # Explicitly separates .example.com demo fixtures from real sources
+    min_devices: Optional[int] = None
+    include_demo: bool = True  # Allowed in non-production; strictly blocked in production by discovery service
+    page: int = 1
+    page_size: int = 20
+    sort_by: Optional[str] = "confidence"  # "confidence", "name", "city", "devices", "retrieval"
+    sort_order: Optional[str] = "desc"
 
 
 class DiscoveredCompanyItem(BaseModel):
@@ -78,6 +87,19 @@ class DiscoveredCompanyItem(BaseModel):
     verification_status: str = "unverified"  # verified, unverified, inferred, unknown, demo_fixture
     confidence_level: float = 0.5
     retrieval_timestamp: Optional[datetime] = None
+
+
+class DiscoveryResponse(BaseModel):
+    items: List[DiscoveredCompanyItem]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+    scope: str
+    search_strategy: str
+    coverage_note: str
+    active_providers: List[str]
+    failed_providers: List[str] = []
 
 
 class WebsiteCrawlRequest(BaseModel):

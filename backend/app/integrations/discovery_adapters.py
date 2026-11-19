@@ -67,11 +67,16 @@ class OpenStreetMapPublicAdapter(DiscoverySourceAdapter):
         limit: int = 8,
         http_client: Optional[httpx.Client] = None,
     ) -> List[DiscoveredCompanyItem]:
-        city = (query.city or "Siliguri").strip()
-        if city.lower() == "all":
-            city = "Siliguri"
+        city = (query.city or "").strip()
+        is_all_india = city.lower() in ("all", "all india", "") or query.scope == "country"
         term = (query.query or query.industry or "software IT office").strip()
-        search_q = f"{term} {city} India"
+
+        if is_all_india:
+            search_q = f"{term} India"
+        elif query.state and not city:
+            search_q = f"{term} {query.state} India"
+        else:
+            search_q = f"{term} {city} {query.state or ''} India".strip()
 
         close_client = http_client is None
         client = http_client or httpx.Client(timeout=8.0)
@@ -101,11 +106,14 @@ class OpenStreetMapPublicAdapter(DiscoverySourceAdapter):
                 osm_id = place.get("osm_id", "")
                 osm_url = f"https://www.openstreetmap.org/{osm_type}/{osm_id}" if osm_id else "https://www.openstreetmap.org/"
 
+                extracted_city = addr.get("city") or addr.get("town") or addr.get("municipality") or addr.get("state_district") or (city if not is_all_india else "India")
+                extracted_state = addr.get("state") or query.state
+
                 items.append(DiscoveredCompanyItem(
                     name=sanitize_untrusted_text(display[:120]),
                     website=website,
-                    city=addr.get("city") or addr.get("town") or city,
-                    state=addr.get("state") or query.state,
+                    city=extracted_city,
+                    state=extracted_state,
                     industry=query.industry or extra.get("office") or "Business / Technology",
                     description=sanitize_untrusted_text((place.get("display_name") or "")[:300]),
                     public_email=extra.get("email") or extra.get("contact:email"),
@@ -145,10 +153,20 @@ class TavilyDiscoveryAdapter(DiscoverySourceAdapter):
     ) -> List[DiscoveredCompanyItem]:
         if not self.is_configured():
             return []
-        city = (query.city or "Siliguri").strip()
+        city = (query.city or "").strip()
+        is_all_india = city.lower() in ("all", "all india", "") or query.scope == "country"
         ind = (query.industry or "software IT services").strip()
         kw = (query.query or "").strip()
-        q = f"{kw} {ind} companies in {city} India official website contact".strip()
+
+        if is_all_india:
+            q = f"{kw} {ind} companies in India official website contact".strip()
+            result_city = "India"
+        elif query.state and not city:
+            q = f"{kw} {ind} companies in {query.state} India official website contact".strip()
+            result_city = query.state
+        else:
+            q = f"{kw} {ind} companies in {city} {query.state or ''} India official website contact".strip()
+            result_city = city or "India"
 
         close_client = http_client is None
         client = http_client or httpx.Client(timeout=10.0)
@@ -176,7 +194,7 @@ class TavilyDiscoveryAdapter(DiscoverySourceAdapter):
                 items.append(DiscoveredCompanyItem(
                     name=sanitize_untrusted_text(title[:120]),
                     website=url,
-                    city=city,
+                    city=result_city,
                     state=query.state,
                     industry=query.industry or "Technology Services",
                     description=sanitize_untrusted_text((r.get("content") or "")[:300]),
@@ -215,10 +233,20 @@ class SerpApiDiscoveryAdapter(DiscoverySourceAdapter):
     ) -> List[DiscoveredCompanyItem]:
         if not self.is_configured():
             return []
-        city = (query.city or "Siliguri").strip()
+        city = (query.city or "").strip()
+        is_all_india = city.lower() in ("all", "all india", "") or query.scope == "country"
         ind = (query.industry or "software IT services").strip()
         kw = (query.query or "").strip()
-        q = f"{kw} {ind} companies in {city} India".strip()
+
+        if is_all_india:
+            q = f"{kw} {ind} companies in India".strip()
+            result_city = "India"
+        elif query.state and not city:
+            q = f"{kw} {ind} companies in {query.state} India".strip()
+            result_city = query.state
+        else:
+            q = f"{kw} {ind} companies in {city} {query.state or ''} India".strip()
+            result_city = city or "India"
 
         close_client = http_client is None
         client = http_client or httpx.Client(timeout=10.0)
@@ -241,7 +269,7 @@ class SerpApiDiscoveryAdapter(DiscoverySourceAdapter):
                 items.append(DiscoveredCompanyItem(
                     name=sanitize_untrusted_text(title[:120]),
                     website=link,
-                    city=city,
+                    city=result_city,
                     state=query.state,
                     industry=query.industry or "Technology Services",
                     description=sanitize_untrusted_text((org.get("snippet") or "")[:300]),

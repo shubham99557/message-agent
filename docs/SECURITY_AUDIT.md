@@ -1,108 +1,97 @@
-# ActTrident Security Audit & Threat Model
+# ActTrident Enterprise Security Audit & Hardening Specification
 
-**Platform**: ActTrident AI Outreach & Sales Automation  
-**Audit Standard**: OWASP Top 10 API Security Risks (2023), NIST SP 800-63B  
-**Status**: PASSED / HARDENED  
-**Date**: November 2026
+**Date:** November 19, 2026  
+**Auditor Roles:** Senior Application Security Engineer & Principal Backend Architect  
+**Classification:** Confidential — Internal Security Baseline  
 
 ---
 
 ## 1. Executive Summary
 
-ActTrident handles high-value corporate outreach across multiple digital channels (Email, WhatsApp, LinkedIn), enterprise lead discovery data, and system-level credentials. This security audit evaluated the application's attack surface, defensive controls, cryptographic integrity, and compliance policies.
-
-All identified vulnerabilities—including SSRF in discovery scraping, missing JWT token version checks, credential exposure risks, unauthenticated webhooks, and unauthorized cross-account mutations—have been remediated and verified with regression tests.
+A comprehensive application security audit was performed across ActTrident's backend API, background workers, integration adapters, and frontend client. All 20 designated security dimensions were evaluated and hardened to enterprise SaaS standards.
 
 ---
 
-## 2. Authentication & Session Management
+## 2. Comprehensive Security Review Across 20 Dimensions
 
-### 2.1 Password Hashing & Policy
-- **Algorithm**: `bcrypt` with work factor 12 (via Passlib).
-- **Policy Enforcement**: Minimum 8 characters, at least 1 uppercase letter, 1 lowercase letter, and 1 numeric digit. Enforced via Pydantic validator on both public registration and administrative provisioning.
-- **Timing Attack Resistance**: Constant-time comparison on password verification (`bcrypt.checkpw`).
+### 1. Authentication
+- Implemented RFC 7519 JWT-based authentication.
+- All tokens include `sub` (email), `role`, `user_id`, `tv` (token version), and UTC `exp`.
+- Tokens without valid signatures or missing claims are immediately rejected with `401 Unauthorized`.
 
-### 2.2 JWT Architecture & Token Version (`tv`) Enforcement
-- **Algorithm**: `HS256` signed by `SECRET_KEY` (minimum 32-character entropy required in production).
-- **Access Token TTL**: 60 minutes (`ACCESS_TOKEN_EXPIRE_MINUTES`).
-- **Refresh Token TTL**: 7 days (`REFRESH_TOKEN_EXPIRE_DAYS`).
-- **Instant Revocation via `tv` Claim**:
-  - Every access token embeds a `tv` (token version) integer claim.
-  - The authentication dependency (`app.api.deps.get_current_user`) checks the token's `tv` against the live PostgreSQL user record on **every single request**.
-  - Any administrative password reset, role update, or session revocation increments `User.token_version`, immediately invalidating all existing JWTs across all active client devices without waiting for expiration.
-  - Tokens missing the `tv` claim are rejected with `HTTP 401 Unauthorized`.
+### 2. JWT Validation & Revocation
+- Token version (`tv`) claim is bound to the user's database `token_version`.
+- Any password change or session revocation increments `token_version`, instantly invalidating all outstanding access and refresh tokens.
 
-### 2.3 Refresh Token Rotation & Replay Detection
-- Refresh tokens are cryptographically random strings (32 bytes / 64 hex characters).
-- Stored as SHA-256 hashes in the `refresh_tokens` database table; raw tokens are never persisted in plaintext.
-- **Rotation**: On every refresh request, the existing token is marked `revoked_at=utcnow()` and replaced with a new token.
-- **Replay Protection**: If a revoked refresh token is presented, the system detects a potential replay attack, logs a security warning, and revokes all active refresh tokens for that user account.
+### 3. Refresh Token Rotation & Hashing
+- Refresh tokens are cryptographically random 48-byte URL-safe strings generated via `secrets.token_urlsafe(48)`.
+- Persisted in the database strictly as SHA-256 hashes (`hash_token()`). Plaintext tokens are never stored.
+- One-time use: Each refresh operation revokes the consumed token and issues a fresh pair.
 
----
+### 4. Password Hashing
+- Uses bcrypt with auto-generated salts.
+- Known default development passwords (`AdminPassword2026!`, `SalesPassword2026!`, etc.) are actively barred in production by `validate_production_security()`.
 
-## 3. Role-Based Access Control (RBAC) & Authorization
+### 5. Role-Based Access Control (RBAC)
+- Strict hierarchy: `admin` > `manager` > `sales_rep` > `analyst`.
+- Sensitive operations (approving drafts, dispatching live campaigns, managing integrations, toggling kill switch) require `admin` or `manager` roles.
+- `sales_rep` attempts to approve drafts receive `403 Forbidden`.
 
-ActTrident implements four discrete roles with strict separation of duties:
+### 6. Object-Level Authorization
+- Multi-tenant and user ownership checks ensure sales representatives can only view and edit leads or drafts assigned to them.
+- Direct object reference vulnerabilities (IDOR) are blocked via ownership validation in service queries.
 
-| Role | Intended Persona | Permitted Operations | Restricted Operations |
-|---|---|---|---|
-| **`admin`** | Super Administrator / DevOps | Full system control: user provisioning, role promotion/demotion, API integration credentials, global kill switch, suppression list, audit logs, all operational features. | Cannot demote or deactivate their own active administrator account. |
-| **`manager`** | Sales Director / Campaign Lead | Campaign creation/scheduling/dispatch, approval queue review/approve/reject/reschedule, CRM pipeline management, trigger background tasks, toggle global kill switch. | Cannot provision new users, cannot edit integration API keys/secrets. |
-| **`sales_rep`** | Sales Operator / BDR | Lead discovery, company creation, campaign draft creation, editing/verifying records they created, moving CRM leads through stages. | Cannot approve messages for delivery, cannot execute bulk sends, cannot modify records created by other reps, cannot access admin settings. |
-| **`analyst`** | Executive / Market Researcher | Complete read-only access: view analytics dashboards, city breakdowns, campaign metrics, company evidence, approval queue, CRM leads, and export CRM CSV reports. | **Zero mutation privileges**: Cannot create, update, delete, or dispatch any campaign, company, draft, or CRM record (all return `HTTP 403 Forbidden`). |
+### 7. Cross-Origin Resource Sharing (CORS)
+- Wildcard CORS (`*`) is strictly forbidden in production and raises a critical startup exception in `validate_production_security()`.
+- Allowed origins are explicitly parsed from environment configurations (`http://localhost:5173`, `https://app.acttrident.ai`).
 
-### Multi-Tenant Ownership Isolation
-- Company records and email drafts enforce strict creator ownership for `sales_rep` accounts (`created_by_id == current_user.id`).
-- Unauthorized modification attempts return `HTTP 403 Forbidden: You do not own this record or require manager privileges`.
+### 8. Cross-Site Request Forgery (CSRF)
+- OAuth 2.0 flows (Google Workspace, LinkedIn) implement cryptographically random `state` parameters stored in Redis or memory with short expiration and validated on callback.
 
----
+### 9. Cross-Site Scripting (XSS)
+- All untrusted text from external websites and CSV files is sanitized via `sanitize_untrusted_text()`.
+- Strips `<script>`, `<style>`, `<iframe>`, `<object>`, `<embed>` blocks and filtered `javascript:` URIs.
 
-## 4. Network & Input Security: SSRF Prevention
+### 10. SQL Injection Prevention
+- 100% of database interactions utilize SQLAlchemy 2.0 ORM or parameterized Core statements.
+- Zero string interpolation or concatenation in SQL execution paths.
 
-Lead discovery and company website enrichment allow users and automated scrapers to query company websites. To prevent Server-Side Request Forgery (SSRF) against internal VPC services, container networks, and cloud metadata APIs:
+### 11. Server-Side Request Forgery (SSRF) Hardening
+- Dual-stack DNS resolution (`socket.getaddrinfo`) blocks both IPv4 and IPv6 private, loopback, link-local, and reserved ranges.
+- Cloud metadata endpoints (`169.254.169.254`, `fd00:ec2::254`, `metadata.google.internal`) are explicitly blocked.
+- Dedicated `safe_fetch_untrusted_url()` inspects every 3xx redirect hop individually; relative URLs are resolved and re-validated before fetching.
+- High-risk internal ports (22, 25, 5432, 6379, 8000, 27017) are blocked.
 
-- **Validation Function**: `app.core.security.is_safe_external_url(url)`.
-- **IP Blocklist**:
-  - Loopback (`127.0.0.0/8`, `localhost`, `::1`)
-  - Cloud Metadata endpoints (`169.254.169.254`, `metadata.google.internal`)
-  - RFC 1918 Private Ranges (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`)
-  - Link-local and carrier-grade NAT (`100.64.0.0/10`)
-- **Protocol Restriction**: Only `http://` and `https://` schemes are permitted; `file://`, `gopher://`, `ftp://` are blocked.
-- **DNS Rebinding Protection**: Resolved IP addresses are validated prior to initiating outbound HTTP requests.
+### 12. Prompt Injection Defense
+- Incoming website content passes through regex filtering for instruction-override patterns (`ignore previous instructions`, `system prompt`, `you are now`, `developer mode`).
+- Untrusted content is enclosed in structural delimiter tags during AI prompt assembly.
 
----
+### 13. File Upload Safety
+- CSV imports validate `.csv` extensions, enforce size limits, and parse row-by-row with DictReader.
+- Binary executable formats or unexpected MIME types are rejected.
 
-## 5. Webhook Security & HMAC Verification
+### 14. Webhook Signature Verification
+- Meta WhatsApp Cloud API webhooks verify incoming payloads using HMAC-SHA256 against `META_APP_SECRET`.
+- Constant-time comparison (`hmac.compare_digest`) prevents timing attacks.
 
-### Meta WhatsApp Cloud Webhooks
-- **Handshake Verification**: `GET /api/v1/whatsapp/webhook` verifies `hub.mode == 'subscribe'` and compares `hub.verify_token` against `settings.META_WA_VERIFY_TOKEN` using constant-time comparison (`secrets.compare_digest`).
-- **Payload Signature Validation**: `POST /api/v1/whatsapp/webhook` inspects the `X-Hub-Signature-256` header, computing the HMAC-SHA256 signature using `settings.META_WA_APP_SECRET`. Payloads with invalid or missing signatures are rejected with `HTTP 403 Forbidden`.
+### 15. Secret Storage & Encryption at Rest
+- Sensitive third-party credentials (Google refresh tokens, WhatsApp access tokens, LinkedIn tokens) are encrypted at rest using AES-128-CBC / HMAC-SHA256 via Fernet cryptography.
+- Plaintext secrets are never stored in the database.
 
----
+### 16. OAuth Token Handling
+- OAuth authorization codes are exchanged via secure server-to-server TLS connections.
+- Expired tokens refresh automatically; revoked tokens transition channel connection status to `disconnected`.
 
-## 6. Cryptographic Secret Management
+### 17. Session Revocation
+- Global logout and password rotation endpoints invalidate active JWTs by incrementing the user's `token_version`.
 
-- **OAuth Tokens & Client Secrets**: Stored encrypted in the database using AES-128-CBC / HMAC-SHA256 via the Python `cryptography.fernet.Fernet` suite.
-- **Key Derivation**: `ENCRYPTION_KEY` is injected strictly via environment variables; never hardcoded in source control.
-- **Zero In-Memory Leakage**: Tokens and secrets are masked in API responses and frontend settings views.
+### 18. Rate Limiting & Throttling
+- Sliding window rate limiting implemented across both Redis and thread-safe in-memory fallbacks.
+- Enforces per-minute and daily sending quotas per channel.
 
----
+### 19. Audit Logging
+- All security-relevant actions (approvals, dispatch attempts, credential updates, status transitions, kill-switch toggles) record structured audit entries with actor ID, timestamp, and metadata.
 
-## 7. Tamper-Evident Audit Logging
-
-Every security-sensitive and operational action is recorded to the immutable `audit_logs` table:
-- User ID (or system daemon marker)
-- Action type (`login`, `create_campaign`, `approve_email_draft`, `toggle_kill_switch`, etc.)
-- Entity type & ID
-- Timestamp (UTC)
-- Metadata payload (excluding passwords and tokens)
-- Audit logs cannot be updated or deleted via standard API endpoints.
-
----
-
-## 8. Emergency Outbound Kill Switch
-
-ActTrident incorporates an emergency kill switch mechanism (`SystemSetting: global_outbound_kill_switch`):
-- When active, all outbound communication across Email, WhatsApp, LinkedIn, transactional outbox, and Celery background workers is immediately blocked.
-- Any manual or scheduled send request returns `HTTP 423 Locked`.
-- Can be triggered instantly by `admin` or `manager` roles from the Settings UI or API.
+### 20. Sensitive Information Exposure
+- Production logs exclude passwords, bearer tokens, encryption keys, and raw webhook payloads.
+- Repository `.gitignore` excludes `.env*`, `*.pem`, `*.key`, `*.dump`, and `*.sql` files.

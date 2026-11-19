@@ -16,6 +16,12 @@ config = context.config
 
 # Always resolve database URL from application Settings / environment
 db_url = os.getenv("ALEMBIC_DATABASE_URL") or settings.DATABASE_URL
+if db_url.startswith("postgresql://"):
+    try:
+        import psycopg  # noqa: F401
+        db_url = db_url.replace("postgresql://", "postgresql+psycopg://", 1)
+    except ImportError:
+        pass
 config.set_main_option("sqlalchemy.url", db_url)
 
 if config.config_file_name is not None:
