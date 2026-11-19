@@ -189,6 +189,12 @@ def add_recipients_to_campaign(
                 status_code=400,
                 detail=f"Demo fixture company '{comp.name}' cannot be added to campaigns.",
             )
+        if camp.status in ("active", "running") and camp.min_devices and camp.min_devices >= 5:
+            if not comp.has_verified_5_plus_laptops or getattr(comp, "verification_status", None) != "verified":
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Cannot add company '{comp.name}' with unverified fleet status ({getattr(comp, 'verification_status', 'pending')}) to a live campaign requiring verified devices.",
+                )
         exists = db.query(CampaignRecipient).filter(
             CampaignRecipient.campaign_id == campaign_id,
             CampaignRecipient.company_id == comp_id

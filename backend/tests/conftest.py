@@ -4,6 +4,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.core.config import settings
 from app.core.database import Base
 from app.api.deps import get_db
 from app.main import app
@@ -11,6 +12,12 @@ from app.services.auth_service import create_user
 from app.schemas.auth import UserCreate
 from app.models.company import Company
 from app.models.user import User
+
+
+@pytest.fixture(autouse=True)
+def configure_test_environment(monkeypatch):
+    """Enables live send mode for unit test harnesses with mocked HTTP providers."""
+    monkeypatch.setattr(settings, "LIVE_SEND_ENABLED", True)
 
 
 @pytest.fixture(scope="function")

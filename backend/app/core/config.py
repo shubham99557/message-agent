@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     OUTBOUND_RATE_LIMIT_EMAIL_PER_MIN: int = int(os.getenv("OUTBOUND_RATE_LIMIT_EMAIL_PER_MIN", "30"))
     OUTBOUND_RATE_LIMIT_WA_PER_MIN: int = int(os.getenv("OUTBOUND_RATE_LIMIT_WA_PER_MIN", "10"))
 
+    # Live Outreach Safety Gate (Default: False — fail-closed)
+    LIVE_SEND_ENABLED: bool = os.getenv("LIVE_SEND_ENABLED", "false").lower() in ("true", "1", "yes")
+
     # Initial Admin Bootstrap (from environment only; never hardcoded in source)
     INITIAL_ADMIN_EMAIL: str = os.getenv("INITIAL_ADMIN_EMAIL", "")
     INITIAL_ADMIN_PASSWORD: str = os.getenv("INITIAL_ADMIN_PASSWORD", "")
@@ -134,6 +137,16 @@ class Settings(BaseSettings):
                     raise ValueError("CRITICAL SECURITY ERROR: Production WhatsApp Cloud API requires META_APP_SECRET for HMAC verification.")
                 if (self.META_WA_VERIFY_TOKEN or "").strip() in ("", "acttrident_meta_webhook_secret_2026"):
                     raise ValueError("CRITICAL SECURITY ERROR: Production META_WA_VERIFY_TOKEN must not use the default development token.")
+            known_insecure_defaults = {
+                "AdminPassword2026!",
+                "SalesPassword2026!",
+                "ManagerPassword2026!",
+                "Password123!",
+                "SecurePassword123!",
+                "AdminPassword123!",
+            }
+            if self.INITIAL_ADMIN_PASSWORD and self.INITIAL_ADMIN_PASSWORD in known_insecure_defaults:
+                raise ValueError("CRITICAL SECURITY ERROR: INITIAL_ADMIN_PASSWORD must not use a known default development password in production.")
 
 
 settings = Settings()

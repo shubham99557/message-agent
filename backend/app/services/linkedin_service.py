@@ -328,7 +328,8 @@ def dispatch_approved_linkedin_message(
     msg.idempotency_key = idempotency_key
 
     partner_api_ready = bool(
-        settings.LINKEDIN_MESSAGING_API_APPROVED
+        getattr(settings, "LIVE_SEND_ENABLED", False)
+        and settings.LINKEDIN_MESSAGING_API_APPROVED
         and (settings.LINKEDIN_PARTNER_MESSAGING_ENDPOINT or "").strip()
     )
 

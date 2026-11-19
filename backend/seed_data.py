@@ -1,10 +1,12 @@
 import os
 import sys
+import secrets
 from datetime import datetime, timezone, timedelta
 
 # Ensure backend root is on sys.path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from app.core.config import settings
 from app.core.database import SessionLocal, Base, engine
 from app.models.user import User
 from app.models.company import Company, CompanyContact, ContactSource
@@ -21,6 +23,9 @@ from app.services.qualification_service import qualify_company
 
 
 def run_seed():
+    if settings.ENVIRONMENT.lower() == "production":
+        raise RuntimeError("CRITICAL SECURITY VIOLATION: seed_data.py is strictly forbidden in production.")
+
     print("Initializing ActTrident Database Tables...")
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
@@ -31,7 +36,10 @@ def run_seed():
         
         rep = db.query(User).filter(User.email == "sales@acttrident.ai").first()
         if not rep:
-            sales_password = os.getenv("INITIAL_SALES_PASSWORD", "SalesPassword2026!")
+            sales_password = os.getenv("INITIAL_SALES_PASSWORD")
+            if not sales_password:
+                sales_password = secrets.token_urlsafe(16)
+                print(f"Generated secure non-default sales password for local dev: {sales_password}")
             rep = User(
                 email="sales@acttrident.ai",
                 hashed_password=get_password_hash(sales_password),

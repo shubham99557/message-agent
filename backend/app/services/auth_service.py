@@ -14,6 +14,15 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+KNOWN_INSECURE_DEFAULT_PASSWORDS = {
+    "AdminPassword2026!",
+    "SalesPassword2026!",
+    "ManagerPassword2026!",
+    "Password123!",
+    "SecurePassword123!",
+    "AdminPassword123!",
+}
+
 
 def get_user_by_email(db: Session, email: str) -> Optional[User]:
     return db.query(User).filter(User.email == email.lower().strip()).first()
@@ -25,6 +34,8 @@ def get_user_by_id(db: Session, user_id: int) -> Optional[User]:
 
 def create_user(db: Session, user_in: UserCreate, role: str = "sales_rep") -> User:
     safe_role = role if role in VALID_ROLES else "sales_rep"
+    if settings.ENVIRONMENT.lower() == "production" and user_in.password in KNOWN_INSECURE_DEFAULT_PASSWORDS:
+        raise ValueError("Known development default passwords are not permitted in production.")
     hashed_password = get_password_hash(user_in.password)
     db_user = User(
         email=user_in.email.lower().strip(),
@@ -46,6 +57,28 @@ def authenticate_user(db: Session, email: str, password: str) -> Optional[User]:
         return None
     if not verify_password(password, user.hashed_password):
         return None
+    if settings.ENVIRONMENT.lower() == "production" and password in KNOWN_INSECURE_DEFAULT_PASSWORDS:
+        logger.warning(f"Production security block: Rejected login for '{email}' using known default password.")
+        return None
+    return user
+
+
+def change_user_password(db: Session, user_id: int, old_password: str, new_password: str) -> User:
+    """Securely rotates user password, increments token_version and invalidates active sessions."""
+    user = get_user_by_id(db, user_id)
+    if not user:
+        raise ValueError("User not found.")
+    if not verify_password(old_password, user.hashed_password):
+        raise ValueError("Current password verification failed.")
+    if len(new_password) < 8:
+        raise ValueError("New password must be at least 8 characters long.")
+    if settings.ENVIRONMENT.lower() == "production" and new_password in KNOWN_INSECURE_DEFAULT_PASSWORDS:
+        raise ValueError("Known development default passwords are not permitted in production.")
+
+    user.hashed_password = get_password_hash(new_password)
+    revoke_user_refresh_tokens(db, user_id)
+    db.commit()
+    db.refresh(user)
     return user
 
 

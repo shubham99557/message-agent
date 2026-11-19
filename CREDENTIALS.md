@@ -6,12 +6,29 @@
 
 ---
 
-## 1. Local Development Credentials
+## 1. Local Development & Initial Provisioning
 
-| Account Role | Email Identifier | Default Dev Password | Notes |
+> **SECURITY HARDENING ENFORCEMENT:**  
+> Static default passwords have been removed from source code, scripts, and documentation.  
+> In production and staging, default development credentials are automatically rejected by the authentication validator.
+
+### Provisioning Accounts:
+1. **Interactive CLI Provisioning (Recommended):**
+   Run the secure provisioning CLI tool to create administrator and operator accounts with masked password inputs:
+   ```bash
+   python backend/scripts/provision_admin.py --email admin@acttrident.ai --name "System Administrator"
+   ```
+2. **Environment Variable Bootstrapping (Non-production only):**
+   In local development, configure temporary passwords in your uncommitted `.env` file:
+   - `INITIAL_ADMIN_EMAIL=admin@acttrident.ai`
+   - `INITIAL_ADMIN_PASSWORD=<custom-strong-password>`
+   - `INITIAL_SALES_PASSWORD=<custom-strong-password>`
+
+| Account Role | Email Identifier | Provisioning Method | Access Capabilities |
 | :--- | :--- | :--- | :--- |
-| **System Administrator** | `admin@acttrident.ai` | `AdminPassword2026!` | Required for user creation, DLQ management, and configuration. |
-| **Sales Representative** | `sales@acttrident.ai` | `SalesPassword2026!` | Used for day-to-day company research, drafting, and CRM pipeline review. |
+| **System Administrator** | `admin@acttrident.ai` | `provision_admin.py` or `.env` | Full platform administration, integration setup, outbox controls, kill switch |
+| **Sales Manager** | `manager@acttrident.ai` | Admin invitation or `provision_admin.py` | Approval queue review, SHA-256 hash signing, campaign lifecycle controls |
+| **Sales Representative** | `sales@acttrident.ai` | Admin invitation or self-registration | Prospect research, company profiling, AI draft generation, CRM review |
 
 ---
 

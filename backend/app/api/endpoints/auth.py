@@ -16,6 +16,7 @@ from app.schemas.auth import (
     Token,
     UserLogin,
     TokenRefreshRequest,
+    PasswordChangeRequest,
     VALID_ROLES
 )
 from app.services.auth_service import (
@@ -27,7 +28,8 @@ from app.services.auth_service import (
     rotate_refresh_token,
     revoke_user_refresh_tokens,
     set_user_active_status,
-    update_user_role
+    update_user_role,
+    change_user_password,
 )
 from app.core.audit import record_audit_log
 
@@ -221,6 +223,33 @@ def logout_endpoint(
         details={"revoked_tokens": revoked_count}
     )
     return {"status": "logged_out", "revoked_tokens": revoked_count}
+
+
+@router.post("/change-password")
+def change_password_endpoint(
+    payload: PasswordChangeRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Securely rotates user password, invalidating older sessions and rotating token version."""
+    try:
+        user = change_user_password(
+            db=db,
+            user_id=current_user.id,
+            old_password=payload.old_password,
+            new_password=payload.new_password,
+        )
+        record_audit_log(
+            db=db,
+            action="password_rotated",
+            entity_type="user",
+            entity_id=str(user.id),
+            user_id=user.id,
+            details={"email": user.email, "token_version": user.token_version},
+        )
+        return {"status": "success", "message": "Password updated successfully. Please re-authenticate."}
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
 
 @router.get("/me", response_model=UserResponse)

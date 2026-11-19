@@ -74,6 +74,16 @@ class TokenRefreshRequest(BaseModel):
     refresh_token: str
 
 
+class PasswordChangeRequest(BaseModel):
+    old_password: str
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def check_password_policy(cls, v: str) -> str:
+        return _validate_strong_password(v)
+
+
 class UserResponse(UserBase):
     id: int
     role: str

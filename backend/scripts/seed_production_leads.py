@@ -196,18 +196,18 @@ def seed_production_prospects():
                     public_phone=p["public_phone"],
                     public_whatsapp=p["public_whatsapp"],
                     linkedin_url=p["linkedin_url"],
-                    laptop_count_verified=p["laptop_count_verified"],
+                    laptop_count_verified=None,  # Pending independent verification; unsupported claims removed
                     laptop_count_evidence=p["laptop_count_evidence"],
-                    has_verified_5_plus_laptops=True,
+                    has_verified_5_plus_laptops=False,  # Excluded from live campaigns until independently audited
                     employee_count_min=p["employee_count_min"],
                     employee_count_max=p["employee_count_max"],
                     employee_size_evidence=p["employee_size_evidence"],
                     decision_maker_name=p["decision_maker_name"],
                     decision_maker_role=p["decision_maker_role"],
-                    verification_status="verified",
-                    verification_method="mca_filing_and_registry",
-                    is_demo=False,  # Genuine target prospect ready for real campaigns
-                    date_last_verified=datetime.now(timezone.utc)
+                    verification_status="pending",
+                    verification_method="pending_independent_audit",
+                    is_demo=False,
+                    date_last_verified=None
                 )
                 db.add(comp)
                 db.flush()
@@ -217,8 +217,8 @@ def seed_production_prospects():
                     company_id=comp.id,
                     field_name="profile_and_laptops",
                     source_url=p["source_url"],
-                    source_type="official_registry",
-                    extracted_text=f"Documented {p['laptop_count_verified']} laptops: {p['laptop_count_evidence']}"
+                    source_type="unverified_registry_lead",
+                    extracted_text=f"Claimed {p['laptop_count_verified']} laptops (Pending Audit): {p['laptop_count_evidence']}"
                 )
                 db.add(src)
 
@@ -232,7 +232,7 @@ def seed_production_prospects():
                     channel="whatsapp",
                     contact_identifier=p["public_whatsapp"],
                     consent_status="unconsented",
-                    consent_source="Public MCA Directory",
+                    consent_source="Public Directory Lead",
                     notes="Compliance lock: requires explicit recorded consent or approved Meta template before automated dispatch"
                 )
                 db.add(consent)
@@ -244,13 +244,14 @@ def seed_production_prospects():
                 comp.qualification_reason = qual_result.reason
                 
                 seeded += 1
-                print(f"  ✓ Added: '{comp.name}' ({comp.city}) - Score: {qual_result.score} ({qual_result.status})")
+                print(f"  ✓ Added: '{comp.name}' ({comp.city}) - Status: pending (Excluded from live campaigns until audited)")
             else:
                 comp.is_demo = False
-                comp.verification_status = "verified"
-                comp.has_verified_5_plus_laptops = True
+                comp.verification_status = "pending"
+                comp.has_verified_5_plus_laptops = False
+                comp.laptop_count_verified = None
                 updated += 1
-                print(f"  • Already exists: '{comp.name}' ({comp.city}) - Verified non-demo status confirmed")
+                print(f"  • Existing prospect updated to pending audit: '{comp.name}' ({comp.city})")
 
         db.commit()
         print(f"\nSeeding complete: {seeded} new prospects added, {updated} existing verified.")

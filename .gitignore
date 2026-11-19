@@ -2,8 +2,27 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.db
+*.sqlite3
 .pytest_cache/
+.coverage
+htmlcov/
+
+# Environment and Secrets
 .env
+.env.*
+!.env.example
+*.pem
+*.key
+*.cert
+*.p12
+credentials.json
+client_secret*.json
+
+# Backups & Database Dumps
+backups/
+*.dump
+*.sql
+*.tar.gz
 
 # Node
 node_modules/

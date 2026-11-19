@@ -223,13 +223,21 @@ def send_approved_email(
     body_with_optout = _ensure_opt_out_footer(draft)
     attempt_num = _next_attempt_number(db, draft.id)
     gmail_conn = get_active_gmail_connection(db)
+
+    # LIVE OUTREACH SAFETY GATE:
+    # LIVE_SEND_ENABLED must be explicitly True to dispatch live external network requests.
+    # When False (the secure default), missing or present credentials fail closed to local simulation.
+    live_send_permitted = getattr(settings, "LIVE_SEND_ENABLED", False)
+
     use_gmail = bool(
-        gmail_conn
+        live_send_permitted
+        and gmail_conn
         and gmail_conn.status == "connected"
         and (gmail_conn.encrypted_access_token or gmail_conn.encrypted_refresh_token)
     )
     use_smtp = bool(
-        not use_gmail
+        live_send_permitted
+        and not use_gmail
         and settings.EMAIL_PROVIDER == "smtp"
         and settings.SMTP_USER
         and settings.SMTP_PASSWORD
@@ -458,6 +466,8 @@ def record_provider_email_event(
     elif event_type in ("bounced", "complaint"):
         draft.approval_status = "bounced"
         draft.error_message = details or f"Provider reported {event_type}"
+        if draft.company and draft.company.lead:
+            draft.company.lead.pipeline_status = "bounced"
 
     db.add(EmailEvent(
         draft_id=draft.id,

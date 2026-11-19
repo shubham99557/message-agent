@@ -372,7 +372,8 @@ def send_approved_whatsapp_message(
     db.refresh(msg)
 
     # Rule 7: Dispatch via Official Meta Cloud API or Explicit Simulation Mode
-    if is_meta_wa_configured():
+    live_send_permitted = getattr(settings, "LIVE_SEND_ENABLED", False)
+    if live_send_permitted and is_meta_wa_configured():
         try:
             meta_msg_id = send_meta_template_message(db=db, msg=msg, http_client=http_client)
             now_utc = datetime.now(timezone.utc)
