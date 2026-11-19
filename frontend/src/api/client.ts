@@ -281,6 +281,21 @@ export const api = {
     formData.append('file', file);
     return request<any[]>('/discovery/upload-csv', { method: 'POST', body: formData });
   },
+  exportDiscoveryCsv: async (params: any) => {
+    const token = getAuthToken();
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const res = await fetch(`${API_BASE}/discovery/export/csv`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(params),
+    });
+    if (!res.ok) throw new Error('Failed to export Discovery CSV');
+    return res.blob();
+  },
+  getDiscoveryHistory: async () => {
+    return request<any[]>('/discovery/history');
+  },
 
   // Qualification
   qualifyCompany: (companyId: number) => request<any>(`/qualification/company/${companyId}`, { method: 'POST' }),

@@ -110,3 +110,25 @@ class WebsiteCrawlRequest(BaseModel):
 
 class BatchImportRequest(BaseModel):
     companies: List[DiscoveredCompanyItem]
+
+
+class MultiCityDiscoveryQuery(BaseModel):
+    cities: List[str]
+    industry: Optional[str] = None
+    query: Optional[str] = None
+    min_devices: Optional[int] = None
+    include_demo: bool = True
+    page: int = 1
+    page_size: int = 20
+    sort_by: Optional[str] = "confidence"
+    sort_order: Optional[str] = "desc"
+
+
+class DiscoverySearchHistoryItem(BaseModel):
+    id: str
+    query_summary: str
+    city: Optional[str] = None
+    state: Optional[str] = None
+    scope: str
+    results_count: int
+    timestamp: datetime

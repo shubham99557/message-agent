@@ -1,5 +1,7 @@
+import io
 from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, get_current_user
@@ -9,12 +11,17 @@ from app.schemas.research import (
     DiscoveredCompanyItem,
     DiscoveryResponse,
     WebsiteCrawlRequest,
-    BatchImportRequest
+    BatchImportRequest,
+    MultiCityDiscoveryQuery,
+    DiscoverySearchHistoryItem,
 )
 from app.schemas.company import CompanyResponse, CompanyCreate
 from app.services.discovery_service import (
     search_public_company_directory,
     search_public_company_directory_paginated,
+    search_multi_city_directory,
+    get_recent_search_history,
+    export_discovered_companies_csv,
     crawl_company_website_for_contacts,
     parse_csv_discovery_file
 )
@@ -97,6 +104,53 @@ def search_discovery_directory_paginated_endpoint(
     with provider health reporting and sorting controls.
     """
     return search_public_company_directory_paginated(query_params)
+
+
+@router.get("/history", response_model=List[DiscoverySearchHistoryItem])
+def get_discovery_history(current_user: User = Depends(get_current_user)):
+    """Returns recent operator discovery queries for auditability and fast re-runs."""
+    return get_recent_search_history()
+
+
+@router.post("/multi-city-search", response_model=DiscoveryResponse)
+def search_multi_city_discovery_endpoint(
+    query_params: MultiCityDiscoveryQuery,
+    current_user: User = Depends(get_current_user)
+):
+    """Executes aggregated discovery across multiple Indian cities in a target cluster."""
+    if not query_params.cities:
+        raise HTTPException(status_code=400, detail="At least one target city must be specified.")
+    return search_multi_city_directory(query_params)
+
+
+@router.post("/export/csv")
+def export_discovery_csv(
+    query_params: DiscoveryQuery,
+    current_user: User = Depends(get_current_user)
+):
+    """Exports discovered company items matching query parameters into RFC 4180 CSV format."""
+    results = search_public_company_directory(query_params)
+    csv_text = export_discovered_companies_csv(results)
+    filename = f"discovery_export_{query_params.city or query_params.state or 'all'}_{int(len(results))}.csv"
+    return StreamingResponse(
+        io.StringIO(csv_text),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+
+@router.get("/coverage")
+def get_geographic_coverage_metrics(current_user: User = Depends(get_current_user)):
+    """Returns geographic coverage reporting across India's 6 regional zones and canonical hubs."""
+    states = get_states_and_uts()
+    regions = get_regions()
+    return {
+        "country": "India",
+        "total_states_and_uts": len(states),
+        "regions_covered": regions,
+        "supported_strategies": ["Multi-Region Nationwide Corridors", "Targeted City Hubs", "Multi-City Clusters"],
+        "status": "active"
+    }
 
 
 @router.post("/crawl-website", response_model=Dict[str, Any])

@@ -20,6 +20,7 @@ import {
   ChevronRight,
   ArrowUpDown,
   History,
+  Download,
   X
 } from 'lucide-react';
 
@@ -270,6 +271,35 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onCompanyImported 
       alert(`CSV upload error: ${err.message}`);
     } finally {
       setUploadingCsv(false);
+    }
+  };
+
+  const [exportingCsv, setExportingCsv] = useState(false);
+  const handleExportCsv = async () => {
+    try {
+      setExportingCsv(true);
+      const queryParams = {
+        city: scope === 'country' ? 'All' : cityInput.trim(),
+        state: selectedState || undefined,
+        scope: scope,
+        industry: (industry === 'All' ? undefined : (industry === 'custom' ? customIndustry : industry)) || undefined,
+        query: searchQuery.trim() || undefined,
+        min_devices: minDevices || undefined,
+        include_demo: includeDemo,
+      };
+      const blob = await api.exportDiscoveryCsv(queryParams);
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `discovered_prospects_${scope === 'country' ? 'nationwide' : cityInput || 'export'}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (err: any) {
+      alert(`Export failed: ${err.message}`);
+    } finally {
+      setExportingCsv(false);
     }
   };
 
@@ -652,6 +682,20 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onCompanyImported 
             <option value="devices">Sort by Laptops</option>
             <option value="retrieval">Sort by Recent</option>
           </select>
+
+          {/* Export CSV Button */}
+          {results.length > 0 && (
+            <button
+              type="button"
+              onClick={handleExportCsv}
+              disabled={exportingCsv}
+              className="px-2.5 py-1 bg-cobalt-800 hover:bg-cobalt-700 text-cobalt-200 border border-cobalt-700 rounded text-xs font-medium transition-colors flex items-center space-x-1 disabled:opacity-50"
+              title="Download results as CSV"
+            >
+              <Download className="w-3.5 h-3.5 text-cobalt-400" />
+              <span>{exportingCsv ? 'Exporting...' : 'Export CSV'}</span>
+            </button>
+          )}
 
           {/* Batch Import Button */}
           {results.length > 0 && (

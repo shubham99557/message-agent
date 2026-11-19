@@ -149,3 +149,48 @@ def test_auth_route_rate_limiting_lockout(client):
 
     # Clean up
     _failed_login_attempts.clear()
+
+
+def test_discovery_search_history_and_multi_city(client, auth_headers):
+    """Validates search history tracking and multi-city search endpoint."""
+    # 1. Run paginated search to populate history
+    client.post(
+        "/api/v1/discovery/search-paginated",
+        json={"city": "Siliguri", "scope": "city", "include_demo": True},
+        headers=auth_headers
+    )
+
+    # 2. Check history
+    r_hist = client.get("/api/v1/discovery/history", headers=auth_headers)
+    assert r_hist.status_code == 200
+    hist = r_hist.json()
+    assert len(hist) >= 1
+    assert any("Siliguri" in (h.get("city") or "") for h in hist)
+
+    # 3. Multi-city search
+    r_multi = client.post(
+        "/api/v1/discovery/multi-city-search",
+        json={"cities": ["Siliguri", "Gangtok"], "include_demo": True},
+        headers=auth_headers
+    )
+    assert r_multi.status_code == 200
+    m_data = r_multi.json()
+    assert m_data["total"] >= 1
+    assert m_data["scope"] == "multi_city"
+
+    # 4. Coverage endpoint
+    r_cov = client.get("/api/v1/discovery/coverage", headers=auth_headers)
+    assert r_cov.status_code == 200
+    c_data = r_cov.json()
+    assert c_data["total_states_and_uts"] >= 36
+    assert len(c_data["regions_covered"]) >= 4
+
+    # 5. Export CSV
+    r_csv = client.post(
+        "/api/v1/discovery/export/csv",
+        json={"city": "Siliguri", "scope": "city", "include_demo": True},
+        headers=auth_headers
+    )
+    assert r_csv.status_code == 200
+    assert "text/csv" in r_csv.headers.get("content-type", "")
+    assert "Name,Website,City" in r_csv.text

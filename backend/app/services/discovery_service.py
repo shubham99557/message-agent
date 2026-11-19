@@ -18,7 +18,13 @@ from app.integrations.discovery_adapters import (
     OpenStreetMapPublicAdapter,
 )
 from app.core.locations import get_nationwide_search_batches, get_canonical_location
-from app.schemas.research import DiscoveredCompanyItem, DiscoveryQuery, DiscoveryResponse
+from app.schemas.research import (
+    DiscoveredCompanyItem,
+    DiscoveryQuery,
+    DiscoveryResponse,
+    MultiCityDiscoveryQuery,
+    DiscoverySearchHistoryItem,
+)
 from app.services.job_service import get_redis_client
 
 logger = logging.getLogger(__name__)
@@ -674,6 +680,8 @@ def search_public_company_directory_paginated(
         "Results are strictly deduplicated and source-attributed. Managed workstation fleet counts (5+ laptops) require independent verification."
     )
 
+    record_search_history(query_params, total)
+
     return DiscoveryResponse(
         items=paginated_items,
         total=total,
@@ -686,3 +694,145 @@ def search_public_company_directory_paginated(
         active_providers=active_providers,
         failed_providers=failed_providers,
     )
+
+
+_recent_search_history: List[Dict[str, Any]] = []
+
+
+def record_search_history(query_params: DiscoveryQuery, total_count: int) -> None:
+    """Maintains an in-memory audit log of recent operator discovery searches."""
+    global _recent_search_history
+    import uuid
+    summary = f"{query_params.query or 'All Technologies'} in {query_params.city or query_params.state or 'All India'}"
+    entry = {
+        "id": str(uuid.uuid4())[:8],
+        "query_summary": summary,
+        "city": query_params.city,
+        "state": query_params.state,
+        "scope": query_params.scope or "city",
+        "results_count": total_count,
+        "timestamp": datetime.now(timezone.utc),
+    }
+    _recent_search_history.insert(0, entry)
+    if len(_recent_search_history) > 50:
+        _recent_search_history = _recent_search_history[:50]
+
+
+def get_recent_search_history() -> List[Dict[str, Any]]:
+    """Returns recent discovery queries for operator visibility."""
+    return list(_recent_search_history)
+
+
+def search_multi_city_directory(
+    query_params: MultiCityDiscoveryQuery,
+    http_client: Optional[httpx.Client] = None,
+) -> DiscoveryResponse:
+    """
+    Executes aggregated multi-city discovery across an explicit cluster of Indian cities
+    with deduplication, pagination, and unified coverage reporting.
+    """
+    all_results: List[DiscoveredCompanyItem] = []
+    seen_keys = set()
+
+    for city_name in query_params.cities:
+        sub_query = DiscoveryQuery(
+            city=city_name.strip(),
+            industry=query_params.industry,
+            query=query_params.query,
+            min_devices=query_params.min_devices,
+            include_demo=query_params.include_demo,
+            scope="city"
+        )
+        city_results = search_public_company_directory(sub_query, http_client=http_client)
+        for item in city_results:
+            key = (
+                item.name.strip().lower(),
+                (item.website or "").strip().lower(),
+                (item.city or "").strip().lower()
+            )
+            if key not in seen_keys:
+                seen_keys.add(key)
+                all_results.append(item)
+
+    # Sort
+    sort_by = (query_params.sort_by or "confidence").lower()
+    reverse = (query_params.sort_order or "desc").lower() == "desc"
+    if sort_by == "name":
+        all_results.sort(key=lambda x: (x.name or "").lower(), reverse=reverse)
+    elif sort_by == "city":
+        all_results.sort(key=lambda x: (x.city or "").lower(), reverse=reverse)
+    elif sort_by == "devices":
+        all_results.sort(key=lambda x: (x.laptop_count_verified or 0), reverse=reverse)
+    else:
+        all_results.sort(key=lambda x: (x.confidence_level or 0.0), reverse=reverse)
+
+    total = len(all_results)
+    page = max(1, query_params.page)
+    page_size = max(1, min(100, query_params.page_size))
+    total_pages = (total + page_size - 1) // page_size if total > 0 else 1
+
+    start_idx = (page - 1) * page_size
+    end_idx = start_idx + page_size
+
+    adapters = [TavilyDiscoveryAdapter(), SerpApiDiscoveryAdapter(), OpenStreetMapPublicAdapter()]
+    active_providers = [a.name for a in adapters if a.is_configured()]
+    failed_providers = [a.name for a in adapters if not a.is_configured()]
+
+    return DiscoveryResponse(
+        items=all_results[start_idx:end_idx],
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages,
+        scope="multi_city",
+        search_strategy=f"Multi-City Cluster ({', '.join(query_params.cities[:3])}{'...' if len(query_params.cities) > 3 else ''})",
+        coverage_note=f"Aggregated discovery across {len(query_params.cities)} selected cities.",
+        active_providers=active_providers,
+        failed_providers=failed_providers,
+    )
+
+
+def export_discovered_companies_csv(items: List[DiscoveredCompanyItem]) -> str:
+    """Serializes a list of discovered companies into standard RFC 4180 CSV."""
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "Name",
+        "Website",
+        "City",
+        "State",
+        "Industry",
+        "Public Email",
+        "Public Phone",
+        "Public WhatsApp",
+        "LinkedIn URL",
+        "Decision Maker",
+        "Decision Maker Role",
+        "Employee Estimate",
+        "Verified Laptops",
+        "Laptop Evidence",
+        "Confidence",
+        "Source URL",
+        "Verification Status"
+    ])
+    for item in items:
+        writer.writerow([
+            item.name,
+            item.website or "",
+            item.city,
+            item.state or "",
+            item.industry or "",
+            item.public_email or "",
+            item.public_phone or "",
+            item.public_whatsapp or "",
+            item.linkedin_url or "",
+            item.decision_maker_name or "",
+            item.decision_maker_role or "",
+            f"{item.employee_count_min or ''}-{item.employee_count_max or ''}" if item.employee_count_min else "",
+            item.laptop_count_verified or 0,
+            item.laptop_count_evidence or "",
+            item.confidence_level,
+            item.source_url,
+            item.verification_status
+        ])
+    return output.getvalue()
