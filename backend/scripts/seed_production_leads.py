@@ -173,6 +173,14 @@ def seed_production_prospects():
     seeded = 0
     updated = 0
     try:
+        from app.integrations.discovery_adapters import is_demo_domain
+        for c in db.query(Company).all():
+            if is_demo_domain(c.website) or is_demo_domain(c.public_email):
+                if not c.is_demo:
+                    c.is_demo = True
+                    c.verification_status = "demo_fixture"
+        db.commit()
+
         for p in REAL_PROSPECTS:
             comp = db.query(Company).filter(Company.name == p["name"]).first()
             if not comp:
