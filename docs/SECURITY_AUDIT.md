@@ -95,3 +95,10 @@ A comprehensive application security audit was performed across ActTrident's bac
 ### 20. Sensitive Information Exposure
 - Production logs exclude passwords, bearer tokens, encryption keys, and raw webhook payloads.
 - Repository `.gitignore` excludes `.env*`, `*.pem`, `*.key`, `*.dump`, and `*.sql` files.
+
+### 21. Regulatory Scope & Channel Separation (DPDP 2023 & TRAI TCCCPR 2018)
+- **India DPDP Act 2023:** Section 12 Right to be Forgotten erasure service is exposed at authenticated `POST /api/v1/crm/erasure` with immediate cascading deletion from leads and drafts, plus permanent cryptographic addition to `SuppressionList`.
+- **Public One-Click Unsubscribe (RFC 8058):** Publicly available GET and POST `/api/v1/crm/public/opt-out` endpoints handle instant unsubscribe requests without requiring login credentials.
+- **TRAI Calling Curfew (09:00 - 21:00 IST):** Enforced in `validate_trai_commercial_hours` strictly on Indian telecom phone channels (`+91` numbers on WhatsApp, Phone, SMS). Email is explicitly exempt from TRAI telecommunications curfew hours and is governed under CAN-SPAM and IT Act guidelines.
+- **Meta WhatsApp Policy Compliance:** Enforces official Meta Graph API v22.0 message templates, utility category classification, opt-in tracking, and HMAC-SHA256 signature verification with `X-Hub-Signature-256`.
+

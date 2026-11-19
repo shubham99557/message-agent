@@ -170,27 +170,29 @@ sequenceDiagram
 
 | Task ID | Phase | Description | File Targets | Status | Acceptance Criteria |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **TASK-001** | Phase 1 | External Provider Research Documentation | `docs/PROVIDER_RESEARCH.md` | **COMPLETED** | Complete research for Gmail, WhatsApp, LinkedIn, Tavily, SerpAPI, OSM, DPDP, TRAI. |
-| **TASK-002** | Phase 2 | Root-Level Master Roadmap | `PLAN.md` | **COMPLETED** | Sections A-I complete with architecture, mermaid diagrams, and task IDs. |
-| **TASK-003** | Phase 2 | Publish Documentation Branch | Git `origin/docs/acttrident-production-roadmap` | **COMPLETED** | Clean documentation branch from `origin/main` pushed to remote (`34f2cf7`). |
-| **TASK-004** | Phase 3 | Lead & Campaign Idempotency Constraints | `backend/app/models/campaign.py` | **COMPLETED** | Unique constraint on `(campaign_id, company_id)` prevents duplicate draft rows. |
-| **TASK-005** | Phase 3 | Suppression List Table & Indexing | `backend/app/models/activity.py` | **COMPLETED** | Composite index on `(identifier, channel)` with fast suppression lookup. |
-| **TASK-006** | Phase 4 | Gmail OAuth2 Token Refresh Lifecycle | `backend/app/integrations/gmail_adapter.py` | **COMPLETED** | Auto-refresh expired access tokens via Google token endpoint; fail gracefully. |
-| **TASK-007** | Phase 4 | WhatsApp Cloud API HMAC Webhook Verification | `backend/app/api/endpoints/whatsapp.py` | **COMPLETED** | Validate `X-Hub-Signature-256` using secret; reject tampering with 403. |
-| **TASK-008** | Phase 4 | LinkedIn Operator Handoff & Audit Log | `backend/app/integrations/linkedin_adapter.py` | **COMPLETED** | Verify compliant manual deep-link generation and action logging. |
-| **TASK-009** | Phase 5 | Redis-Backed Discovery Caching | `backend/app/services/discovery_service.py` | **COMPLETED** | Cache geocoding and search queries in Redis with 7-day TTL. |
-| **TASK-010** | Phase 5 | Nominatim 1 req/sec Throttling | `backend/app/integrations/discovery_adapters.py` | **COMPLETED** | Thread-safe token bucket rate limiter guaranteeing max 1 req/sec. |
-| **TASK-011** | Phase 6 | Mailbox Warm-Up Rate Limiter | `backend/app/services/email_sender_service.py` | **COMPLETED** | Tiered daily send cap (20 -> 50 -> 100 -> 200) based on domain age. |
-| **TASK-012** | Phase 7 | DPDP 2023 Opt-Out & Erasure Service | `backend/app/api/endpoints/crm.py` | **COMPLETED** | Public RFC 8058 one-click opt-out and Section 12 erasure endpoints active. |
-| **TASK-013** | Phase 7 | TRAI IST Commercial Hours Curfew Guard | `backend/app/core/compliance_policy_engine.py` | **COMPLETED** | Reject outbound Indian phone outreach outside 09:00 - 21:00 IST. |
-| **TASK-014** | Phase 8 | Frontend Channel Connection Wizard | `frontend/src/views/IntegrationsView.tsx` | **COMPLETED** | Interactive step-by-step UI with verification test button per channel. |
-| **TASK-015** | Phase 8 | Live Notification & Error Boundary | `frontend/src/components/ErrorBoundary.tsx` | **COMPLETED** | Capture React crashes gracefully and surface user-friendly recovery UI. |
-| **TASK-016** | Phase 9 | Auth Route Rate Limiting & Lockout | `backend/app/api/endpoints/auth.py` | **COMPLETED** | Limit login attempts to 5 per 5 minutes per IP to mitigate brute-force. |
-| **TASK-017** | Phase 10 | Celery Dead-Letter & Failure Alerting | `backend/app/services/job_service.py` | **COMPLETED** | Route exhausted retries to dead-letter queue with error diagnostic logging. |
-| **TASK-018** | Phase 11 | Backend Integration Test Expansion | `backend/tests/` | **COMPLETED** | Comprehensive suite expanded to 126 tests (100% pass rate). |
-| **TASK-019** | Phase 12 | 15-Step End-to-End Socket Verification | `backend/scripts/live_e2e_runner.py` | **COMPLETED** | Live socket run verifying full 15-step lifecycle without mocks. |
-| **TASK-020** | Phase 13 | Multi-Stage Production Containerization | `docker-compose.prod.yml`, `alembic/env.py` | **COMPLETED** | Hardened Redis auth, PostgreSQL connection pools, and migration scripts. |
-| **TASK-021** | Phase 14 | Final Production Sign-Off & Verification | Root verification run | **COMPLETED** | Complete verification suite, zero uncommitted files, final readiness report. |
+| **TASK-001** | Phase 1 | External Provider Research Documentation | `docs/PROVIDER_RESEARCH.md` | **VERIFIED** | Complete research for Gmail, WhatsApp, LinkedIn, Tavily, SerpAPI, OSM, DPDP, TRAI. |
+| **TASK-002** | Phase 2 | Root-Level Master Roadmap | `PLAN.md` | **VERIFIED** | Sections A-I complete with architecture, mermaid diagrams, and task IDs. |
+| **TASK-003** | Phase 2 | Publish Documentation Branch | Git `origin/docs/acttrident-production-roadmap` | **APPROVED** | Clean documentation branch from `origin/main` pushed to remote (`34f2cf7`). |
+| **TASK-004** | Phase 3 | Lead & Campaign Idempotency Constraints | `backend/app/models/campaign.py`, `0008_phase8...py` | **VERIFIED** | Unique constraint on `(campaign_id, company_id)` prevents duplicate draft rows across PostgreSQL & SQLite. |
+| **TASK-005** | Phase 3 | Suppression List Table & Indexing | `backend/app/models/activity.py`, `0008_phase8...py` | **VERIFIED** | Composite index on `(identifier, channel)` with fast suppression lookup across dialects. |
+| **TASK-006** | Phase 4 | Gmail OAuth2 Token Refresh Lifecycle | `backend/app/integrations/gmail_adapter.py` | **VERIFIED** | Auto-refresh expired access tokens via Google token endpoint; fail gracefully. |
+| **TASK-007** | Phase 4 | WhatsApp Cloud API HMAC Webhook Verification | `backend/app/api/endpoints/whatsapp.py` | **VERIFIED** | Validate `X-Hub-Signature-256` using secret; reject tampering with 403. |
+| **TASK-008** | Phase 4 | LinkedIn Operator Handoff & Audit Log | `backend/app/integrations/linkedin_adapter.py` | **VERIFIED** | Verify compliant manual deep-link generation, character limits, and SHA-256 action logging. |
+| **TASK-009** | Phase 5 | Redis-Backed Discovery Caching | `backend/app/services/discovery_service.py` | **VERIFIED** | Cache geocoding and search queries in Redis with 7-day TTL and search history tracker. |
+| **TASK-010** | Phase 5 | Nominatim 1 req/sec Throttling | `backend/app/integrations/discovery_adapters.py` | **VERIFIED** | Thread-safe token bucket rate limiter guaranteeing max 1 req/sec. |
+| **TASK-011** | Phase 6 | Mailbox Warm-Up Rate Limiter | `backend/app/services/email_sender_service.py` | **VERIFIED** | Tiered daily send cap (20 -> 50 -> 100 -> 200) based on domain age. |
+| **TASK-012** | Phase 7 | DPDP 2023 Opt-Out & Erasure Service | `backend/app/api/endpoints/crm.py`, `crm_service.py` | **VERIFIED** | Public RFC 8058 one-click opt-out and Section 12 erasure endpoints active. |
+| **TASK-013** | Phase 7 | TRAI IST Commercial Hours Curfew Guard | `backend/app/core/compliance_policy_engine.py` | **VERIFIED** | Reject outbound Indian phone outreach outside 09:00 - 21:00 IST (email exempt). |
+| **TASK-014** | Phase 8 | Frontend Channel Connection Wizard | `frontend/src/views/IntegrationsView.tsx` | **VERIFIED** | Interactive step-by-step UI with modal guide for Gmail, WhatsApp, LinkedIn. |
+| **TASK-015** | Phase 8 | Live Notification & Error Boundary | `frontend/src/components/ErrorBoundary.tsx` | **VERIFIED** | Capture React crashes gracefully and surface user-friendly recovery UI. |
+| **TASK-016** | Phase 9 | Auth Route Rate Limiting & Lockout | `backend/app/api/endpoints/auth.py` | **VERIFIED** | Limit login attempts to 5 per 5 minutes per IP; 6th triggers HTTP 429. |
+| **TASK-017** | Phase 10 | Celery Dead-Letter & Failure Alerting | `backend/app/services/job_service.py` | **VERIFIED** | Route exhausted retries to dead-letter queue with error diagnostic logging. |
+| **TASK-018** | Phase 11 | Backend Integration Test Expansion | `backend/tests/` | **VERIFIED** | Comprehensive suite expanded to 126 tests (100% pass rate). |
+| **TASK-019** | Phase 12 | 15-Step End-to-End Socket Verification | `backend/scripts/live_e2e_runner.py` | **VERIFIED** | Live socket run verifying full 15-step lifecycle without mocks. |
+| **TASK-020** | Phase 13 | Multi-Stage Production Containerization | `docker-compose.prod.yml`, `alembic/env.py` | **VERIFIED** | Hardened Redis auth, PostgreSQL connection pools, and migration 0008. |
+| **TASK-021** | Phase 14 | Operational Runbook & Gap Analysis | `docs/OPERATIONS_RUNBOOK.md`, `GAP_ANALYSIS.md` | **VERIFIED** | Complete runbook, gap analysis, and final readiness report. |
+| **TASK-022** | Operations | Live Third-Party Outbound Dispatch | External Provider APIs | **BLOCKED** | Live external network sending held until operator supplies live production credentials & activates campaign. |
+| **TASK-023** | Phase 12 | Automated Headless Chrome Browser E2E | `frontend/scripts/browser_e2e_runner.cjs` | **VERIFIED** | 7-step headless browser runner verifying DOM elements, navigation, modal tabs. |
 
 ---
 
@@ -238,24 +240,25 @@ sequenceDiagram
 
 ## Section H: Progress Tracker
 
-| Phase | Title | Total Tasks | Completed | In Progress | Status |
-| :--- | :--- | :---: | :---: | :---: | :--- |
-| **Phase 0** | Baseline Verification | 1 | 1 | 0 | **COMPLETED** |
-| **Phase 1** | Provider Technical Research | 1 | 1 | 0 | **COMPLETED** |
-| **Phase 2** | Master Plan & Roadmap | 2 | 2 | 0 | **COMPLETED** |
-| **Phase 3** | Database & Model Hardening | 2 | 2 | 0 | **COMPLETED** |
-| **Phase 4** | Multi-Channel Gateway Hardening | 3 | 3 | 0 | **COMPLETED** |
-| **Phase 5** | Discovery & Enrichment Pipeline | 2 | 2 | 0 | **COMPLETED** |
-| **Phase 6** | Campaign Orchestration Engine | 1 | 1 | 0 | **COMPLETED** |
-| **Phase 7** | Safety, Suppression & Compliance | 2 | 2 | 0 | **COMPLETED** |
-| **Phase 8** | Frontend Production Polishing | 2 | 2 | 0 | **COMPLETED** |
-| **Phase 9** | Operator Security & RBAC | 1 | 1 | 0 | **COMPLETED** |
-| **Phase 10** | Celery Queue & Scalability | 1 | 1 | 0 | **COMPLETED** |
-| **Phase 11** | Test Automation & QA | 1 | 1 | 0 | **COMPLETED** |
-| **Phase 12** | Live Socket E2E Verification | 1 | 1 | 0 | **COMPLETED** |
-| **Phase 13** | DevSecOps & Containerization | 1 | 1 | 0 | **COMPLETED** |
-| **Phase 14** | Production Launch Sign-Off | 1 | 1 | 0 | **COMPLETED** |
-| **Total** | **All Phases Combined** | **21** | **21** | **0** | **100% COMPLETE** |
+| Phase | Title | Total Tasks | Verified | Blocked | In Progress | Status |
+| :--- | :--- | :---: | :---: | :---: | :---: | :--- |
+| **Phase 0** | Baseline Verification | 1 | 1 | 0 | 0 | **VERIFIED** |
+| **Phase 1** | Provider Technical Research | 1 | 1 | 0 | 0 | **VERIFIED** |
+| **Phase 2** | Master Plan & Roadmap | 2 | 2 | 0 | 0 | **APPROVED** |
+| **Phase 3** | Database & Model Hardening | 2 | 2 | 0 | 0 | **VERIFIED** |
+| **Phase 4** | Multi-Channel Gateway Hardening | 3 | 3 | 0 | 0 | **VERIFIED** |
+| **Phase 5** | Discovery & Enrichment Pipeline | 2 | 2 | 0 | 0 | **VERIFIED** |
+| **Phase 6** | Campaign Orchestration Engine | 1 | 1 | 0 | 0 | **VERIFIED** |
+| **Phase 7** | Safety, Suppression & Compliance | 2 | 2 | 0 | 0 | **VERIFIED** |
+| **Phase 8** | Frontend Production Polishing | 2 | 2 | 0 | 0 | **VERIFIED** |
+| **Phase 9** | Operator Security & RBAC | 1 | 1 | 0 | 0 | **VERIFIED** |
+| **Phase 10** | Celery Queue & Scalability | 1 | 1 | 0 | 0 | **VERIFIED** |
+| **Phase 11** | Test Automation & QA | 1 | 1 | 0 | 0 | **VERIFIED** |
+| **Phase 12** | Socket & Headless Browser E2E | 2 | 2 | 0 | 0 | **VERIFIED** |
+| **Phase 13** | DevSecOps & Containerization | 1 | 1 | 0 | 0 | **VERIFIED** |
+| **Phase 14** | Production Launch & Gap Analysis | 1 | 1 | 0 | 0 | **VERIFIED** |
+| **Operations**| Live External Network Outreach | 1 | 0 | 1 | 0 | **BLOCKED** *(Awaiting Operator Credentials)* |
+| **Total** | **All Phases Combined** | **23** | **22** | **1** | **0** | **95.6% VERIFIED (LIVE BLOCKED BY DESIGN)** |
 
 ---
 
@@ -276,7 +279,10 @@ sequenceDiagram
 - [x] 15-step live socket E2E suite passes cleanly.
 - [x] Frontend production build compiles with 0 errors.
 - [x] Backup and recovery runbook validated against clean database.
+- [x] 7-step headless Chrome browser E2E suite passes cleanly with zero crashes.
+- [x] Alembic migration 0008 verified offline for PostgreSQL and online for SQLite.
 - [x] Operator user manual and customer onboarding guide accessible in app.
+- [ ] Operator live credentials provided and live send explicitly activated (held for operator approval).
 
 ---
 *Roadmap Approved for Staged Production Engineering Execution.*

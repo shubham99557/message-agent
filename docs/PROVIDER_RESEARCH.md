@@ -278,22 +278,26 @@ This document serves as the single authoritative engineering reference for all e
 
 ---
 
-### 5.2 Telecom Regulatory Authority of India (TRAI) TCCCPR 2018 & Commercial Communications Regulations
+### 5.2 Telecom Regulatory Authority of India (TRAI) TCCCPR 2018 vs OTT (WhatsApp) vs Email
 
-#### Official Documentation
+#### Official Documentation & Legal Authority
 - **TRAI Telecom Commercial Communications Customer Preference Regulations (TCCCPR 2018):** [https://www.trai.gov.in/telecom-commercial-communications-customer-preference-regulations-2018](https://www.trai.gov.in/telecom-commercial-communications-customer-preference-regulations-2018)
-- **National Do Not Call (NDNC) / DLT Portal Requirements:** [https://www.trai.gov.in/](https://www.trai.gov.in/)
+- **Information Technology Act 2000 & Intermediary Guidelines (IT Rules 2021):** [https://www.meity.gov.in/content/information-technology-act-2000](https://www.meity.gov.in/content/information-technology-act-2000)
+- **Meta WhatsApp Business Messaging Policy:** [https://www.whatsapp.com/legal/business-policy/](https://www.whatsapp.com/legal/business-policy/)
 
-#### Mandatory Technical Controls for WhatsApp & SMS Outreach
-1. **Distributed Ledger Technology (DLT) Registration:**
-   - Commercial voice and SMS communications in India require enterprise registration on telecom DLT platforms (e.g., Vilpower, Jio DLT, Airtel DLT).
-   - Sender IDs (Headers) and message templates must be pre-approved on DLT.
-2. **National Customer Preference Register (NCPR / NDNC):**
-   - Commercial communications cannot be transmitted to telephone numbers registered on the DND registry without explicit preference registration.
-   - Calling or messaging unregistered or DND numbers between 9:00 PM and 9:00 AM IST is strictly prohibited.
-3. **Application Enforcement in ActTrident:**
-   - WhatsApp outreach validates recipient numbers against the internal DND / suppression table before invoking Meta API.
-   - Outbound batch schedules enforce time-of-day guards (09:00 to 21:00 IST).
+#### Precise Channel-by-Channel Legal & Technical Scope
+1. **Telecom Voice & SMS (Direct TRAI Statutory Mandate):**
+   - Applies to commercial calls and SMS sent through telecom access providers (Airtel, Jio, Vi, BSNL).
+   - Requires Principal Entity registration on DLT portals, header registration, and template scrubbing against DND (NCPR).
+   - Calling or SMS transmission outside 09:00 to 21:00 IST is a direct violation of TRAI telecom licenses, carrying telecom disconnection and fines.
+2. **WhatsApp Business Messaging (OTT IP Application — Policy & Best-Practice Guard):**
+   - WhatsApp is an Over-the-Top (OTT) data application governed by the Information Technology Act 2000 and Meta Business Messaging Policies rather than telecom access provider licenses.
+   - However, sending commercial messages outside 09:00 to 21:00 IST leads to high user complaint rates and prompt WhatsApp account tier downgrades or phone bans by Meta.
+   - ActTrident enforces the 09:00 - 21:00 IST calling-curfew on Indian telephone numbers (`+91`) across WhatsApp and SMS to protect sender reputation and comply with consumer protection standards.
+3. **Email Outreach (Excluded from TRAI Telecom Restrictions):**
+   - Email is an open internet protocol and is **not** subject to TRAI TCCCPR 2018 calling-window restrictions.
+   - Email compliance is governed by CAN-SPAM (US), India IT Act 2000, and DPDP Act 2023, requiring valid sender identification, clear opt-out / RFC 8058 unsubscribe headers, and zero deceptive claims.
+   - ActTrident does **not** restrict email dispatch times based on TRAI calling hours, allowing email deliveries based on campaign-configured timezones.
 
 ---
 

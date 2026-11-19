@@ -14,8 +14,9 @@ import app.models  # noqa: F401 - register all ORM models on Base.metadata
 
 config = context.config
 
-# Always resolve database URL from application Settings / environment
-db_url = os.getenv("ALEMBIC_DATABASE_URL") or settings.DATABASE_URL
+# Always resolve database URL from application Settings / environment / config
+cli_url = config.get_main_option("sqlalchemy.url")
+db_url = os.getenv("ALEMBIC_DATABASE_URL") or (cli_url if cli_url and not cli_url.startswith("driver://") else settings.DATABASE_URL)
 if db_url.startswith("postgresql://"):
     try:
         import psycopg  # noqa: F401
