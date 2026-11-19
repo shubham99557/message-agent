@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Optional
 from pydantic import BaseModel, EmailStr, ConfigDict, field_validator
 
-VALID_ROLES = {"admin", "manager", "sales_rep"}
+VALID_ROLES = {"admin", "manager", "sales_rep", "analyst"}
 
 
 def _validate_strong_password(password: str) -> str:
@@ -35,7 +35,7 @@ class UserCreate(UserBase):
 
 class AdminUserCreate(UserBase):
     password: str
-    role: str = "sales_rep"  # admin, sales_rep, manager
+    role: str = "sales_rep"  # admin, sales_rep, manager, analyst
 
     @field_validator("password")
     @classmethod

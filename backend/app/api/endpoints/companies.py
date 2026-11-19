@@ -61,7 +61,7 @@ def get_all_companies(
 def create_new_company(
     comp_in: CompanyCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role(["admin", "manager", "sales_rep"]))
 ):
     company = create_company(db, comp_in, user_id=current_user.id)
     record_audit_log(
@@ -92,7 +92,7 @@ def update_existing_company(
     company_id: int,
     comp_in: CompanyUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role(["admin", "manager", "sales_rep"]))
 ):
     company = get_company(db, company_id)
     if not company:
@@ -122,7 +122,7 @@ def verify_company_endpoint(
     company_id: int,
     verify_in: CompanyVerifyRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role(["admin", "manager", "sales_rep"]))
 ):
     """Records user verification and evidence corrections with strict ownership/role guard and audit trail."""
     existing = get_company(db, company_id)
@@ -159,7 +159,7 @@ def add_source_to_company(
     company_id: int,
     source_in: ContactSourceCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role(["admin", "manager", "sales_rep"]))
 ):
     company = get_company(db, company_id)
     if not company:
@@ -178,7 +178,7 @@ def add_source_to_company(
 async def upload_csv_file(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role(["admin", "manager", "sales_rep"]))
 ):
     if not file.filename.endswith(".csv"):
         raise HTTPException(status_code=400, detail="Only .csv files are supported")

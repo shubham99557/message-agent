@@ -11,7 +11,7 @@ class User(Base):
     email = Column(String(255), unique=True, index=True, nullable=False)
     hashed_password = Column(String(255), nullable=False)
     full_name = Column(String(255), nullable=False)
-    role = Column(String(50), default="sales_rep", nullable=False)  # admin, sales_rep, manager
+    role = Column(String(50), default="sales_rep", nullable=False)  # admin, sales_rep, manager, analyst
     is_active = Column(Boolean, default=True, nullable=False)
     token_version = Column(Integer, default=1, nullable=False)  # Incremented on logout/deactivation/role-change to invalidate JWTs
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

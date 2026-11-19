@@ -6,7 +6,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
-from app.api.deps import get_db, get_current_user
+from app.api.deps import get_db, get_current_user, require_role
 from app.models.user import User
 from app.models.lead import PIPELINE_STATUSES
 from app.models.company import Company
@@ -126,7 +126,7 @@ def update_pipeline_status(
     lead_id: int,
     payload: StatusUpdatePayload,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role(["admin", "manager", "sales_rep"]))
 ):
     if payload.status not in PIPELINE_STATUSES:
         raise HTTPException(status_code=400, detail=f"Invalid pipeline status. Must be one of: {PIPELINE_STATUSES}")
@@ -151,7 +151,7 @@ def schedule_lead_followup(
     lead_id: int,
     followup_in: FollowupCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role(["admin", "manager", "sales_rep"]))
 ):
     lead = get_lead(db, lead_id)
     if not lead:
@@ -164,7 +164,7 @@ def schedule_lead_meeting(
     lead_id: int,
     meeting_in: MeetingCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role(["admin", "manager", "sales_rep"]))
 ):
     lead = get_lead(db, lead_id)
     if not lead:
@@ -177,7 +177,7 @@ def activate_lead_trial(
     lead_id: int,
     trial_in: TrialCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role(["admin", "manager", "sales_rep"]))
 ):
     lead = get_lead(db, lead_id)
     if not lead:
@@ -199,7 +199,7 @@ def activate_lead_trial(
 def record_prospect_opt_out(
     payload: OptOutPayload,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role(["admin", "manager", "sales_rep"]))
 ):
     handle_opt_out(db, identifier=payload.identifier, channel=payload.channel, reason=payload.reason)
     record_audit_log(

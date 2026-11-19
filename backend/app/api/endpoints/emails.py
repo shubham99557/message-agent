@@ -31,7 +31,7 @@ class ProviderEmailEventPayload(BaseModel):
 def generate_email_endpoint(
     req: EmailGenerateRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role(["admin", "manager", "sales_rep"]))
 ):
     company = get_company(db, req.company_id)
     if not company:
@@ -87,7 +87,7 @@ def update_email_draft_endpoint(
     draft_id: int,
     update_in: EmailDraftUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role(["admin", "manager", "sales_rep"]))
 ):
     existing = db.query(EmailDraft).filter(EmailDraft.id == draft_id).first()
     if not existing:

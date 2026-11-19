@@ -15,7 +15,8 @@ from app.schemas.auth import (
     UserResponse,
     Token,
     UserLogin,
-    TokenRefreshRequest
+    TokenRefreshRequest,
+    VALID_ROLES
 )
 from app.services.auth_service import (
     create_user,
@@ -79,7 +80,7 @@ def admin_create_user(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="A user with this email address already exists"
         )
-    target_role = user_in.role if user_in.role in ["admin", "manager", "sales_rep"] else "sales_rep"
+    target_role = user_in.role if user_in.role in VALID_ROLES else "sales_rep"
     new_user = create_user(db, user_in, role=target_role)
     record_audit_log(
         db=db,

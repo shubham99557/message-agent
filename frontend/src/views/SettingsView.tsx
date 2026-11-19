@@ -198,6 +198,7 @@ export const SettingsView: React.FC = () => {
                           <option value="sales_rep">sales_rep</option>
                           <option value="manager">manager</option>
                           <option value="admin">admin</option>
+                          <option value="analyst">analyst</option>
                         </select>
                       ) : (
                         <span className="px-2 py-0.5 rounded bg-cobalt-950 border border-cobalt-800 font-mono text-[11px] text-cobalt-300">

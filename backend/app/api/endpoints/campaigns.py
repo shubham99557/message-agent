@@ -94,7 +94,7 @@ def list_campaigns(
 def create_campaign(
     camp_in: CampaignCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role(["admin", "manager", "sales_rep"]))
 ):
     camp = Campaign(
         name=camp_in.name,
@@ -147,7 +147,7 @@ def update_campaign(
     campaign_id: int,
     camp_update: CampaignUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role(["admin", "manager", "sales_rep"]))
 ):
     camp = db.query(Campaign).filter(Campaign.id == campaign_id).first()
     if not camp:
@@ -171,7 +171,7 @@ def add_recipients_to_campaign(
     campaign_id: int,
     payload: AddRecipientsPayload,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role(["admin", "manager", "sales_rep"]))
 ):
     camp = db.query(Campaign).filter(Campaign.id == campaign_id).first()
     if not camp:
@@ -240,7 +240,7 @@ def batch_generate_campaign_drafts(
     campaign_id: int,
     payload: BatchDraftPayload,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role(["admin", "manager", "sales_rep"]))
 ):
     camp = db.query(Campaign).filter(Campaign.id == campaign_id).first()
     if not camp:
