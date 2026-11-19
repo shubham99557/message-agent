@@ -3,7 +3,7 @@
 **Project:** ActTrident AI Outreach & B2B Sales Automation Platform  
 **Target Environment:** Production Candidate v2.0  
 **Current Baseline Commit:** `9dc964f5246dec826e7be02a49576f63fa10be5b`  
-**Current Local Implementation Commit:** `136482b7c4a179ad234855d3ef6a72c1c68e1467`  
+**Current Local Implementation Commit:** `7b59367`  
 **Working Branch:** `feature/production-readiness-v2`  
 **Documentation Publication Branch:** `docs/acttrident-production-roadmap`  
 **Reference Document:** [docs/PROVIDER_RESEARCH.md](file:///c:/Users/singh/message-agent/docs/PROVIDER_RESEARCH.md)
@@ -28,7 +28,7 @@ ActTrident is an enterprise-grade AI-powered B2B sales automation and intelligen
 
 ## Section B: Current System Status
 
-### Verified Working Baseline (as of Commit `136482b`):
+### Verified Working Baseline (as of Commit `7b59367`):
 - **Backend Architecture:** FastAPI async REST API with Pydantic v2 schemas and SQLAlchemy 2.0 async/sync support.
 - **Database Engine:** PostgreSQL 16 schema managed via Alembic migrations.
 - **Queue & Worker Engine:** Celery with Redis 7.x broker and result backend.
@@ -38,14 +38,19 @@ ActTrident is an enterprise-grade AI-powered B2B sales automation and intelligen
   - SSRF Protection: Dual-stack IPv4/IPv6 private IP rejection and hop-by-hop redirect verification in `safe_fetch_untrusted_url`.
 - **Nationwide Discovery Engine:**
   - Administrative hierarchy for 36 Indian states/UTs and key districts implemented in `backend/app/core/locations.py`.
-  - Multi-provider orchestration (Tavily, SerpAPI, Nominatim) with fallbacks and rate limiting.
+  - Multi-provider orchestration (Tavily, SerpAPI, Nominatim) with fallbacks, multi-city clustering, and strict 1 req/sec rate limiting.
+  - Redis-backed search caching with 7-day TTL and search history tracker.
+- **Regulatory Compliance:**
+  - India DPDP Act 2023 Section 12 Right to be Forgotten erasure service.
+  - TRAI TCCCPR 2018 commercial curfew enforcement (09:00 - 21:00 IST).
+  - RFC 8058 one-click public unsubscribe endpoints (`/api/v1/crm/public/opt-out`).
 - **Frontend Architecture:**
   - React 18 + TypeScript + Vite + Tailwind CSS with Lucide icons.
-  - Live discovery UI with debounced search, 12 business category filters, and provider selection.
+  - Live discovery UI with debounced search, 12 business category filters, multi-city search, and CSV export.
   - Channel setup modal with step-by-step guides for Gmail, WhatsApp, and LinkedIn.
 - **Verification Metrics:**
-  - **118 / 118** pytest automated tests passing (100% pass rate).
-  - **13 / 13** live HTTP socket end-to-end steps verified via `live_e2e_runner.py`.
+  - **126 / 126** pytest automated tests passing (100% pass rate).
+  - **15 / 15** live HTTP socket end-to-end steps verified via `live_e2e_runner.py`.
   - Vite production build compiling with 0 TypeScript/CSS errors.
 
 ---
@@ -182,7 +187,7 @@ sequenceDiagram
 | **TASK-015** | Phase 8 | Live Notification & Error Boundary | `frontend/src/components/ErrorBoundary.tsx` | **COMPLETED** | Capture React crashes gracefully and surface user-friendly recovery UI. |
 | **TASK-016** | Phase 9 | Auth Route Rate Limiting & Lockout | `backend/app/api/endpoints/auth.py` | **COMPLETED** | Limit login attempts to 5 per 5 minutes per IP to mitigate brute-force. |
 | **TASK-017** | Phase 10 | Celery Dead-Letter & Failure Alerting | `backend/app/services/job_service.py` | **COMPLETED** | Route exhausted retries to dead-letter queue with error diagnostic logging. |
-| **TASK-018** | Phase 11 | Backend Integration Test Expansion | `backend/tests/` | **COMPLETED** | Comprehensive suite expanded to 125 tests (100% pass rate). |
+| **TASK-018** | Phase 11 | Backend Integration Test Expansion | `backend/tests/` | **COMPLETED** | Comprehensive suite expanded to 126 tests (100% pass rate). |
 | **TASK-019** | Phase 12 | 15-Step End-to-End Socket Verification | `backend/scripts/live_e2e_runner.py` | **COMPLETED** | Live socket run verifying full 15-step lifecycle without mocks. |
 | **TASK-020** | Phase 13 | Multi-Stage Production Containerization | `docker-compose.prod.yml`, `alembic/env.py` | **COMPLETED** | Hardened Redis auth, PostgreSQL connection pools, and migration scripts. |
 | **TASK-021** | Phase 14 | Final Production Sign-Off & Verification | Root verification run | **COMPLETED** | Complete verification suite, zero uncommitted files, final readiness report. |
@@ -196,7 +201,7 @@ sequenceDiagram
    - Dual-stack IPv4/IPv6 SSRF protection on all user-supplied URLs.
    - Fail-closed security architecture for all channel integrations.
 2. **Gate 2: Test Suite & Coverage [PASSED]**
-   - All 125 unit and integration tests passing (100% pass rate).
+   - All 126 unit and integration tests passing (100% pass rate).
    - Core business logic coverage verified across all channels.
    - Regression tests preventing default credentials from being accepted.
 3. **Gate 3: Live Send Safety & Fail-Closed [PASSED]**
@@ -267,7 +272,7 @@ sequenceDiagram
 - [x] LinkedIn manual handoff workflow operational.
 - [x] DPDP 2023 opt-out and suppression pipeline verified.
 - [x] TRAI 09:00-21:00 IST business hour guard tested.
-- [x] All 125 automated tests passing in CI/CD pipeline (100% pass rate).
+- [x] All 126 automated tests passing in CI/CD pipeline (100% pass rate).
 - [x] 15-step live socket E2E suite passes cleanly.
 - [x] Frontend production build compiles with 0 errors.
 - [x] Backup and recovery runbook validated against clean database.
