@@ -28,7 +28,8 @@ from app.services.crm_service import (
     add_followup,
     add_meeting,
     create_trial,
-    handle_opt_out
+    handle_opt_out,
+    execute_dpdp_erasure
 )
 from app.core.audit import record_audit_log
 
@@ -211,3 +212,82 @@ def record_prospect_opt_out(
         details={"channel": payload.channel, "reason": payload.reason}
     )
     return {"status": "success", "message": f"{payload.identifier} added to global suppression list"}
+
+
+@router.get("/public/opt-out")
+def public_opt_out_get(
+    email: Optional[str] = Query(None),
+    identifier: Optional[str] = Query(None),
+    db: Session = Depends(get_db)
+):
+    """Public one-click unsubscribe endpoint complying with RFC 8058 and India DPDP Act 2023."""
+    target = (email or identifier or "").strip()
+    if not target:
+        raise HTTPException(status_code=400, detail="Missing email or identifier parameter")
+
+    handle_opt_out(db, identifier=target, channel="all", reason="public_one_click_unsubscribe")
+    record_audit_log(
+        db=db,
+        action="public_one_click_opt_out",
+        entity_type="suppression",
+        entity_id=target,
+        details={"source": "public_web_link"}
+    )
+    return {
+        "status": "success",
+        "message": f"Successfully unsubscribed {target}. You will not receive further outreach communications from ActTrident.",
+        "identifier": target
+    }
+
+
+@router.post("/public/opt-out")
+def public_opt_out_post(
+    payload: OptOutPayload,
+    db: Session = Depends(get_db)
+):
+    """Public RFC 8058 List-Unsubscribe POST endpoint (automated mail client unsubscribe)."""
+    target = (payload.identifier or "").strip()
+    if not target:
+        raise HTTPException(status_code=400, detail="Missing identifier in request payload")
+
+    handle_opt_out(db, identifier=target, channel=payload.channel or "all", reason="rfc8058_automated_unsubscribe")
+    record_audit_log(
+        db=db,
+        action="rfc8058_client_opt_out",
+        entity_type="suppression",
+        entity_id=target,
+        details={"source": "rfc8058_header_action"}
+    )
+    return {
+        "status": "success",
+        "message": f"Unsubscribed {target}",
+        "identifier": target
+    }
+
+
+class ErasurePayload(BaseModel):
+    identifier: str
+    reason: Optional[str] = "dpdp_right_to_erasure"
+
+
+@router.post("/erasure")
+def request_dpdp_erasure(
+    payload: ErasurePayload,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["admin", "manager"]))
+):
+    """Executes India DPDP Act 2023 Section 12 Right to Erasure / Right to be Forgotten."""
+    target = (payload.identifier or "").strip()
+    if not target:
+        raise HTTPException(status_code=400, detail="Missing identifier for data erasure")
+
+    result = execute_dpdp_erasure(db, identifier=target, reason=payload.reason or "dpdp_right_to_erasure")
+    record_audit_log(
+        db=db,
+        action="dpdp_erasure_executed",
+        entity_type="company_contact",
+        entity_id=target,
+        user_id=current_user.id,
+        details=result
+    )
+    return result

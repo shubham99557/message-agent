@@ -204,8 +204,36 @@ def run_live_e2e():
     assert pdata["scope"] == "country"
     print(f"  ✓ Nationwide paginated discovery OK: total={pdata['total']}, strategy='{pdata['search_strategy']}'")
 
+    # 14. Public RFC 8058 One-Click Unsubscribe Verification
+    print("\n[Step 14] Verifying Public RFC 8058 One-Click Unsubscribe without auth...")
+    unsub_email = "e2e_public_unsub@privacy.example"
+    r_unsub = client.get(f"/api/v1/crm/public/opt-out?email={unsub_email}")
+    assert r_unsub.status_code == 200, f"Public unsubscribe failed: {r_unsub.text}"
+    assert r_unsub.json()["status"] == "success"
+    print(f"  ✓ Public GET unsubscribe OK: {r_unsub.json()['message']}")
+
+    r_unsub_post = client.post("/api/v1/crm/public/opt-out", json={
+        "identifier": "e2e_post_unsub@privacy.example",
+        "channel": "email"
+    })
+    assert r_unsub_post.status_code == 200
+    assert r_unsub_post.json()["status"] == "success"
+    print("  ✓ Public RFC 8058 POST unsubscribe OK")
+
+    # 15. Auth Route Rate Limiting & Lockout Verification
+    print("\n[Step 15] Verifying Auth Route Rate Limiting & Lockout Defense...")
+    attacker_creds = {"email": "lockout_victim@target.example", "password": "WrongPassword!"}
+    for attempt_idx in range(5):
+        r_fail = client.post("/api/v1/auth/login/json", json=attacker_creds)
+        assert r_fail.status_code == 401, f"Attempt {attempt_idx+1} expected 401, got {r_fail.status_code}"
+
+    # 6th attempt must be rejected with 429 Too Many Requests
+    r_locked = client.post("/api/v1/auth/login/json", json=attacker_creds)
+    assert r_locked.status_code == 429, f"Expected 429 Too Many Requests, got {r_locked.status_code}"
+    print(f"  ✓ Auth Lockout OK: 6th failed attempt blocked with HTTP 429 ('{r_locked.json()['detail'][:40]}...')")
+
     print("\n" + "="*60)
-    print("ALL 13 LIVE END-TO-END VERIFICATION CHECKS PASSED WITH ZERO DEFECTS!")
+    print("ALL 15 LIVE END-TO-END VERIFICATION CHECKS PASSED WITH ZERO DEFECTS!")
     print("="*60)
 
 if __name__ == "__main__":

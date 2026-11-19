@@ -1,4 +1,6 @@
 import logging
+import threading
+import time
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
@@ -49,6 +51,21 @@ class DiscoverySourceAdapter(ABC):
         pass
 
 
+_nominatim_lock = threading.Lock()
+_last_nominatim_call = 0.0
+
+
+def _throttle_nominatim(min_interval: float = 1.0) -> None:
+    """Enforces strict 1 req/sec policy required by OpenStreetMap Nominatim Usage Policy."""
+    global _last_nominatim_call
+    with _nominatim_lock:
+        now = time.time()
+        elapsed = now - _last_nominatim_call
+        if elapsed < min_interval:
+            time.sleep(min_interval - elapsed)
+        _last_nominatim_call = time.time()
+
+
 class OpenStreetMapPublicAdapter(DiscoverySourceAdapter):
     """
     Queries public OpenStreetMap Nominatim open-data directory for offices and technology
@@ -82,6 +99,7 @@ class OpenStreetMapPublicAdapter(DiscoverySourceAdapter):
         client = http_client or httpx.Client(timeout=8.0)
         items: List[DiscoveredCompanyItem] = []
         try:
+            _throttle_nominatim(1.0)
             resp = client.get(
                 "https://nominatim.openstreetmap.org/search",
                 params={"q": search_q, "format": "jsonv2", "addressdetails": 1, "extratags": 1, "limit": limit},

@@ -1,5 +1,6 @@
 import re
 import logging
+from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session
 
@@ -106,3 +107,28 @@ class CompliancePolicyEngine:
         """Validates that a URL is a safe public target and blocks SSRF."""
         if not is_safe_external_url(url):
             raise PolicyViolationError("SSRF_ATTEMPT_BLOCKED", f"The URL {url} targets an internal, loopback, or non-permitted network destination.")
+
+    @classmethod
+    def validate_trai_commercial_hours(cls, recipient_phone: Optional[str], channel: str = "whatsapp") -> None:
+        """
+        Enforces TRAI TCCCPR 2018 calling-window restriction (09:00 to 21:00 IST).
+        Commercial communication to Indian telephone numbers (+91 or 10-digit mobile)
+        outside these hours is strictly prohibited under Indian telecom regulations.
+        """
+        if not recipient_phone or channel.lower() not in ("whatsapp", "phone", "sms"):
+            return
+
+        clean = re.sub(r'[\s.-]', '', recipient_phone)
+        is_indian = clean.startswith("+91") or clean.startswith("91") or (len(clean) == 10 and clean[0] in "6789")
+        if not is_indian:
+            return
+
+        ist_now = datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)
+        hour = ist_now.hour
+
+        if hour < 9 or hour >= 21:
+            raise PolicyViolationError(
+                "TRAI_COMMERCIAL_HOURS_RESTRICTION",
+                f"TRAI regulations prohibit automated commercial telecommunications between 21:00 and 09:00 IST. "
+                f"Current IST time is {ist_now.strftime('%H:%M IST')}. Outreach is permitted only from 09:00 to 21:00 IST."
+            )

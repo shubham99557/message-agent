@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Boolean, Float
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Boolean, Float, UniqueConstraint
 from sqlalchemy.orm import relationship
 from app.core.database import Base
 
@@ -57,6 +57,9 @@ class Campaign(Base):
 
 class CampaignRecipient(Base):
     __tablename__ = "campaign_recipients"
+    __table_args__ = (
+        UniqueConstraint("campaign_id", "company_id", name="uq_campaign_recipient_company"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     campaign_id = Column(Integer, ForeignKey("campaigns.id", ondelete="CASCADE"), nullable=False)

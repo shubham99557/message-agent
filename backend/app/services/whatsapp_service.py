@@ -335,6 +335,16 @@ def send_approved_whatsapp_message(
         db.commit()
         return False, "Recipient is on the suppression list"
 
+    # Rule 4b: TRAI TCCCPR 2018 Commercial Hours Restriction (09:00 - 21:00 IST)
+    from app.core.compliance_policy_engine import CompliancePolicyEngine, PolicyViolationError
+    try:
+        CompliancePolicyEngine.validate_trai_commercial_hours(msg.recipient_phone, "whatsapp")
+    except PolicyViolationError as pve:
+        msg.delivery_status = "failed"
+        msg.error_message = str(pve)
+        db.commit()
+        return False, str(pve)
+
     # Rule 5: Validate template approval & parameter ordering before claiming lock
     if msg.template:
         params_dict = json.loads(msg.parameters_json) if msg.parameters_json else {}

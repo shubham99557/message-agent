@@ -1,5 +1,8 @@
+import time
+from collections import defaultdict
 from datetime import timedelta
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import Dict, List
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
@@ -143,10 +146,44 @@ def admin_update_user_role(
     return updated
 
 
+# In-memory failed login rate-limiting tracker (5 failed attempts within 5 minutes triggers lockout)
+_failed_login_attempts: Dict[str, List[float]] = defaultdict(list)
+_LOGIN_LOCKOUT_WINDOW_SECONDS = 300
+_MAX_FAILED_LOGIN_ATTEMPTS = 5
+
+
+def _check_login_rate_limit(key: str) -> None:
+    now = time.time()
+    valid_attempts = [t for t in _failed_login_attempts[key] if now - t < _LOGIN_LOCKOUT_WINDOW_SECONDS]
+    _failed_login_attempts[key] = valid_attempts
+    if len(valid_attempts) >= _MAX_FAILED_LOGIN_ATTEMPTS:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed login attempts. Account temporarily locked for 5 minutes to prevent brute-force attacks."
+        )
+
+
+def _record_failed_login(key: str) -> None:
+    _failed_login_attempts[key].append(time.time())
+
+
+def _clear_failed_login(key: str) -> None:
+    _failed_login_attempts.pop(key, None)
+
+
 @router.post("/login", response_model=Token)
-def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+def login(
+    request: Request,
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    db: Session = Depends(get_db)
+):
+    client_ip = request.client.host if request.client else "unknown"
+    rate_key = f"{client_ip}:{form_data.username.strip().lower()}"
+    _check_login_rate_limit(rate_key)
+
     user = authenticate_user(db, form_data.username, form_data.password)
     if not user:
+        _record_failed_login(rate_key)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
@@ -155,6 +192,7 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account has been deactivated")
 
+    _clear_failed_login(rate_key)
     access_token = _issue_access_token_for_user(user)
     raw_refresh, _ = issue_refresh_token(db, user.id)
 
@@ -167,9 +205,18 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
 
 
 @router.post("/login/json", response_model=Token)
-def login_json(credentials: UserLogin, db: Session = Depends(get_db)):
+def login_json(
+    request: Request,
+    credentials: UserLogin,
+    db: Session = Depends(get_db)
+):
+    client_ip = request.client.host if request.client else "unknown"
+    rate_key = f"{client_ip}:{credentials.email.strip().lower()}"
+    _check_login_rate_limit(rate_key)
+
     user = authenticate_user(db, credentials.email, credentials.password)
     if not user:
+        _record_failed_login(rate_key)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password"
@@ -177,6 +224,7 @@ def login_json(credentials: UserLogin, db: Session = Depends(get_db)):
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account has been deactivated")
 
+    _clear_failed_login(rate_key)
     access_token = _issue_access_token_for_user(user)
     raw_refresh, _ = issue_refresh_token(db, user.id)
 

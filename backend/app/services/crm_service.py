@@ -168,3 +168,58 @@ def handle_opt_out(db: Session, identifier: str, channel: str = "all", reason: s
             c.opt_out_date = datetime.now(timezone.utc)
 
     db.commit()
+
+
+def execute_dpdp_erasure(db: Session, identifier: str, reason: str = "dpdp_right_to_erasure"):
+    """
+    Executes India DPDP Act 2023 Section 12 Right to Erasure / Right to be Forgotten:
+    1. Enters identifier into SuppressionList so the individual is never re-prospected or contacted.
+    2. Permanently anonymizes personal identifiers (names, emails, phones) from Company, Contact, and Lead records.
+    3. Returns count of sanitized records.
+    """
+    clean_id = identifier.strip().lower()
+    handle_opt_out(db, identifier=clean_id, channel="all", reason=reason)
+
+    from app.models.company import Company, CompanyContact
+
+    erased_companies = 0
+    erased_contacts = 0
+
+    comps = db.query(Company).filter(
+        or_(
+            Company.public_email == clean_id,
+            Company.public_phone == clean_id,
+            Company.public_whatsapp == clean_id
+        )
+    ).all()
+    for comp in comps:
+        comp.public_email = f"erased-{comp.id}@privacy-erased.invalid"
+        comp.public_phone = None
+        comp.public_whatsapp = None
+        if comp.lead:
+            comp.lead.pipeline_status = "do_not_contact"
+            comp.lead.notes = "PII erased in compliance with DPDP Act 2023 Section 12."
+        erased_companies += 1
+
+    contacts = db.query(CompanyContact).filter(
+        or_(
+            CompanyContact.email == clean_id,
+            CompanyContact.phone == clean_id
+        )
+    ).all()
+    for con in contacts:
+        con.first_name = "Erased"
+        con.last_name = "DataSubject"
+        con.email = f"erased-contact-{con.id}@privacy-erased.invalid"
+        con.phone = None
+        con.linkedin_url = None
+        erased_contacts += 1
+
+    db.commit()
+    return {
+        "status": "success",
+        "identifier": clean_id,
+        "erased_companies_count": erased_companies,
+        "erased_contacts_count": erased_contacts,
+        "message": f"Successfully executed DPDP erasure for {clean_id}."
+    }

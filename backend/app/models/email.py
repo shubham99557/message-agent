@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Boolean
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Boolean, Index
 from sqlalchemy.orm import relationship
 from app.core.database import Base
 
@@ -23,6 +23,9 @@ EMAIL_STATES = [
 
 class EmailDraft(Base):
     __tablename__ = "email_drafts"
+    __table_args__ = (
+        Index("ix_email_drafts_campaign_recipient", "campaign_id", "recipient_email"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     campaign_id = Column(Integer, ForeignKey("campaigns.id", ondelete="CASCADE"), nullable=True)

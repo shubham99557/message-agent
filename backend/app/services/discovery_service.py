@@ -1,7 +1,9 @@
-import re
 import csv
+import hashlib
 import io
+import json
 import logging
+import re
 from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 from urllib.parse import urlparse
@@ -17,8 +19,11 @@ from app.integrations.discovery_adapters import (
 )
 from app.core.locations import get_nationwide_search_batches, get_canonical_location
 from app.schemas.research import DiscoveredCompanyItem, DiscoveryQuery, DiscoveryResponse
+from app.services.job_service import get_redis_client
 
 logger = logging.getLogger(__name__)
+
+DISCOVERY_CACHE_TTL_SECONDS = 604800  # 7 days TTL per OSM and provider research guidelines
 
 # Standard Indian business phone patterns
 INDIAN_PHONE_REGEX = re.compile(
@@ -477,6 +482,48 @@ def parse_csv_discovery_file(content_bytes: bytes, filename: str = "upload.csv")
     return items
 
 
+def _get_discovery_cache_key(query_params: DiscoveryQuery) -> str:
+    raw = f"{query_params.query or ''}:{query_params.city or ''}:{query_params.state or ''}:{query_params.industry or ''}:{query_params.scope or ''}"
+    digest = hashlib.sha256(raw.lower().strip().encode("utf-8")).hexdigest()
+    return f"discovery:cache:{digest}"
+
+
+def get_cached_discovery_results(query_params: DiscoveryQuery) -> Optional[List[DiscoveredCompanyItem]]:
+    """Retrieves cached discovery results from Redis if available."""
+    r = get_redis_client()
+    if not r:
+        return None
+    try:
+        key = _get_discovery_cache_key(query_params)
+        cached = r.get(key)
+        if cached:
+            items_raw = json.loads(cached.decode("utf-8") if isinstance(cached, bytes) else cached)
+            return [DiscoveredCompanyItem(**item) for item in items_raw]
+    except Exception as e:
+        logger.debug(f"Redis discovery cache get failed: {e}")
+    return None
+
+
+def set_cached_discovery_results(
+    query_params: DiscoveryQuery,
+    items: List[DiscoveredCompanyItem],
+    ttl: int = DISCOVERY_CACHE_TTL_SECONDS
+) -> None:
+    """Stores verified real discovery results into Redis with 7-day TTL."""
+    real_items = [item for item in items if not item.is_demo]
+    if not real_items:
+        return
+    r = get_redis_client()
+    if not r:
+        return
+    try:
+        key = _get_discovery_cache_key(query_params)
+        payload = json.dumps([item.model_dump(mode="json") for item in real_items])
+        r.setex(key, ttl, payload)
+    except Exception as e:
+        logger.debug(f"Redis discovery cache set failed: {e}")
+
+
 def search_public_company_directory(
     query_params: DiscoveryQuery,
     http_client: Optional[httpx.Client] = None,
@@ -503,46 +550,54 @@ def search_public_company_directory(
             seen_keys.add(key)
             results.append(item)
 
-    # 1. Real Permitted Search Adapters (Tavily, SerpAPI, OpenStreetMap)
-    active_adapters = [
-        TavilyDiscoveryAdapter(),
-        SerpApiDiscoveryAdapter(),
-        OpenStreetMapPublicAdapter(),
-    ]
+    # 1. Real Permitted Search Adapters with Redis Caching (7-Day TTL)
+    cached_real_items = get_cached_discovery_results(query_params)
+    if cached_real_items is not None:
+        for item in cached_real_items:
+            _add_unique(item)
+    else:
+        active_adapters = [
+            TavilyDiscoveryAdapter(),
+            SerpApiDiscoveryAdapter(),
+            OpenStreetMapPublicAdapter(),
+        ]
 
-    city_raw = (query_params.city or "").strip()
-    is_nationwide = (
-        query_params.scope == "country"
-        or city_raw.lower() in ("all", "all india", "")
-    )
+        city_raw = (query_params.city or "").strip()
+        is_nationwide = (
+            query_params.scope == "country"
+            or city_raw.lower() in ("all", "all india", "")
+        )
 
-    if is_nationwide:
-        # Nationwide multi-region strategy: query canonical regional batches
-        regional_batches = get_nationwide_search_batches(batch_size=4)
-        # Execute first batch of canonical commercial hubs + query country-level adapter
-        first_batch = regional_batches[0] if regional_batches else []
-        for loc in first_batch:
-            sub_query = query_params.model_copy(update={
-                "city": loc["city"],
-                "state": loc["state"],
-                "scope": "city"
-            })
+        if is_nationwide:
+            # Nationwide multi-region strategy: query canonical regional batches
+            regional_batches = get_nationwide_search_batches(batch_size=4)
+            # Execute first batch of canonical commercial hubs + query country-level adapter
+            first_batch = regional_batches[0] if regional_batches else []
+            for loc in first_batch:
+                sub_query = query_params.model_copy(update={
+                    "city": loc["city"],
+                    "state": loc["state"],
+                    "scope": "city"
+                })
+                for adapter in active_adapters:
+                    if adapter.is_configured():
+                        try:
+                            for item in adapter.search(sub_query, limit=4, http_client=http_client):
+                                _add_unique(item)
+                        except Exception as exc:
+                            logger.debug(f"Adapter {adapter.name} failed for {loc['city']}: {exc}")
+        else:
+            # Targeted city, state, or district query
             for adapter in active_adapters:
                 if adapter.is_configured():
                     try:
-                        for item in adapter.search(sub_query, limit=4, http_client=http_client):
+                        for item in adapter.search(query_params, limit=8, http_client=http_client):
                             _add_unique(item)
                     except Exception as exc:
-                        logger.debug(f"Adapter {adapter.name} failed for {loc['city']}: {exc}")
-    else:
-        # Targeted city, state, or district query
-        for adapter in active_adapters:
-            if adapter.is_configured():
-                try:
-                    for item in adapter.search(query_params, limit=8, http_client=http_client):
-                        _add_unique(item)
-                except Exception as exc:
-                    logger.debug(f"Adapter {adapter.name} failed for {query_params.city}: {exc}")
+                        logger.debug(f"Adapter {adapter.name} failed for {query_params.city}: {exc}")
+
+        # Store newly discovered real items in Redis cache
+        set_cached_discovery_results(query_params, results)
 
     # 2. Quarantined Demo Fixtures (STRICTLY labelled is_demo=True, verification_status='demo_fixture', never in production)
     allow_demo = query_params.include_demo and settings.ENVIRONMENT.lower() != "production"

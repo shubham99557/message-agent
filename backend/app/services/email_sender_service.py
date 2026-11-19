@@ -23,8 +23,39 @@ from app.integrations.gmail_adapter import (
 )
 
 
+def get_mailbox_warmup_limit(db: Session) -> int:
+    """
+    Computes recommended maximum daily outreach limit according to mailbox warm-up schedule:
+    - Days 1-7: max 20 emails/day
+    - Days 8-14: max 50 emails/day
+    - Days 15-21: max 100 emails/day
+    - Days 22+: max 200 emails/day (hard ceiling for cold B2B outreach reputation protection)
+    """
+    first_send = db.query(EmailDraft.sent_at).filter(
+        EmailDraft.approval_status.in_(["sent", "delivered"]),
+        EmailDraft.sent_at.isnot(None)
+    ).order_by(EmailDraft.sent_at.asc()).first()
+
+    if not first_send or not first_send[0]:
+        return 20  # Brand new mailbox
+
+    earliest = first_send[0]
+    if earliest.tzinfo is None:
+        earliest = earliest.replace(tzinfo=timezone.utc)
+    days_active = max(1, (datetime.now(timezone.utc) - earliest).days + 1)
+
+    if days_active <= 7:
+        return 20
+    elif days_active <= 14:
+        return 50
+    elif days_active <= 21:
+        return 100
+    else:
+        return min(200, settings.DEFAULT_DAILY_EMAIL_LIMIT)
+
+
 def check_daily_sending_limit(db: Session, campaign_id: Optional[int] = None) -> bool:
-    """Enforces conservative daily email limits across campaigns and global ceiling."""
+    """Enforces conservative daily email limits across campaigns, warm-up schedules, and global ceiling."""
     today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
 
     # Global daily sent count (strictly real sends, excluding simulated)
@@ -33,7 +64,9 @@ def check_daily_sending_limit(db: Session, campaign_id: Optional[int] = None) ->
         EmailDraft.approval_status.in_(["sent", "delivered"])
     ).count()
 
-    if global_sent_today >= settings.DEFAULT_DAILY_EMAIL_LIMIT:
+    warmup_cap = get_mailbox_warmup_limit(db)
+    effective_limit = min(settings.DEFAULT_DAILY_EMAIL_LIMIT, warmup_cap)
+    if global_sent_today >= effective_limit:
         return False
 
     if campaign_id:
