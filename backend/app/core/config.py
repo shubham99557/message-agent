@@ -31,18 +31,30 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./acttrident.db")
 
+    # Local Desktop Storage Directory (%LOCALAPPDATA%\ActTrident)
+    LOCAL_APP_DATA_DIR: str = os.getenv(
+        "LOCAL_APP_DATA_DIR",
+        os.path.join(os.getenv("LOCALAPPDATA", os.path.expanduser("~")), "ActTrident")
+    )
+
     # Redis & Distributed Celery Task Queue
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
     CELERY_BROKER_URL: str = os.getenv("CELERY_BROKER_URL", os.getenv("REDIS_URL", "redis://localhost:6379/0"))
     CELERY_RESULT_BACKEND: str = os.getenv("CELERY_RESULT_BACKEND", os.getenv("REDIS_URL", "redis://localhost:6379/0"))
     TIMEZONE: str = os.getenv("TIMEZONE", "Asia/Kolkata")
+    USE_LOCAL_WORKER: bool = os.getenv("USE_LOCAL_WORKER", "true").lower() in ("true", "1", "yes")
 
-    # AI Configuration (gemini, openai, anthropic, mock)
-    AI_PROVIDER: str = os.getenv("AI_PROVIDER", "mock")
+    # Local-First AI Configuration (Default: Ollama)
+    AI_PROVIDER: str = os.getenv("AI_PROVIDER", "ollama")  # ollama, mock, gemini, openai
+    OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+    OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "llama3.2:latest")
+    OLLAMA_TIMEOUT_SECONDS: int = int(os.getenv("OLLAMA_TIMEOUT_SECONDS", "60"))
+    OLLAMA_NUM_CTX: int = int(os.getenv("OLLAMA_NUM_CTX", "4096"))
+    OLLAMA_TEMPERATURE: float = float(os.getenv("OLLAMA_TEMPERATURE", "0.2"))
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
     OPENAI_BASE_URL: str = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
-    AI_MODEL_NAME: str = os.getenv("AI_MODEL_NAME", "gemini-1.5-pro")
+    AI_MODEL_NAME: str = os.getenv("AI_MODEL_NAME", "llama3.2:latest")
 
     # Email Settings (SMTP / Gmail)
     EMAIL_PROVIDER: str = os.getenv("EMAIL_PROVIDER", "mock")  # smtp, gmail, mock

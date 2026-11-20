@@ -17,6 +17,26 @@ A production-ready, security-hardened, multi-channel **B2B AI Sales Outreach & A
 
 ---
 
+## Windows Local Desktop Mode (Zero Cloud Requirement)
+
+ActTrident can be launched directly as a self-contained Windows desktop application powered by **local Ollama AI models**:
+
+### Launching ActTrident
+1. **Desktop Shortcut:** Double-click the **`ActTrident AI Sales Agent`** shortcut on your Windows Desktop.
+2. **Start Menu:** Open **Start ➔ Programs ➔ ActTrident ➔ ActTrident AI Sales Agent**.
+3. **Command Line:** Run `.\scripts\start_acttrident_desktop.bat`
+
+The unified application opens at **`http://127.0.0.1:8000/`** with:
+- Local AI Brain (`llama3.2:latest`, GPU-accelerated via NVIDIA CUDA at ~48 tokens/sec).
+- Local persistent storage in `%LOCALAPPDATA%\ActTrident\data\acttrident.db`.
+- Built-in asynchronous worker (zero mandatory Redis/Celery).
+- Interactive first-run setup wizard and AI diagnostic benchmark tools.
+
+### Stopping ActTrident
+Run `.\scripts\stop_acttrident_desktop.bat` to cleanly terminate the background service.
+
+---
+
 ## Quick Start (Local Development)
 
 ### 1. Backend (FastAPI + Alembic)

@@ -504,4 +504,14 @@ export const api = {
   }) => request<any>('/agent/run-cycle', { method: 'POST', body: JSON.stringify(data) }),
   seedRegionalTargets: (city?: string) =>
     request<any>(`/agent/seed-targets${city ? `?target_city=${encodeURIComponent(city)}` : ''}`, { method: 'POST' }),
+
+  // Local AI Brain & Desktop Storage
+  getLocalAIStatus: () => request<any>('/ai/status'),
+  getLocalAIModels: () => request<any>('/ai/models'),
+  switchLocalModel: (model_tag: string) =>
+    request<any>('/ai/switch-model', { method: 'POST', body: JSON.stringify({ model_tag }) }),
+  testLocalModel: (prompt?: string) =>
+    request<any>('/ai/test', { method: 'POST', body: JSON.stringify({ prompt }) }),
+  getDesktopStorageStatus: () => request<any>('/ai/storage'),
+  triggerInstantBackup: () => request<any>('/ai/backup', { method: 'POST' }),
 };

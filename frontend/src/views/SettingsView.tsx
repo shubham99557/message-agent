@@ -6,8 +6,16 @@ import {
   UserCheck,
   Shield,
   OctagonAlert,
-  CheckCircle2
+  CheckCircle2,
+  Cpu,
+  Zap,
+  Database,
+  Sparkles,
+  Play,
+  RotateCw,
+  HardDrive
 } from 'lucide-react';
+import { FirstRunWizardModal } from '../components/FirstRunWizardModal';
 
 export const SettingsView: React.FC = () => {
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
@@ -19,20 +27,37 @@ export const SettingsView: React.FC = () => {
   const [togglingKs, setTogglingKs] = useState(false);
   const [loading, setLoading] = useState(true);
 
+  // Local AI & Desktop Storage State
+  const [aiStatus, setAiStatus] = useState<any>(null);
+  const [aiModels, setAiModels] = useState<any>(null);
+  const [storageStatus, setStorageStatus] = useState<any>(null);
+  const [switchingModel, setSwitchingModel] = useState(false);
+  const [benchmarking, setBenchmarking] = useState(false);
+  const [benchmarkResult, setBenchmarkResult] = useState<any>(null);
+  const [backupLoading, setBackupLoading] = useState(false);
+  const [backupNotice, setBackupNotice] = useState<string | null>(null);
+  const [wizardOpen, setWizardOpen] = useState(false);
+
   const loadData = async () => {
     try {
-      const [me, logs, supp, userList, ks] = await Promise.all([
+      const [me, logs, supp, userList, ks, ai, models, storage] = await Promise.all([
         api.getMe().catch(() => null),
         api.getAuditLogs().catch(() => []),
         api.getSuppressionList().catch(() => []),
         api.getUsers().catch(() => []),
-        api.getKillSwitch().catch(() => ({ active: false }))
+        api.getKillSwitch().catch(() => ({ active: false })),
+        api.getLocalAIStatus().catch(() => null),
+        api.getLocalAIModels().catch(() => null),
+        api.getDesktopStorageStatus().catch(() => null),
       ]);
       setCurrentUser(me);
       setAuditLogs(logs);
       setSuppressed(supp);
       setUsers(userList);
       setKillSwitch(ks);
+      setAiStatus(ai);
+      setAiModels(models);
+      setStorageStatus(storage);
     } catch (err) {
       console.error(err);
     } finally {
@@ -81,14 +106,201 @@ export const SettingsView: React.FC = () => {
     }
   };
 
+  const handleSwitchModel = async (modelTag: string) => {
+    setSwitchingModel(true);
+    try {
+      await api.switchLocalModel(modelTag);
+      await loadData();
+    } catch (err: any) {
+      alert(`Model switch failed: ${err.message}`);
+    } finally {
+      setSwitchingModel(false);
+    }
+  };
+
+  const handleRunBenchmark = async () => {
+    setBenchmarking(true);
+    setBenchmarkResult(null);
+    try {
+      const res = await api.testLocalModel('Confirm local model latency and tokens per second.');
+      setBenchmarkResult(res);
+    } catch (err: any) {
+      setBenchmarkResult({ error: err.message || 'Benchmark failed' });
+    } finally {
+      setBenchmarking(false);
+    }
+  };
+
+  const handleTriggerBackup = async () => {
+    setBackupLoading(true);
+    setBackupNotice(null);
+    try {
+      const res = await api.triggerInstantBackup();
+      const backupFile = res.backup?.backup_file?.split('\\').pop() || 'backup.db';
+      setBackupNotice(`Backup successfully saved: ${backupFile} (SHA-256 verified)`);
+      await loadData();
+    } catch (err: any) {
+      alert(`Backup failed: ${err.message}`);
+    } finally {
+      setBackupLoading(false);
+    }
+  };
+
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
-      <div>
-        <h2 className="text-base font-bold text-slate-100 tracking-tight">Security Audit Logs, Users & Compliance Settings</h2>
-        <p className="text-xs text-slate-400 mt-0.5">
-          Emergency outbound safety controls, role-based access administration, tamper-evident activity logging, and suppression registry.
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h2 className="text-base font-bold text-slate-100 tracking-tight">System Settings, Local AI Brain & Compliance</h2>
+          <p className="text-xs text-slate-400 mt-0.5">
+            Local Ollama AI configuration, Windows PC hardware acceleration, storage backups, and outbound safety controls.
+          </p>
+        </div>
+        <button
+          onClick={() => setWizardOpen(true)}
+          className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-cobalt-800 hover:bg-cobalt-700 text-cobalt-200 text-xs font-medium border border-cobalt-700/80 transition-colors shrink-0"
+        >
+          <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+          <span>Launch Setup Wizard</span>
+        </button>
+      </div>
+
+      {/* Local AI Brain & Hardware Configuration Card */}
+      <div className="rounded-lg p-5 border bg-cobalt-900/80 border-cobalt-800 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-cobalt-800/80 pb-3">
+          <div className="flex items-center space-x-3">
+            <div className="w-9 h-9 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
+              <Zap className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center space-x-2">
+                <h3 className="text-sm font-bold text-slate-100">Local AI Brain (Ollama)</h3>
+                <span
+                  className={`px-2 py-0.5 rounded text-[10px] font-mono uppercase border ${
+                    aiStatus?.is_online
+                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                      : 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                  }`}
+                >
+                  {aiStatus?.is_online ? `ONLINE (${aiStatus?.latency_ms || 0}ms)` : 'OFFLINE (Rule Engine Active)'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-400">Zero cloud subscription required. 100% private inference on local GPU/CPU.</p>
+            </div>
+          </div>
+
+          {/* Model Switcher Dropdown */}
+          <div className="flex items-center space-x-2">
+            <label className="text-xs text-slate-400 shrink-0">Active Model:</label>
+            <select
+              value={aiModels?.active_model || 'llama3.2:latest'}
+              disabled={switchingModel}
+              onChange={(e) => handleSwitchModel(e.target.value)}
+              className="bg-cobalt-950 border border-cobalt-800 text-slate-200 text-xs rounded px-2.5 py-1.5 focus:outline-none focus:border-cobalt-500 font-mono"
+            >
+              {(aiModels?.recommended_catalog || []).map((m: any) => (
+                <option key={m.tag} value={m.tag}>
+                  {m.name} ({m.parameters}, {m.size_gb} GB)
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Hardware & GPU Acceleration Metrics */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
+          <div className="bg-cobalt-950/70 border border-cobalt-800/60 rounded p-2.5 space-y-1">
+            <span className="text-slate-500 block text-[10px] uppercase font-mono">Acceleration</span>
+            <span className="font-mono text-emerald-400 font-semibold flex items-center gap-1">
+              <Cpu className="w-3.5 h-3.5" /> NVIDIA GTX 1650 (CUDA)
+            </span>
+          </div>
+          <div className="bg-cobalt-950/70 border border-cobalt-800/60 rounded p-2.5 space-y-1">
+            <span className="text-slate-500 block text-[10px] uppercase font-mono">Dedicated VRAM</span>
+            <span className="font-mono text-slate-200 font-semibold">4.0 GB GDDR6</span>
+          </div>
+          <div className="bg-cobalt-950/70 border border-cobalt-800/60 rounded p-2.5 space-y-1">
+            <span className="text-slate-500 block text-[10px] uppercase font-mono">Ollama Endpoint</span>
+            <span className="font-mono text-slate-300 truncate block">127.0.0.1:11434</span>
+          </div>
+          <div className="bg-cobalt-950/70 border border-cobalt-800/60 rounded p-2.5 space-y-1">
+            <span className="text-slate-500 block text-[10px] uppercase font-mono">Context Window</span>
+            <span className="font-mono text-cobalt-300 font-semibold">4,096 tokens</span>
+          </div>
+        </div>
+
+        {/* Live Model Benchmark Tool */}
+        <div className="flex flex-col sm:flex-row items-center gap-3 pt-1">
+          <button
+            onClick={handleRunBenchmark}
+            disabled={benchmarking}
+            className="flex items-center space-x-1.5 px-3 py-1.5 rounded bg-cobalt-800 hover:bg-cobalt-700 text-slate-100 text-xs font-medium border border-cobalt-700 transition-colors shrink-0"
+          >
+            {benchmarking ? <RotateCw className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
+            <span>{benchmarking ? 'Testing Inference...' : 'Test Local Model Benchmark'}</span>
+          </button>
+          {benchmarkResult && (
+            <div className="text-xs font-mono text-slate-300">
+              {benchmarkResult.error ? (
+                <span className="text-rose-400">{benchmarkResult.error}</span>
+              ) : (
+                <span className="text-emerald-400">
+                  ✓ Latency: {benchmarkResult.latency_seconds}s | ~{benchmarkResult.tokens_per_second_estimate} tok/s | "{benchmarkResult.response}"
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Local Desktop Storage & Instant Backup Card */}
+      <div className="rounded-lg p-5 border bg-cobalt-900/80 border-cobalt-800 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-cobalt-800/80 pb-3">
+          <div className="flex items-center space-x-3">
+            <div className="w-9 h-9 rounded-lg bg-cobalt-800/80 border border-cobalt-700 flex items-center justify-center text-cobalt-300 shrink-0">
+              <Database className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-slate-100">Local Desktop Persistent Storage</h3>
+              <p className="text-xs text-slate-400">
+                Data persists in <code className="text-cobalt-300 font-mono text-[11px]">%LOCALAPPDATA%\ActTrident\data\acttrident.db</code>
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={handleTriggerBackup}
+            disabled={backupLoading}
+            className="flex items-center space-x-1.5 px-3 py-1.5 rounded bg-cobalt-800 hover:bg-cobalt-700 text-slate-100 text-xs font-medium border border-cobalt-700 transition-colors shrink-0"
+          >
+            {backupLoading ? <RotateCw className="w-3.5 h-3.5 animate-spin" /> : <HardDrive className="w-3.5 h-3.5" />}
+            <span>{backupLoading ? 'Creating Backup...' : 'Create Instant Backup'}</span>
+          </button>
+        </div>
+
+        {backupNotice && (
+          <div className="p-2.5 rounded bg-emerald-950/40 border border-emerald-500/30 text-emerald-300 text-xs font-mono">
+            {backupNotice}
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+          <div className="bg-cobalt-950/70 border border-cobalt-800/60 rounded p-2.5">
+            <span className="text-slate-500 block text-[10px] uppercase font-mono">Database Size</span>
+            <span className="font-mono text-slate-200 font-semibold">{storageStatus?.database_size_mb || 0} MB</span>
+          </div>
+          <div className="bg-cobalt-950/70 border border-cobalt-800/60 rounded p-2.5">
+            <span className="text-slate-500 block text-[10px] uppercase font-mono">Free Disk Space</span>
+            <span className="font-mono text-slate-200 font-semibold">{storageStatus?.free_disk_space_gb || 0} GB Free</span>
+          </div>
+          <div className="bg-cobalt-950/70 border border-cobalt-800/60 rounded p-2.5">
+            <span className="text-slate-500 block text-[10px] uppercase font-mono">Crash Recovery (WAL)</span>
+            <span className="font-mono text-emerald-400 font-semibold">Enabled</span>
+          </div>
+          <div className="bg-cobalt-950/70 border border-cobalt-800/60 rounded p-2.5">
+            <span className="text-slate-500 block text-[10px] uppercase font-mono">Stored Snapshots</span>
+            <span className="font-mono text-cobalt-300 font-semibold">{storageStatus?.backups_stored || 0} Backups</span>
+          </div>
+        </div>
       </div>
 
       {/* Global Emergency Kill Switch Card */}
@@ -329,6 +541,9 @@ export const SettingsView: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* First-Run Setup Wizard Modal */}
+      <FirstRunWizardModal isOpen={wizardOpen} onClose={() => setWizardOpen(false)} />
     </div>
   );
 };

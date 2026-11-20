@@ -1,5 +1,5 @@
 import logging
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, inspect, text, event
 from sqlalchemy.orm import declarative_base, sessionmaker
 from app.core.config import settings
 
@@ -16,6 +16,21 @@ engine = create_engine(
     connect_args=connect_args,
     pool_pre_ping=True
 )
+
+
+@event.listens_for(engine, "connect")
+def set_sqlite_pragma(dbapi_connection, connection_record):
+    """Enforces SQLite WAL mode, foreign key enforcement, and a 5000ms busy timeout."""
+    if db_url.startswith("sqlite"):
+        try:
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.execute("PRAGMA busy_timeout=5000")
+            cursor.close()
+        except Exception as exc:
+            logger.debug(f"SQLite PRAGMA setup skipped: {exc}")
+
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

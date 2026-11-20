@@ -4,6 +4,7 @@ import time
 import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any, List, Tuple
+from concurrent.futures import ThreadPoolExecutor
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
@@ -12,6 +13,9 @@ from app.core.database import SessionLocal
 from app.models.job import BackgroundTaskRecord, DeadLetterTask, TASK_CATEGORIES, TASK_STATUSES
 
 logger = logging.getLogger(__name__)
+
+# Dedicated asynchronous worker thread pool for local desktop execution (avoids mandatory Redis/Celery)
+_LOCAL_EXECUTOR = ThreadPoolExecutor(max_workers=3, thread_name_prefix="acttrident-worker")
 
 # In-memory rate limiting fallback if Redis is unavailable
 _LOCAL_RATE_LIMITS: Dict[str, List[float]] = {}
@@ -125,20 +129,35 @@ def create_background_task(
     db.commit()
     db.refresh(task_record)
 
-    # Dispatch to Celery or run synchronous
+    # Dispatch: local background worker thread pool, Celery, or synchronous
     if execute_sync:
         _run_task_synchronously(task_record.id, category, payload, db=db)
         db.refresh(task_record)
+    elif getattr(settings, "USE_LOCAL_WORKER", True):
+        # Asynchronous local execution via thread pool (zero external server needed)
+        _LOCAL_EXECUTOR.submit(_run_task_synchronously, task_record.id, category, payload)
     else:
         try:
             from app.worker.tasks import dispatch_celery_task
             dispatch_celery_task(category, task_uuid, payload)
         except Exception as e:
-            logger.warning(f"Could not dispatch via Celery ({e}); executing task directly.")
-            _run_task_synchronously(task_record.id, category, payload, db=db)
-            db.refresh(task_record)
+            logger.warning(f"Could not dispatch via Celery ({e}); executing asynchronously via local thread pool.")
+            _LOCAL_EXECUTOR.submit(_run_task_synchronously, task_record.id, category, payload)
 
     return task_record
+
+
+def recover_dangling_tasks(db: Session) -> int:
+    """Finds tasks stuck in 'running' state from previous unexpected app closes/restarts and resets them."""
+    stuck = db.query(BackgroundTaskRecord).filter(BackgroundTaskRecord.status == "running").all()
+    count = len(stuck)
+    for t in stuck:
+        t.status = "pending"
+        t.error_message = "Recovered automatically after unexpected workstation shutdown/restart."
+    if count > 0:
+        db.commit()
+        logger.info(f"Local Worker: recovered {count} interrupted task(s) from previous session.")
+    return count
 
 
 def _run_task_synchronously(

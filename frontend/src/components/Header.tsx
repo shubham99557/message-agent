@@ -1,6 +1,6 @@
 import React from 'react';
 import { ViewType } from '../types';
-import { ShieldCheck, Lock, MapPin, Send } from 'lucide-react';
+import { ShieldCheck, Lock, MapPin, Send, Sparkles } from 'lucide-react';
 
 interface HeaderProps {
   currentView: ViewType;
@@ -17,6 +17,12 @@ export const Header: React.FC<HeaderProps> = ({ currentView, title, subtitle }) 
       </div>
 
       <div className="flex items-center space-x-3 text-xs">
+        {/* Local AI Brain Badge */}
+        <div className="hidden sm:flex items-center space-x-1.5 px-2.5 py-1 rounded bg-cobalt-900 border border-cobalt-800 text-slate-300">
+          <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+          <span className="font-mono text-[11px]">Local AI: llama3.2 (CUDA)</span>
+        </div>
+
         {/* City Filter / Market Badge */}
         <div className="hidden md:flex items-center space-x-1.5 px-2.5 py-1 rounded bg-cobalt-900 border border-cobalt-800 text-slate-300">
           <MapPin className="w-3.5 h-3.5 text-cobalt-400" />

@@ -2,13 +2,14 @@ from fastapi import APIRouter
 from app.api.endpoints import (
     auth, companies, crm, discovery, qualification,
     research, emails, approvals, campaigns, whatsapp, replies,
-    analytics, settings, jobs, integrations, linkedin, agent
+    analytics, settings, jobs, integrations, linkedin, agent, local_ai
 )
 
 api_router = APIRouter()
 
 api_router.include_router(auth.router, prefix="/auth", tags=["Authentication"])
 api_router.include_router(agent.router, prefix="/agent", tags=["Autonomous Outreach Agent Brain"])
+api_router.include_router(local_ai.router, prefix="/ai", tags=["Local AI Brain & Desktop Storage"])
 api_router.include_router(companies.router, prefix="/companies", tags=["Companies & Leads"])
 api_router.include_router(crm.router, prefix="/crm", tags=["CRM Pipeline"])
 api_router.include_router(discovery.router, prefix="/discovery", tags=["Discovery"])

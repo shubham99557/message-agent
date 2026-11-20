@@ -1,5 +1,6 @@
 import logging
 import uuid
+from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.exceptions import RequestValidationError
@@ -71,6 +72,10 @@ async def lifespan(app: FastAPI):
     # Enforce production/staging security constraints at startup
     settings.validate_production_security()
 
+    # Ensure local %LOCALAPPDATA%\ActTrident storage layout is initialized
+    from app.core.storage import initialize_storage_layout
+    initialize_storage_layout()
+
     # In production, schema changes must be applied explicitly via Alembic (`alembic upgrade head`).
     # Automatic schema sync is restricted to non-production environments only.
     if settings.ENVIRONMENT.lower() in ("development", "test"):
@@ -78,6 +83,8 @@ async def lifespan(app: FastAPI):
 
     db = SessionLocal()
     try:
+        from app.services.job_service import recover_dangling_tasks
+        recover_dangling_tasks(db)
         if settings.ENVIRONMENT.lower() != "production":
             seed_default_admin(db)
         seed_default_meta_templates(db)
@@ -206,6 +213,13 @@ def readiness_check():
         "environment": settings.ENVIRONMENT,
         "request_id": request_id_ctx.get("-")
     }
+
+
+# Mount Built React Frontend Distribution for Unified Windows Desktop Serving
+_frontend_dist = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+if _frontend_dist.exists():
+    from fastapi.staticfiles import StaticFiles
+    app.mount("/", StaticFiles(directory=str(_frontend_dist), html=True), name="frontend")
 
 
 if __name__ == "__main__":
