@@ -11,12 +11,23 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({ currentView, title, subtitle }) => {
   return (
     <header className="h-16 border-b border-cobalt-800/80 bg-cobalt-950/95 backdrop-blur-sm px-6 flex items-center justify-between sticky top-0 z-10">
-      <div>
-        <h1 className="text-base font-semibold text-slate-100 tracking-tight">{title}</h1>
-        {subtitle && <p className="text-xs text-slate-400 mt-0.5">{subtitle}</p>}
+      <div className="flex items-center space-x-3">
+        <div className="w-8 h-8 rounded-lg bg-cobalt-900 border border-cobalt-700/60 p-1 flex items-center justify-center shrink-0">
+          <img src="/acttrident-logo.png" alt="ActTrident" className="w-full h-full object-contain" />
+        </div>
+        <div>
+          <h1 className="text-base font-semibold text-slate-100 tracking-tight">{title}</h1>
+          {subtitle && <p className="text-xs text-slate-400 mt-0.5">{subtitle}</p>}
+        </div>
       </div>
 
       <div className="flex items-center space-x-3 text-xs">
+        {/* Real-Time Operational Badge */}
+        <div className="hidden xl:flex items-center space-x-1.5 px-2.5 py-1 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-300">
+          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span className="font-mono text-[11px] font-medium">Real-Time Engine</span>
+        </div>
+
         {/* Local AI Brain Badge */}
         <div className="hidden sm:flex items-center space-x-1.5 px-2.5 py-1 rounded bg-cobalt-900 border border-cobalt-800 text-slate-300">
           <Sparkles className="w-3.5 h-3.5 text-amber-400" />

@@ -1,3 +1,4 @@
+import logging
 import re
 from typing import List, Optional, Tuple
 from sqlalchemy.orm import Session
@@ -7,6 +8,8 @@ from app.models.company import Company
 from app.models.research import ResearchReport
 from app.core.security import is_safe_external_url, sanitize_untrusted_text, safe_fetch_untrusted_url
 from app.integrations.discovery_adapters import is_demo_domain
+
+logger = logging.getLogger("acttrident.research")
 
 
 def _strip_html_to_text(raw_html: str) -> str:
@@ -127,35 +130,37 @@ async def generate_company_research_report(db: Session, company: Company) -> Res
         f"under industry '{company.industry or 'Unspecified'}', with {workforce_clause}. "
         f"Record verification status: {company.verification_status or 'unverified'}."
     )
-    if website_content:
-        snippet = website_content[:260].strip()
-        summary += f" Public website excerpt (untrusted source): \"{snippet}\""
-        try:
-            from app.ai.local_ai_gateway import local_ai_gateway
-            comp_payload = {
-                "name": company.name,
-                "website": company.website,
-                "industry": company.industry,
-                "city": company.city,
-                "state": company.state,
-                "laptop_count_verified": company.laptop_count_verified,
-                "laptop_count_evidence": company.laptop_count_evidence,
-                "decision_maker_name": company.decision_maker_name,
-                "decision_maker_role": company.decision_maker_role,
-            }
-            dossier = await local_ai_gateway.generate_research_dossier(comp_payload, web_content=website_content)
-            if dossier and dossier.summary and len(dossier.summary) > 20:
-                summary = f"{demo_prefix}{dossier.summary} [Local AI: {local_ai_gateway.model_manager.active_model}]"
-            if dossier and dossier.products_and_services:
-                services = dossier.products_and_services
-        except Exception as exc:
-            logger.debug(f"Local AI dossier synthesis notice: {exc}")
-
     services = (
         company.description
         if company.description
         else f"Recorded industry sector: {company.industry or 'Unspecified'}. Specific service catalog not yet verified from public sources."
     )
+
+    if website_content:
+        snippet = website_content[:260].strip()
+        summary += f" Public website excerpt (untrusted source): \"{snippet}\""
+
+    try:
+        from app.ai.local_ai_gateway import local_ai_gateway
+        comp_payload = {
+            "name": company.name,
+            "website": company.website,
+            "industry": company.industry,
+            "city": company.city,
+            "state": company.state,
+            "laptop_count_verified": company.laptop_count_verified,
+            "laptop_count_evidence": company.laptop_count_evidence,
+            "decision_maker_name": company.decision_maker_name,
+            "decision_maker_role": company.decision_maker_role,
+        }
+        dossier = await local_ai_gateway.generate_research_dossier(comp_payload, web_content=website_content or "")
+        if dossier and dossier.summary and len(dossier.summary) > 20:
+            status_tag = f"Record status: {company.verification_status or 'unverified'}."
+            summary = f"{demo_prefix}{dossier.summary} [{status_tag}] [Local AI: {local_ai_gateway.model_manager.active_model}]"
+        if dossier and dossier.products_and_services:
+            services = dossier.products_and_services
+    except Exception as exc:
+        logger.debug(f"Local AI dossier synthesis notice: {exc}")
 
     if company.laptop_count_verified and company.laptop_count_evidence:
         laptop_clause = f"{company.laptop_count_verified} verified company-managed workstations ({company.laptop_count_evidence})"

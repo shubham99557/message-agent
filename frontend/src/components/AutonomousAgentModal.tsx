@@ -94,8 +94,8 @@ export const AutonomousAgentModal: React.FC<AutonomousAgentModalProps> = ({
         {/* Modal Header */}
         <div className="p-5 bg-gradient-to-r from-cobalt-900 to-cobalt-950 border-b border-cobalt-800 flex items-center justify-between">
           <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-lg bg-cobalt-800/80 border border-cobalt-700 flex items-center justify-center text-cobalt-400 shadow-inner">
-              <BrainCircuit className="w-6 h-6 animate-pulse" />
+            <div className="w-10 h-10 rounded-lg bg-cobalt-800/90 border border-cobalt-700 flex items-center justify-center p-1.5 shadow-inner">
+              <img src="/acttrident-mark.png" alt="ActTrident" className="w-full h-full object-contain" />
             </div>
             <div>
               <div className="flex items-center space-x-2">

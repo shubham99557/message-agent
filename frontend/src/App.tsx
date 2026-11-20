@@ -83,13 +83,20 @@ export const App: React.FC = () => {
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen bg-cobalt-950 flex items-center justify-center p-4">
-        <div className="w-full max-w-sm bg-cobalt-900 border border-cobalt-800 rounded-xl p-8 space-y-6 shadow-2xl">
-          <div className="text-center space-y-2">
-            <div className="w-12 h-12 rounded-xl bg-cobalt-600 flex items-center justify-center mx-auto shadow-lg shadow-cobalt-600/30 border border-cobalt-500/40">
-              <Shield className="w-6 h-6 text-white" />
+        <div className="w-full max-w-sm bg-cobalt-900 border border-cobalt-800 rounded-xl p-8 space-y-6 shadow-2xl relative overflow-hidden">
+          <div className="absolute -top-12 -right-12 w-32 h-32 bg-cobalt-600/10 rounded-full blur-2xl pointer-events-none" />
+          <div className="text-center space-y-3">
+            <div className="w-16 h-16 rounded-2xl bg-cobalt-950 border border-cobalt-700/80 p-2.5 flex items-center justify-center mx-auto shadow-xl shadow-cobalt-950/80">
+              <img src="/acttrident-logo.png" alt="ActTrident Official Logo" className="w-full h-full object-contain" />
             </div>
-            <h1 className="text-lg font-bold text-slate-100 tracking-tight">ActTrident AI Outreach Agent</h1>
-            <p className="text-xs text-slate-400">Enterprise B2B Sales Automation Platform</p>
+            <div>
+              <h1 className="text-lg font-bold text-slate-100 tracking-tight flex items-center justify-center space-x-1.5">
+                <span>ActTrident</span>
+                <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">AI</span>
+              </h1>
+              <p className="text-xs text-slate-400 mt-0.5">The Human Action Security Broker™</p>
+              <p className="text-[11px] font-mono text-cobalt-400 mt-1">Autonomous B2B Sales Outreach Agent</p>
+            </div>
           </div>
 
           {loginError && (

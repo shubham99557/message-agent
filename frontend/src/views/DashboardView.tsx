@@ -80,16 +80,21 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
   return (
     <div className="p-6 space-y-6">
       {/* Executive Welcome & Primary Offer Banner */}
-      <div className="bg-gradient-to-r from-cobalt-900 to-cobalt-950 border border-cobalt-800 rounded-lg p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center space-x-2 text-xs font-mono text-cobalt-400 font-medium">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            <span>SYSTEM ACTIVE • PRODUCTION B2B AUTOMATION</span>
+      <div className="bg-gradient-to-r from-cobalt-900 to-cobalt-950 border border-cobalt-800 rounded-lg p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-md">
+        <div className="flex items-center space-x-3.5">
+          <div className="w-12 h-12 rounded-lg bg-cobalt-800/80 border border-cobalt-700 p-1 flex items-center justify-center shrink-0 shadow-inner">
+            <img src="/acttrident-mark.png" alt="ActTrident" className="w-full h-full object-contain" />
           </div>
-          <h2 className="text-xl font-bold text-slate-100 tracking-tight mt-1">ActTrident B2B Sales Automation</h2>
-          <p className="text-xs text-slate-400 mt-1 max-w-2xl leading-relaxed">
-            Targeting SMBs and technology enterprises managing 5+ laptops across <strong className="text-slate-300">any target city</strong> or nationwide technology corridors with the proposed <strong className="text-cobalt-300">90-Day Free Product Evaluation</strong>.
-          </p>
+          <div>
+            <div className="flex items-center space-x-2 text-xs font-mono text-cobalt-400 font-medium">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span>SYSTEM ACTIVE • PRODUCTION B2B AUTOMATION</span>
+            </div>
+            <h2 className="text-xl font-bold text-slate-100 tracking-tight mt-0.5">ActTrident B2B Sales Automation</h2>
+            <p className="text-xs text-slate-400 mt-0.5 max-w-2xl leading-relaxed">
+              Targeting SMBs and technology enterprises managing 5+ laptops across <strong className="text-slate-300">any target city</strong> or nationwide technology corridors with the proposed <strong className="text-cobalt-300">90-Day Free Product Evaluation</strong>.
+            </p>
+          </div>
         </div>
         <div className="flex items-center space-x-2 shrink-0">
           <button
@@ -114,8 +119,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
         
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5 relative z-10">
           <div className="flex items-start space-x-4">
-            <div className="w-12 h-12 rounded-xl bg-indigo-600/20 border border-indigo-500/40 flex items-center justify-center text-indigo-400 shrink-0 shadow-inner">
-              <BrainCircuit className="w-7 h-7 animate-pulse" />
+            <div className="w-14 h-14 rounded-xl bg-indigo-950/90 border border-indigo-500/40 p-2 flex items-center justify-center shrink-0 shadow-lg relative group">
+              <img src="/acttrident-logo.png" alt="ActTrident AI" className="w-full h-full object-contain filter drop-shadow-md group-hover:scale-105 transition-transform" />
+              <div className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-emerald-500 border-2 border-cobalt-950 flex items-center justify-center" title="Autonomous Outreach Brain Active">
+                <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+              </div>
             </div>
             <div className="space-y-1">
               <div className="flex items-center space-x-2">

@@ -69,8 +69,8 @@ export const FirstRunWizardModal: React.FC<FirstRunWizardModalProps> = ({ isOpen
         {/* Modal Header */}
         <div className="px-6 py-4 border-b border-cobalt-800/80 bg-cobalt-900/60 flex items-center justify-between">
           <div className="flex items-center space-x-3">
-            <div className="w-9 h-9 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center">
-              <Sparkles className="w-5 h-5 text-emerald-400" />
+            <div className="w-9 h-9 rounded-lg bg-cobalt-800 border border-cobalt-700 flex items-center justify-center p-1 shadow-inner">
+              <img src="/acttrident-mark.png" alt="ActTrident" className="w-full h-full object-contain" />
             </div>
             <div>
               <h3 className="text-sm font-bold text-slate-100 uppercase tracking-wider">
