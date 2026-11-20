@@ -61,6 +61,7 @@ class Settings(BaseSettings):
 
     # WhatsApp Cloud API (Meta Official)
     WHATSAPP_ENABLED: bool = os.getenv("WHATSAPP_ENABLED", "true").lower() == "true"
+    ENFORCE_TRAI_CURFEW: bool = os.getenv("ENFORCE_TRAI_CURFEW", "true").lower() in ("true", "1", "yes")
     META_WA_ACCESS_TOKEN: str = os.getenv("META_WA_ACCESS_TOKEN", "")
     META_WA_PHONE_NUMBER_ID: str = os.getenv("META_WA_PHONE_NUMBER_ID", "")
     META_WA_BUSINESS_ACCOUNT_ID: str = os.getenv("META_WA_BUSINESS_ACCOUNT_ID", "")

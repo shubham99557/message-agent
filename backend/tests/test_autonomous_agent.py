@@ -134,6 +134,27 @@ def test_agent_api_endpoints(client, admin_auth_headers):
     assert cycle_res["metrics"]["qualified"] >= 2
 
 
+def test_agent_api_rbac_enforcement(client, auth_headers, admin_auth_headers):
+    """Verifies RBAC rules on agent endpoints: sales_rep can view status, but only admin/manager can execute or seed."""
+    # 1. Sales rep can view status
+    resp = client.get("/api/v1/agent/status", headers=auth_headers)
+    assert resp.status_code == 200
+
+    # 2. Sales rep cannot seed targets (403 Forbidden)
+    resp_seed = client.post("/api/v1/agent/seed-targets", headers=auth_headers)
+    assert resp_seed.status_code == 403
+    assert "Operation not permitted" in resp_seed.json()["detail"]
+
+    # 3. Sales rep cannot trigger autonomous cycle (403 Forbidden)
+    resp_cycle = client.post("/api/v1/agent/run-cycle", json={"target_city": "Siliguri"}, headers=auth_headers)
+    assert resp_cycle.status_code == 403
+    assert "Operation not permitted" in resp_cycle.json()["detail"]
+
+    # 4. Unauthenticated request is rejected (401 Unauthorized)
+    resp_unauth = client.get("/api/v1/agent/status")
+    assert resp_unauth.status_code == 401
+
+
 def test_background_task_worker_autonomous_cycle(db_session):
     """Verifies that Celery/background task worker can execute the autonomous cycle via execute_task_logic."""
     payload = {

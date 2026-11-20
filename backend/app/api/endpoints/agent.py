@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, get_current_user
+from app.api.deps import get_db, get_current_user, require_role
 from app.models.user import User
 from app.services.autonomous_agent_service import (
     run_autonomous_outreach_cycle,
@@ -35,12 +35,13 @@ def read_agent_status(
 async def execute_autonomous_cycle(
     req: AutonomousCycleRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role(["admin", "manager"])),
 ) -> Dict[str, Any]:
     """
     Executes the end-to-end autonomous outreach cycle across all 8 pipeline phases:
     Discovery -> Deep Research Dossier -> 7-Factor Qualification -> Campaign Enrollment
     -> Multi-Channel Copywriting -> Approval Safeguards -> Outbox Dispatch -> CRM Tracking.
+    Restricted to admin and manager roles.
     """
     try:
         result = await run_autonomous_outreach_cycle(
@@ -64,9 +65,9 @@ async def execute_autonomous_cycle(
 def seed_regional_targets(
     target_city: Optional[str] = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role(["admin", "manager"])),
 ) -> Dict[str, Any]:
-    """Manually triggers ingestion and 7-factor qualification of verified enterprise targets."""
+    """Manually triggers ingestion and 7-factor qualification of verified enterprise targets. Restricted to admin and manager roles."""
     companies = ensure_verified_targets(db, target_city=target_city)
     return {
         "status": "success",

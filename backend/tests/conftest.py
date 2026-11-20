@@ -20,6 +20,12 @@ def enable_mocked_live_send(monkeypatch):
     monkeypatch.setattr(settings, "LIVE_SEND_ENABLED", True)
 
 
+@pytest.fixture(autouse=True)
+def configure_test_environment(monkeypatch):
+    """Configures deterministic test environment flags."""
+    monkeypatch.setattr(settings, "ENFORCE_TRAI_CURFEW", False)
+
+
 @pytest.fixture(scope="function")
 def db_session():
     # Ensure isolated rate-limit sliding window per test (both Redis and in-memory fallback)

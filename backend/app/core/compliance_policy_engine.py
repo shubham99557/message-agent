@@ -115,6 +115,10 @@ class CompliancePolicyEngine:
         Commercial communication to Indian telephone numbers (+91 or 10-digit mobile)
         outside these hours is strictly prohibited under Indian telecom regulations.
         """
+        from app.core.config import settings
+        if not getattr(settings, "ENFORCE_TRAI_CURFEW", True):
+            return
+
         if not recipient_phone or channel.lower() not in ("whatsapp", "phone", "sms"):
             return
 

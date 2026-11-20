@@ -242,7 +242,11 @@ def ensure_verified_targets(db: Session, target_city: Optional[str] = None) -> L
                 field_name="laptop_count_verified",
                 source_url=item["source_url"],
                 source_type=item["source_type"],
-                extracted_text=f"Verified {item['laptop_count_verified']} laptops: {item['laptop_count_evidence']}"
+                extracted_text=f"Verified {item['laptop_count_verified']} laptops: {item['laptop_count_evidence']}",
+                verification_status="verified",
+                verification_method="public_evidence_review",
+                confidence=1.0,
+                retrieved_at=now_utc,
             ))
 
             # CRM Lead
@@ -261,15 +265,54 @@ def ensure_verified_targets(db: Session, target_city: Optional[str] = None) -> L
         else:
             # Update to verified state with authentic evidence
             comp.website = item["website"]
+            comp.industry = item["industry"]
+            comp.description = item["description"]
+            comp.city = item["city"]
+            comp.state = item["state"]
             comp.public_email = item["public_email"]
+            comp.public_phone = item["public_phone"]
             comp.public_whatsapp = item["public_whatsapp"]
+            comp.linkedin_url = item["linkedin_url"]
             comp.laptop_count_verified = item["laptop_count_verified"]
             comp.laptop_count_evidence = item["laptop_count_evidence"]
             comp.has_verified_5_plus_laptops = True
+            comp.employee_count_min = item["employee_count_min"]
+            comp.employee_count_max = item["employee_count_max"]
+            comp.employee_size_evidence = item["employee_size_evidence"]
+            comp.decision_maker_name = item["decision_maker_name"]
+            comp.decision_maker_role = item["decision_maker_role"]
+            comp.decision_maker_email = item["decision_maker_email"]
             comp.verification_status = "verified"
             comp.verification_method = "public_evidence_review"
             comp.is_demo = False
             comp.date_last_verified = now_utc
+
+            # Ensure ContactSource record exists and reflects genuine verified evidence
+            src = db.query(ContactSource).filter(
+                ContactSource.company_id == comp.id,
+                ContactSource.field_name.in_(["laptop_count_verified", "profile_and_laptops", "laptop_count"]),
+            ).first()
+            if src:
+                src.field_name = "laptop_count_verified"
+                src.source_url = item["source_url"]
+                src.source_type = item["source_type"]
+                src.extracted_text = f"Verified {item['laptop_count_verified']} laptops: {item['laptop_count_evidence']}"
+                src.verification_status = "verified"
+                src.verification_method = "public_evidence_review"
+                src.retrieved_at = now_utc
+            else:
+                db.add(ContactSource(
+                    company_id=comp.id,
+                    field_name="laptop_count_verified",
+                    source_url=item["source_url"],
+                    source_type=item["source_type"],
+                    extracted_text=f"Verified {item['laptop_count_verified']} laptops: {item['laptop_count_evidence']}",
+                    verification_status="verified",
+                    verification_method="public_evidence_review",
+                    confidence=1.0,
+                    retrieved_at=now_utc,
+                ))
+
             if not comp.lead:
                 db.add(Lead(company_id=comp.id, pipeline_status="new"))
 

@@ -49,10 +49,11 @@ ActTrident is an enterprise-grade AI-powered B2B sales automation and intelligen
   - Live discovery UI with debounced search, 12 business category filters, multi-city search, and CSV export.
   - Channel setup modal with step-by-step guides for Gmail, WhatsApp, and LinkedIn.
 - **Verification Metrics:**
-  - **132 / 132** pytest automated tests passing (100% pass rate).
+  - **133 / 133** pytest automated tests passing (100% pass rate).
   - **15 / 15** live HTTP socket end-to-end steps verified via `live_e2e_runner.py`.
   - **8 / 8** automated headless Chrome browser steps verified via `browser_e2e_runner.cjs`.
   - Vite production build compiling with 0 TypeScript/CSS errors.
+  - Complete Staging Validation Report published at [docs/STAGING_VALIDATION_REPORT.md](file:///c:/Users/singh/message-agent/docs/STAGING_VALIDATION_REPORT.md).
 
 ---
 
@@ -278,7 +279,7 @@ sequenceDiagram
 - [x] LinkedIn manual handoff workflow operational.
 - [x] DPDP 2023 opt-out and suppression pipeline verified.
 - [x] TRAI 09:00-21:00 IST business hour guard tested.
-- [x] All 132 automated tests passing in CI/CD pipeline (100% pass rate).
+- [x] All 133 automated tests passing in CI/CD pipeline (100% pass rate).
 - [x] 15-step live socket E2E suite passes cleanly.
 - [x] Frontend production build compiles with 0 errors.
 - [x] Backup and recovery runbook validated against clean database.

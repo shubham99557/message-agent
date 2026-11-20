@@ -18,8 +18,11 @@ from app.models.lead import Lead
 from app.api.endpoints.auth import _failed_login_attempts
 
 
-def test_trai_commercial_hours_restriction():
+def test_trai_commercial_hours_restriction(monkeypatch):
     """Validates TRAI TCCCPR 2018 calling-window restriction (09:00 - 21:00 IST)."""
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "ENFORCE_TRAI_CURFEW", True)
+
     # 1. Non-Indian number should pass regardless of hour
     CompliancePolicyEngine.validate_trai_commercial_hours("+14155552671", "whatsapp")
 
