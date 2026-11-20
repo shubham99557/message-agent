@@ -146,6 +146,8 @@ class OpenStreetMapPublicAdapter(DiscoverySourceAdapter):
                     confidence_level=0.65,
                     retrieval_timestamp=now,
                 ))
+                if len(items) >= limit:
+                    break
         except Exception as exc:
             logger.debug(f"OpenStreetMap discovery request skipped/failed: {exc}")
         finally:

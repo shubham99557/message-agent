@@ -89,7 +89,7 @@ def _ensure_opt_out_footer(draft: EmailDraft) -> str:
     if "opt-out" not in body.lower() and "unsubscribe" not in body.lower():
         footer = (
             f"\n\n---\n"
-            f"ActTrident AI B2B Outreach • Targeting 5+ managed laptops in Siliguri, Gangtok, Patna & Bhagalpur.\n"
+            f"ActTrident AI B2B Outreach • Targeting 5+ managed laptops across Indian Enterprise Clusters.\n"
             f"To opt out of future communications regarding ActTrident evaluations, reply with 'Unsubscribe' "
             f"or visit https://acttrident.ai/opt-out?email={draft.recipient_email}"
         )

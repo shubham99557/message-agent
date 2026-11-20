@@ -1,6 +1,6 @@
 from typing import List, Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, distinct
 
 from app.models.company import Company
 from app.models.lead import Lead, Meeting, Trial, Customer
@@ -151,10 +151,27 @@ def calculate_funnel_metrics(db: Session, campaign_id: Optional[int] = None) -> 
 
 
 def calculate_city_breakdown(db: Session) -> List[CityBreakdownItem]:
-    cities = ["Siliguri", "Gangtok", "Patna", "Bhagalpur"]
-    breakdowns = []
+    # Dynamically extract all distinct non-empty cities from real registered companies
+    db_cities = [
+        c[0].strip()
+        for c in db.query(distinct(Company.city)).filter(
+            Company.is_demo == False,
+            Company.city.isnot(None),
+            Company.city != ""
+        ).all()
+        if c[0] and c[0].strip()
+    ]
 
-    for city in cities:
+    preset_cities = ["Siliguri", "Gangtok", "Patna", "Bhagalpur"]
+    combined_cities: List[str] = []
+    seen = set()
+    for c in db_cities + preset_cities:
+        if c.lower() not in seen:
+            seen.add(c.lower())
+            combined_cities.append(c)
+
+    breakdowns = []
+    for city in combined_cities:
         c_count = db.query(Company).filter(
             Company.is_demo == False,
             Company.city.ilike(f"%{city}%"),

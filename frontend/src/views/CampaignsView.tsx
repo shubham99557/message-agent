@@ -336,17 +336,35 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({ onNavigate }) => {
               </div>
 
               <div>
-                <label className="block text-[11px] font-medium text-slate-400 mb-1">Target Geography</label>
-                <select
+                <label className="block text-[11px] font-medium text-slate-400 mb-1">Target Geography / City</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Siliguri, Bengaluru, Mumbai, or Nationwide"
+                  list="campaign-cities-list"
                   value={targetCity}
                   onChange={(e) => setTargetCity(e.target.value)}
-                  className="w-full bg-cobalt-950 border border-cobalt-800 rounded px-2.5 py-1.5 text-xs text-slate-200"
-                >
+                  className="w-full bg-cobalt-950 border border-cobalt-800 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-cobalt-600"
+                  required
+                />
+                <datalist id="campaign-cities-list">
+                  <option value="All">All India / Nationwide</option>
                   <option value="Siliguri">Siliguri (West Bengal)</option>
                   <option value="Gangtok">Gangtok (Sikkim)</option>
                   <option value="Patna">Patna (Bihar)</option>
                   <option value="Bhagalpur">Bhagalpur (Bihar)</option>
-                </select>
+                  <option value="Bengaluru">Bengaluru (Karnataka)</option>
+                  <option value="Hyderabad">Hyderabad (Telangana)</option>
+                  <option value="Pune">Pune (Maharashtra)</option>
+                  <option value="Mumbai">Mumbai (Maharashtra)</option>
+                  <option value="Delhi">Delhi NCR</option>
+                  <option value="Kolkata">Kolkata (West Bengal)</option>
+                  <option value="Chennai">Chennai (Tamil Nadu)</option>
+                  <option value="Ahmedabad">Ahmedabad (Gujarat)</option>
+                  <option value="Jaipur">Jaipur (Rajasthan)</option>
+                  <option value="Indore">Indore (Madhya Pradesh)</option>
+                  <option value="Chandigarh">Chandigarh</option>
+                  <option value="Lucknow">Lucknow (Uttar Pradesh)</option>
+                </datalist>
               </div>
 
               <div className="grid grid-cols-2 gap-2">

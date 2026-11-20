@@ -88,7 +88,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
           </div>
           <h2 className="text-xl font-bold text-slate-100 tracking-tight mt-1">ActTrident B2B Sales Automation</h2>
           <p className="text-xs text-slate-400 mt-1 max-w-2xl leading-relaxed">
-            Targeting SMBs and technology enterprises managing 5+ laptops across <strong className="text-slate-300">Siliguri</strong>, <strong className="text-slate-300">Gangtok</strong>, <strong className="text-slate-300">Patna</strong>, and <strong className="text-slate-300">Bhagalpur</strong> with the proposed <strong className="text-cobalt-300">90-Day Free Product Evaluation</strong>.
+            Targeting SMBs and technology enterprises managing 5+ laptops across <strong className="text-slate-300">any target city</strong> or nationwide technology corridors with the proposed <strong className="text-cobalt-300">90-Day Free Product Evaluation</strong>.
           </p>
         </div>
         <div className="flex items-center space-x-2 shrink-0">
@@ -130,7 +130,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
               <div className="flex flex-wrap items-center gap-3 pt-1 text-[11px] text-slate-400 font-mono">
                 <span className="flex items-center space-x-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                  <span>Target Clusters: Siliguri • Gangtok • Patna • Bhagalpur</span>
+                  <span>Target Coverage: Nationwide • Any Location or City</span>
                 </span>
                 <span>•</span>
                 <span className="text-indigo-300">Channels: Email (SMTP/Gmail) • WhatsApp (Meta v22.0) • LinkedIn</span>
@@ -444,11 +444,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
           <span className="text-slate-400 font-medium">Run Autonomous Pipelines On-Demand:</span>
           <div className="flex flex-wrap gap-2">
             <button
-              onClick={() => handleRunJob('company_discovery', { cities: ['Siliguri', 'Gangtok', 'Patna', 'Bhagalpur'] })}
+              onClick={() => handleRunJob('company_discovery', { cities: ['Siliguri', 'Gangtok', 'Patna', 'Bhagalpur', 'Bengaluru', 'Delhi', 'Mumbai'] })}
               disabled={runningJob !== null}
               className="px-2.5 py-1.5 bg-cobalt-950 hover:bg-cobalt-850 border border-cobalt-700 text-slate-200 rounded disabled:opacity-50"
             >
-              {runningJob === 'company_discovery' ? 'Running...' : 'Run Regional Discovery'}
+              {runningJob === 'company_discovery' ? 'Running...' : 'Run Nationwide Discovery'}
             </button>
             <button
               onClick={() => handleRunJob('lead_qualification', { recheck_stale_only: false })}

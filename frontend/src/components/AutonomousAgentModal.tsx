@@ -34,6 +34,7 @@ export const AutonomousAgentModal: React.FC<AutonomousAgentModalProps> = ({
   onCycleComplete,
 }) => {
   const [targetCity, setTargetCity] = useState<string>('All');
+  const [customCity, setCustomCity] = useState<string>('');
   const [maxProspects, setMaxProspects] = useState<number>(10);
   const [autoApprove, setAutoApprove] = useState<boolean>(true);
   const [channels, setChannels] = useState<{ email: boolean; whatsapp: boolean; linkedin: boolean }>({
@@ -68,8 +69,9 @@ export const AutonomousAgentModal: React.FC<AutonomousAgentModalProps> = ({
     if (channels.linkedin) activeChannels.push('linkedin');
 
     try {
+      const selectedCity = targetCity === 'Custom' ? (customCity.trim() || undefined) : (targetCity === 'All' ? undefined : targetCity);
       const res = await api.runAutonomousCycle({
-        target_city: targetCity === 'All' ? undefined : targetCity,
+        target_city: selectedCity,
         channels: activeChannels,
         max_prospects: maxProspects,
         auto_approve_simulation: autoApprove,
@@ -128,19 +130,57 @@ export const AutonomousAgentModal: React.FC<AutonomousAgentModalProps> = ({
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {/* Region */}
               <div>
-                <label className="block text-[11px] font-medium text-slate-400 mb-1">Target Cluster</label>
+                <label className="block text-[11px] font-medium text-slate-400 mb-1">Target Cluster / Geography</label>
                 <select
                   value={targetCity}
                   onChange={(e) => setTargetCity(e.target.value)}
                   disabled={isRunning}
-                  className="w-full bg-cobalt-950 border border-cobalt-800 rounded px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-cobalt-600"
+                  className="w-full bg-cobalt-950 border border-cobalt-800 rounded px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-cobalt-600 font-medium"
                 >
-                  <option value="All">All Markets (Siliguri, Gangtok, Patna, Bhagalpur)</option>
-                  <option value="Siliguri">Siliguri, WB (North Bengal Hub)</option>
-                  <option value="Gangtok">Gangtok, Sikkim (Alpine Tech Hub)</option>
-                  <option value="Patna">Patna, Bihar (Capital Tech Corridor)</option>
-                  <option value="Bhagalpur">Bhagalpur, Bihar (Commercial District)</option>
+                  <option value="All">All Nationwide Hubs (Multi-City)</option>
+                  <optgroup label="Regional Focus Hubs">
+                    <option value="Siliguri">Siliguri, WB (North Bengal Hub)</option>
+                    <option value="Gangtok">Gangtok, Sikkim (Alpine Tech Hub)</option>
+                    <option value="Patna">Patna, Bihar (Capital Tech Corridor)</option>
+                    <option value="Bhagalpur">Bhagalpur, Bihar (Commercial District)</option>
+                  </optgroup>
+                  <optgroup label="Tier 1 Metros & Tech Corridors">
+                    <option value="Bengaluru">Bengaluru, KA (Silicon Valley of India)</option>
+                    <option value="Hyderabad">Hyderabad, TG (HITEC City Hub)</option>
+                    <option value="Pune">Pune, MH (IT & Auto Cluster)</option>
+                    <option value="Mumbai">Mumbai, MH (Financial & SaaS Metro)</option>
+                    <option value="Delhi">Delhi NCR (National Capital Region)</option>
+                    <option value="Gurugram">Gurugram, HR (Enterprise Tech)</option>
+                    <option value="Noida">Noida, UP (IT & Tech Corridor)</option>
+                    <option value="Chennai">Chennai, TN (SaaS & Hardware Corridor)</option>
+                    <option value="Kolkata">Kolkata, WB (Salt Lake / New Town Hub)</option>
+                    <option value="Ahmedabad">Ahmedabad, GJ (Commercial & FinTech)</option>
+                  </optgroup>
+                  <optgroup label="Emerging Commercial Centers">
+                    <option value="Jaipur">Jaipur, RJ (Emerging Tech)</option>
+                    <option value="Indore">Indore, MP (Central India Hub)</option>
+                    <option value="Kochi">Kochi, Kerala (Infopark Hub)</option>
+                    <option value="Bhubaneswar">Bhubaneswar, Odisha (Smart Tech City)</option>
+                    <option value="Chandigarh">Chandigarh (Northern IT Park)</option>
+                    <option value="Guwahati">Guwahati, Assam (Northeast Gateway)</option>
+                    <option value="Lucknow">Lucknow, UP (State Capital Corridor)</option>
+                  </optgroup>
+                  <option value="Custom">✨ Custom City / Any Other Location...</option>
                 </select>
+
+                {targetCity === 'Custom' && (
+                  <div className="mt-2">
+                    <input
+                      type="text"
+                      placeholder="Type ANY city, town or state (e.g. Surat, Ranchi, Dehradun)..."
+                      value={customCity}
+                      onChange={(e) => setCustomCity(e.target.value)}
+                      disabled={isRunning}
+                      className="w-full bg-cobalt-950 border border-cobalt-700 rounded px-3 py-1.5 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-cobalt-500"
+                      autoFocus
+                    />
+                  </div>
+                )}
               </div>
 
               {/* Max Prospects */}

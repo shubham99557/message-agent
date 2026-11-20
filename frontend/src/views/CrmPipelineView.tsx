@@ -22,6 +22,10 @@ export const CrmPipelineView: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
 
+  const availableCities = Array.from(
+    new Set(['Siliguri', 'Gangtok', 'Patna', 'Bhagalpur', ...leads.map((l) => l.company?.city).filter(Boolean)])
+  );
+
   const statusDisplayMap: Record<string, string> = {
     new: 'New Lead',
     researching: 'Researched',
@@ -155,11 +159,10 @@ export const CrmPipelineView: React.FC = () => {
             onChange={(e) => setCityFilter(e.target.value)}
             className="bg-cobalt-950 border border-cobalt-800 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-cobalt-600"
           >
-            <option value="All">All Cities</option>
-            <option value="Siliguri">Siliguri</option>
-            <option value="Gangtok">Gangtok</option>
-            <option value="Patna">Patna</option>
-            <option value="Bhagalpur">Bhagalpur</option>
+            <option value="All">All Cities ({leads.length})</option>
+            {availableCities.map((c) => (
+              <option key={c} value={c}>{c}</option>
+            ))}
           </select>
 
           <select

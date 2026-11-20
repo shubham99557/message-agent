@@ -26,7 +26,7 @@ export const Header: React.FC<HeaderProps> = ({ currentView, title, subtitle }) 
         {/* City Filter / Market Badge */}
         <div className="hidden md:flex items-center space-x-1.5 px-2.5 py-1 rounded bg-cobalt-900 border border-cobalt-800 text-slate-300">
           <MapPin className="w-3.5 h-3.5 text-cobalt-400" />
-          <span className="font-mono text-[11px]">Siliguri • Gangtok • Patna • Bhagalpur</span>
+          <span className="font-mono text-[11px]">Nationwide Outreach • Any City</span>
         </div>
 
         {/* Safety & Sending Limit Badge */}

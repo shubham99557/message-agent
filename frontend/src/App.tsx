@@ -131,7 +131,7 @@ export const App: React.FC = () => {
           </form>
 
           <div className="pt-2 border-t border-cobalt-800/80 text-[11px] text-slate-400 text-center">
-            Targeting Siliguri, Gangtok, Patna & Bhagalpur
+            Nationwide B2B Outreach • Any City, State or Technology Hub
           </div>
         </div>
       </div>

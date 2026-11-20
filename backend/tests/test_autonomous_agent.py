@@ -36,6 +36,42 @@ def test_ensure_verified_targets(db_session):
         assert c.city in ["Siliguri", "Gangtok", "Patna", "Bhagalpur"]
 
 
+def test_ensure_verified_targets_custom_city(db_session):
+    """Verifies that ensure_verified_targets supports ANY custom city given by admin."""
+    # Pre-populate a custom city enterprise
+    comp = Company(
+        name="Bengaluru Cloud AI Corp",
+        website="https://bengalurucloud.example.org",
+        city="Bengaluru",
+        state="Karnataka",
+        country="India",
+        industry="Software Development",
+        laptop_count_verified=15,
+        laptop_count_evidence="Careers portal verified 15 developer laptops",
+        has_verified_5_plus_laptops=True,
+        employee_count_min=20,
+        employee_count_max=40,
+        employee_size_evidence="MCA filings",
+        decision_maker_name="Sunil Rao",
+        decision_maker_role="VP Engineering",
+        public_email="contact@bengalurucloud.example.org",
+        public_phone="+91-80-45678900",
+        verification_status="verified",
+        verification_method="public_evidence_review",
+        is_demo=False,
+    )
+    db_session.add(comp)
+    db_session.commit()
+
+    targets = ensure_verified_targets(db_session, target_city="Bengaluru")
+    assert len(targets) >= 1
+    found = next((t for t in targets if t.name == "Bengaluru Cloud AI Corp"), None)
+    assert found is not None
+    assert found.city == "Bengaluru"
+    assert found.has_verified_5_plus_laptops is True
+    assert found.qualification_score >= 80.0
+
+
 def test_get_autonomous_agent_status(db_session):
     """Verifies agent telemetry and status reporting."""
     status = get_autonomous_agent_status(db_session)

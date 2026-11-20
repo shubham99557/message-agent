@@ -27,6 +27,10 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onSelectCompany }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [total, setTotal] = useState(0);
   const [showAddModal, setShowAddModal] = useState(false);
+
+  const availableCities = Array.from(
+    new Set(['Siliguri', 'Gangtok', 'Patna', 'Bhagalpur', ...companies.map((c) => c.city).filter(Boolean)])
+  );
   const [newCompany, setNewCompany] = useState({
     name: '',
     website: '',
@@ -131,11 +135,10 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onSelectCompany }) => {
             onChange={(e) => setCityFilter(e.target.value)}
             className="bg-cobalt-950 border border-cobalt-800 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-cobalt-600"
           >
-            <option value="All">All Cities</option>
-            <option value="Siliguri">Siliguri</option>
-            <option value="Gangtok">Gangtok</option>
-            <option value="Patna">Patna</option>
-            <option value="Bhagalpur">Bhagalpur</option>
+            <option value="All">All Cities ({total})</option>
+            {availableCities.map((c) => (
+              <option key={c} value={c}>{c}</option>
+            ))}
           </select>
         </div>
       </div>
