@@ -56,3 +56,35 @@ class OutboundDispatchOutbox(Base):
 
     campaign = relationship("Campaign")
     created_by = relationship("User")
+
+
+class SchedulerJobRecord(Base):
+    """
+    Durable persistence of background scheduler job execution state.
+    Tracks last run, last success, next due, and total run count across application restarts.
+    """
+    __tablename__ = "scheduler_job_records"
+
+    id = Column(Integer, primary_key=True, index=True)
+    job_name = Column(String(100), unique=True, nullable=False, index=True)
+    last_run_at = Column(DateTime, nullable=True)
+    last_success_at = Column(DateTime, nullable=True)
+    last_status = Column(String(50), nullable=True)  # success, failed, blocked, skipped, executed
+    last_error = Column(Text, nullable=True)
+    total_runs = Column(Integer, default=0, nullable=False)
+    interval_seconds = Column(Integer, default=60, nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
+
+
+class SchedulerExecutionHistory(Base):
+    """
+    Audit log of scheduler job runs persisted to SQLite.
+    """
+    __tablename__ = "scheduler_execution_history"
+
+    id = Column(Integer, primary_key=True, index=True)
+    job_name = Column(String(100), nullable=False, index=True)
+    status = Column(String(50), nullable=False, index=True)  # success, failed, blocked, skipped, executed
+    detail = Column(Text, nullable=True)
+    duration_ms = Column(Integer, default=0)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, index=True)

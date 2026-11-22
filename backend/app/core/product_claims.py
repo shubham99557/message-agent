@@ -53,16 +53,20 @@ DISALLOWED_CLAIMS: List[str] = [
 
 def get_approved_claims_summary() -> str:
     """Returns a consolidated summary of approved product claims for AI prompts."""
+    from app.core.config import settings
     caps = "\n".join([
         f"- {c['title']}: {c['description']}"
         for c in APPROVED_PRODUCT_CAPABILITIES.values()
         if c.get("is_approved")
     ])
-    return (
-        f"Approved Capabilities:\n{caps}\n\n"
-        f"Approved Evaluation Program:\n"
-        f"- {APPROVED_EVALUATION_OFFER['program_name']}: {APPROVED_EVALUATION_OFFER['eligibility_requirement']}. {APPROVED_EVALUATION_OFFER['cost']}."
-    )
+    allow_eval = getattr(settings, "ALLOW_90_DAY_EVALUATION_OFFER", True)
+    eval_text = ""
+    if allow_eval and APPROVED_EVALUATION_OFFER.get("is_approved"):
+        eval_text = (
+            f"\n\nApproved Evaluation Program:\n"
+            f"- {APPROVED_EVALUATION_OFFER['program_name']}: {APPROVED_EVALUATION_OFFER['eligibility_requirement']}. {APPROVED_EVALUATION_OFFER['cost']}."
+        )
+    return f"Approved Capabilities:\n{caps}{eval_text}"
 
 
 def validate_message_against_claims(message_text: str) -> tuple[bool, List[str]]:

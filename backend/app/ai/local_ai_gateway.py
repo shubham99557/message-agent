@@ -68,7 +68,8 @@ class DeterministicFallbackProvider(BaseAIProvider):
                 "it_pain_points": "Workstation posture analysis pending",
                 "relevance_score": 0.0,
                 "confidence_rating": "low",
-                "missing_information": ["AI engine offline"],
+                "analysis_status": "ai_unavailable",
+                "missing_information": ["AI engine offline", "Manual research review required"],
             }
 
         # Qualification fallback - Rule 3.4: Never return synthetic passing 90.0 score when AI is offline
@@ -81,24 +82,26 @@ class DeterministicFallbackProvider(BaseAIProvider):
                 "factor_5_handles_customer_data": False,
                 "factor_6_acttrident_relevance": False,
                 "factor_7_accessible_contact": False,
-                "overall_status": "NEEDS_REVIEW",
+                "overall_status": "Unqualified",
                 "score": 0.0,
                 "reason": "Local AI engine is unavailable; automated qualification requires manual review.",
+                "evidence_completeness": "unverified",
             }
 
         # Reply classification fallback
         if "classify" in combined or "reply" in combined or "interested" in combined:
             return {
-                "classification": "needs_review",
+                "classification": "unknown",
                 "confidence": 0.0,
                 "reason": "Local AI engine unavailable; manual operator review required for inbound reply.",
-                "suggested_response": "",
+                "suggested_response": None,
+                "is_actionable": False,
             }
 
         # Email draft fallback
         return {
-            "subject": "Proposed 90-Day Enterprise Evaluation: ActTrident Workspace Protection",
-            "body_text": "I am reaching out from ActTrident regarding enterprise endpoint security and browser workspace protection. We are offering a proposed 90-day free product evaluation for qualifying companies managing 5+ laptops.",
+            "subject": "[AI Unavailable] Draft Generation Pending",
+            "body_text": "Local AI engine is currently offline or unreachable. Please verify Ollama is running ('ollama serve') to generate personalized copy.",
         }
 
     async def check_health(self) -> Dict[str, Any]:

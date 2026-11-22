@@ -252,12 +252,12 @@ def edit_email_draft(
 
 
 def bulk_handle_approvals(db: Session, bulk_req: BulkApprovalRequest, user_id: int) -> dict:
+    if bulk_req.action == "approve":
+        raise ValueError("Bulk outbound approval is strictly prohibited. Each message requires individual human operator review.")
+
     processed = 0
     for draft_id in bulk_req.draft_ids:
-        if bulk_req.action == "approve":
-            approve_email_draft(db, draft_id, user_id)
-            processed += 1
-        elif bulk_req.action == "reject":
+        if bulk_req.action == "reject":
             reject_email_draft(db, draft_id, user_id, bulk_req.reason)
             processed += 1
         elif bulk_req.action == "skip":

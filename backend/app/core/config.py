@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     OUTBOUND_RATE_LIMIT_EMAIL_PER_MIN: int = int(os.getenv("OUTBOUND_RATE_LIMIT_EMAIL_PER_MIN", "30"))
     OUTBOUND_RATE_LIMIT_WA_PER_MIN: int = int(os.getenv("OUTBOUND_RATE_LIMIT_WA_PER_MIN", "10"))
 
+    # Product Claims & Offer Guards
+    ALLOW_90_DAY_EVALUATION_OFFER: bool = os.getenv("ALLOW_90_DAY_EVALUATION_OFFER", "true").lower() in ("true", "1", "yes")
+    ALLOW_DESKTOP_SQLITE: bool = os.getenv("ALLOW_DESKTOP_SQLITE", "false").lower() in ("true", "1", "yes")
+
     # Live Outreach Safety Gate (Default: False — fail-closed)
     LIVE_SEND_ENABLED: bool = os.getenv("LIVE_SEND_ENABLED", "false").lower() in ("true", "1", "yes")
 
@@ -143,7 +147,7 @@ class Settings(BaseSettings):
         if env == "production":
             if not self.CREDENTIAL_ENCRYPTION_KEY or len(self.CREDENTIAL_ENCRYPTION_KEY.strip()) < 16:
                 raise ValueError("CRITICAL SECURITY ERROR: Production requires CREDENTIAL_ENCRYPTION_KEY (at least 16 characters).")
-            if self.DATABASE_URL.lower().startswith("sqlite"):
+            if self.DATABASE_URL.lower().startswith("sqlite") and not self.ALLOW_DESKTOP_SQLITE:
                 raise ValueError("CRITICAL SECURITY ERROR: SQLite is forbidden in production; configure PostgreSQL DATABASE_URL.")
             if self.WHATSAPP_ENABLED and (self.META_WA_ACCESS_TOKEN or "").strip():
                 if not (self.META_APP_SECRET or "").strip():

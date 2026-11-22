@@ -230,7 +230,21 @@ def readiness_check():
 _frontend_dist = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
 if _frontend_dist.exists():
     from fastapi.staticfiles import StaticFiles
-    app.mount("/", StaticFiles(directory=str(_frontend_dist), html=True), name="frontend")
+    from fastapi.responses import FileResponse
+
+    _assets_dir = _frontend_dist / "assets"
+    if _assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=str(_assets_dir)), name="frontend_assets")
+
+    @app.get("/{full_path:path}")
+    async def serve_spa_frontend(full_path: str):
+        file_candidate = _frontend_dist / full_path
+        if full_path and file_candidate.is_file():
+            return FileResponse(file_candidate)
+        index_file = _frontend_dist / "index.html"
+        if index_file.is_file():
+            return FileResponse(index_file)
+        raise HTTPException(status_code=404, detail="Frontend asset not found")
 
 
 if __name__ == "__main__":

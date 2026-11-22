@@ -14,7 +14,9 @@ REPLY_CATEGORIES = [
     "wrong_contact",
     "out_of_office",
     "unsubscribe",
-    "potential_partnership"
+    "potential_partnership",
+    "bounce",
+    "unknown"
 ]
 
 

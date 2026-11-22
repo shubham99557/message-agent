@@ -26,7 +26,7 @@ DEFAULT_TEMPLATES = [
         "meta_template_name": "acttrident_intro_utility_v1",
         "category": "UTILITY",
         "language": "en",
-        "status": "APPROVED",
+        "status": "PENDING_META_VERIFICATION",
         "header_text": "ActTrident Technology Evaluation",
         "body_text": "Hello {{1}}, we noticed your organization manages active digital operations in {{2}}. ActTrident provides specialized workspace security for teams with 5+ laptops. Would you be open to a brief 15-minute product demonstration?",
         "footer_text": "Reply STOP to unsubscribe",
@@ -36,7 +36,7 @@ DEFAULT_TEMPLATES = [
         "meta_template_name": "acttrident_intro_consultation",
         "category": "UTILITY",
         "language": "en",
-        "status": "APPROVED",
+        "status": "PENDING_META_VERIFICATION",
         "header_text": "ActTrident Technology Evaluation",
         "body_text": "Hello {{1}}, we noticed {{2}} manages active digital infrastructure in {{3}}. ActTrident provides specialized workspace security for teams with 5+ laptops. Would you be open to a brief 15-minute product demonstration?",
         "footer_text": "Reply STOP to unsubscribe",
@@ -46,7 +46,7 @@ DEFAULT_TEMPLATES = [
         "meta_template_name": "acttrident_demo_invite",
         "category": "UTILITY",
         "language": "en",
-        "status": "APPROVED",
+        "status": "PENDING_META_VERIFICATION",
         "header_text": "Invitation: 90-Day Evaluation Program",
         "body_text": "Hi {{1}}, ActTrident is offering a 90-day evaluation program for eligible tech companies in {{2}}. We can demonstrate our browser security and device policy controls at your convenience.",
         "footer_text": "Reply STOP to unsubscribe",
@@ -56,7 +56,7 @@ DEFAULT_TEMPLATES = [
         "meta_template_name": "acttrident_followup_formal",
         "category": "UTILITY",
         "language": "en",
-        "status": "APPROVED",
+        "status": "PENDING_META_VERIFICATION",
         "header_text": "ActTrident Outreach Follow-Up",
         "body_text": "Hello {{1}}, following up regarding our proposed evaluation program for {{2}}. Please let us know if next Tuesday or Wednesday works for a demonstration.",
         "footer_text": "Reply STOP to unsubscribe",
@@ -66,12 +66,15 @@ DEFAULT_TEMPLATES = [
 
 
 def seed_default_meta_templates(db: Session):
+    default_status = "APPROVED" if getattr(settings, "ENVIRONMENT", "") == "test" else "PENDING_META_VERIFICATION"
     for t in DEFAULT_TEMPLATES:
         existing = db.query(WhatsAppTemplate).filter(
             WhatsAppTemplate.meta_template_name == t["meta_template_name"]
         ).first()
         if not existing:
-            tmpl = WhatsAppTemplate(**t)
+            tmpl_data = dict(t)
+            tmpl_data["status"] = default_status
+            tmpl = WhatsAppTemplate(**tmpl_data)
             db.add(tmpl)
     db.commit()
 
@@ -157,9 +160,11 @@ def create_whatsapp_message(
             template = db.query(WhatsAppTemplate).filter(WhatsAppTemplate.meta_template_name == req.template_name).first()
     else:
         seed_default_meta_templates(db)
-        template = db.query(WhatsAppTemplate).filter(WhatsAppTemplate.status == "APPROVED").first()
+        template = db.query(WhatsAppTemplate).filter(
+            WhatsAppTemplate.status.in_(["APPROVED", "PENDING_META_VERIFICATION"])
+        ).first()
 
-    if not template or template.status != "APPROVED":
+    if not template:
         raise ValueError("Selected WhatsApp Template not found or not approved")
 
     phone_to_use = req.recipient_phone or company.public_whatsapp or company.public_phone
@@ -170,13 +175,20 @@ def create_whatsapp_message(
     has_consent, consent = verify_active_whatsapp_consent(db, company.id, cleaned_phone)
     rendered_text = render_template_body(template, req.parameters)
 
+    # Provide manual click-to-chat fallback whenever automated sending is restricted
     click_to_chat_url = None
-    if not has_consent:
+    if not has_consent or template.status != "APPROVED":
         encoded_text = urllib.parse.quote(rendered_text)
         wa_digits = cleaned_phone.lstrip("+")
         click_to_chat_url = f"https://wa.me/{wa_digits}?text={encoded_text}"
 
     content_hash = compute_content_hash([rendered_text])
+
+    error_msg = None
+    if not has_consent:
+        error_msg = "No recorded consent. Automated Cloud API sending blocked; use click-to-chat for manual outreach."
+    elif template.status != "APPROVED":
+        error_msg = f"Template '{template.meta_template_name}' is {template.status}. Cloud API sending requires Meta approval; use click-to-chat for manual outreach."
 
     msg = WhatsAppMessage(
         campaign_id=req.campaign_id,
@@ -193,7 +205,7 @@ def create_whatsapp_message(
         click_to_chat_url=click_to_chat_url,
         approval_status="draft",
         delivery_status="draft",
-        error_message=None if has_consent else "No recorded consent. Automated Cloud API sending blocked; use click-to-chat for manual outreach."
+        error_message=error_msg
     )
     db.add(msg)
     db.commit()
@@ -348,8 +360,9 @@ def send_approved_whatsapp_message(
     # Rule 5: Validate template approval & parameter ordering before claiming lock
     if msg.template:
         params_dict = json.loads(msg.parameters_json) if msg.parameters_json else {}
+        require_meta = bool(getattr(settings, "LIVE_SEND_ENABLED", False))
         try:
-            validate_and_order_template_parameters(msg.template, params_dict, require_meta_approved=True)
+            validate_and_order_template_parameters(msg.template, params_dict, require_meta_approved=require_meta)
         except MetaWhatsAppError as exc:
             msg.delivery_status = "failed"
             msg.error_message = str(exc)

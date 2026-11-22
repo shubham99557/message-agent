@@ -22,6 +22,7 @@ from app.models.whatsapp import WhatsAppTemplate, WhatsAppMessage
 from app.services.whatsapp_service import (
     send_approved_whatsapp_message,
     process_incoming_meta_webhook,
+    seed_default_meta_templates,
 )
 
 
@@ -194,6 +195,13 @@ def test_whatsapp_meta_send_real_wamid_ordered_params_and_idempotency(
         },
         headers=admin_auth_headers,
     )
+    tmpl = db.query(WhatsAppTemplate).filter(WhatsAppTemplate.meta_template_name == "acttrident_intro_utility_v1").first()
+    if not tmpl:
+        seed_default_meta_templates(db)
+        tmpl = db.query(WhatsAppTemplate).filter(WhatsAppTemplate.meta_template_name == "acttrident_intro_utility_v1").first()
+    tmpl.status = "APPROVED"
+    db.commit()
+
     draft = client.post(
         "/api/v1/whatsapp/draft",
         json={

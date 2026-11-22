@@ -116,14 +116,14 @@ def bulk_approve_endpoint(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(["admin", "manager"]))
 ):
-    """Bulk approvals are restricted strictly to managers and administrators with rate bounds."""
-    if bulk_req.action == "approve" and getattr(settings, "LIVE_SEND_ENABLED", False):
+    """Bulk approvals are strictly forbidden for outbound messages. Bulk skip/reject allowed with bounds."""
+    if bulk_req.action == "approve":
         raise HTTPException(
             status_code=400,
-            detail="Bulk approval is disallowed when LIVE_SEND_ENABLED is active. Each live outreach message requires individual human operator review."
+            detail="Bulk outbound approval is strictly prohibited. Each outreach message requires individual human operator review."
         )
     if len(bulk_req.draft_ids) > 100:
-        raise HTTPException(status_code=400, detail="Bulk approval limit is 100 drafts per request.")
+        raise HTTPException(status_code=400, detail="Bulk operation limit is 100 drafts per request.")
     result = bulk_handle_approvals(db, bulk_req, current_user.id)
     record_audit_log(
         db=db,

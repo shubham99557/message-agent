@@ -60,6 +60,57 @@ class LocalScheduler:
 
         self.execution_log: List[Dict[str, Any]] = []
 
+    def load_persisted_state(self, db=None):
+        """Loads durable last_run timestamps from SQLite SchedulerJobRecord table."""
+        try:
+            session = db or SessionLocal()
+            try:
+                from app.models.orchestration import SchedulerJobRecord
+                records = session.query(SchedulerJobRecord).all()
+                for rec in records:
+                    if rec.job_name in self.last_run and rec.last_run_at:
+                        dt = rec.last_run_at
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=timezone.utc)
+                        self.last_run[rec.job_name] = dt
+            finally:
+                if not db:
+                    session.close()
+        except Exception as exc:
+            logger.debug(f"Could not load persisted scheduler state: {exc}")
+
+    def _persist_job_run(self, db, job_name: str, status: str, detail: Optional[str] = None, error: Optional[str] = None):
+        """Updates SchedulerJobRecord and logs to SchedulerExecutionHistory in SQLite."""
+        try:
+            from app.models.orchestration import SchedulerJobRecord, SchedulerExecutionHistory
+            now = datetime.now(timezone.utc)
+            rec = db.query(SchedulerJobRecord).filter(SchedulerJobRecord.job_name == job_name).first()
+            if not rec:
+                rec = SchedulerJobRecord(
+                    job_name=job_name,
+                    interval_seconds=self.intervals_sec.get(job_name, 60),
+                )
+                db.add(rec)
+            rec.last_run_at = now
+            rec.last_status = status
+            rec.total_runs = (rec.total_runs or 0) + 1
+            if status in ("success", "executed"):
+                rec.last_success_at = now
+                rec.last_error = None
+            elif error:
+                rec.last_error = str(error)[:500]
+
+            hist = SchedulerExecutionHistory(
+                job_name=job_name,
+                status=status,
+                detail=detail or (f"Error: {error}" if error else None),
+                created_at=now,
+            )
+            db.add(hist)
+            db.commit()
+        except Exception as exc:
+            logger.debug(f"Could not persist scheduler job record: {exc}")
+
     def _log_event(self, job_name: str, status: str, detail: str):
         event = {
             "job": job_name,
@@ -75,6 +126,7 @@ class LocalScheduler:
     def start(self):
         if self.is_running:
             return
+        self.load_persisted_state()
         self._stop_event.clear()
         self.is_running = True
         self.is_paused = False
@@ -128,31 +180,39 @@ class LocalScheduler:
             if not last or (now - last).total_seconds() >= interval:
                 self.trigger_job(job_name)
 
-    def trigger_job(self, job_name: str) -> Dict[str, Any]:
+    def trigger_job(self, job_name: str, db=None) -> Dict[str, Any]:
         """Executes a specific automation task synchronously or as part of the scheduled loop."""
         now = datetime.now(timezone.utc)
         self.last_run[job_name] = now
 
-        db = SessionLocal()
+        session = db or SessionLocal()
         try:
+            res: Dict[str, Any] = {}
             if job_name == "outbox_dispatch":
-                return self._job_outbox_dispatch(db)
+                res = self._job_outbox_dispatch(session)
             elif job_name == "followup_evaluation":
-                return self._job_followup_evaluation(db)
+                res = self._job_followup_evaluation(session)
             elif job_name == "inbox_sync":
-                return self._job_inbox_sync(db)
+                res = self._job_inbox_sync(session)
             elif job_name == "nightly_discovery_research":
-                return self._job_nightly_discovery(db)
+                res = self._job_nightly_discovery(session)
             elif job_name == "database_backup":
-                return self._job_database_backup()
+                res = self._job_database_backup()
             else:
                 raise ValueError(f"Unknown scheduler job: {job_name}")
+
+            job_status = res.get("status", "executed")
+            detail_msg = str(res.get("reason") or res.get("backup_file") or f"Executed successfully")
+            self._persist_job_run(session, job_name, status=job_status, detail=detail_msg)
+            return res
         except Exception as exc:
             self.task_stats["errors"] += 1
             self._log_event(job_name, "failed", str(exc))
+            self._persist_job_run(session, job_name, status="failed", error=str(exc))
             return {"job": job_name, "status": "failed", "error": str(exc)}
         finally:
-            db.close()
+            if not db:
+                session.close()
 
     def _job_outbox_dispatch(self, db) -> Dict[str, Any]:
         ks_active, ks_reason = is_kill_switch_active(db)
@@ -228,6 +288,29 @@ class LocalScheduler:
             else:
                 next_runs[job_name] = "immediately_due"
 
+        recent_events = self.execution_log[:15]
+        if db:
+            try:
+                from app.models.orchestration import SchedulerExecutionHistory
+                db_hist = (
+                    db.query(SchedulerExecutionHistory)
+                    .order_by(SchedulerExecutionHistory.created_at.desc())
+                    .limit(15)
+                    .all()
+                )
+                if db_hist:
+                    recent_events = [
+                        {
+                            "job": h.job_name,
+                            "status": h.status,
+                            "detail": h.detail,
+                            "timestamp": h.created_at.isoformat() if h.created_at else "",
+                        }
+                        for h in db_hist
+                    ]
+            except Exception:
+                pass
+
         return {
             "is_running": self.is_running,
             "is_paused": self.is_paused,
@@ -240,7 +323,7 @@ class LocalScheduler:
             "next_run": next_runs,
             "intervals_sec": self.intervals_sec,
             "task_stats": self.task_stats,
-            "recent_events": self.execution_log[:15],
+            "recent_events": recent_events,
         }
 
 

@@ -162,6 +162,12 @@ class OllamaProvider(BaseAIProvider):
             logger.warning(f"Failed to query Ollama models: {exc}")
             return []
 
+    async def check_model_exists(self, model_name: str) -> bool:
+        """Verifies if a specific model tag is available in the local library."""
+        models = await self.list_models()
+        target = model_name.strip().lower()
+        return any(target in (m.get("name") or "").lower() for m in models)
+
     async def check_health(self) -> Dict[str, Any]:
         """Performs a comprehensive diagnostic health check against local Ollama."""
         start = time.time()

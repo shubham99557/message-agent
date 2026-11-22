@@ -7,6 +7,7 @@ from app.models.company import Company, CompanyContact
 from app.models.campaign import Campaign
 from app.models.email import EmailDraft
 from app.schemas.email import EmailGenerateRequest
+from app.core.config import settings
 from app.core.product_claims import validate_message_against_claims
 
 logger = logging.getLogger("acttrident.email_generator")
@@ -157,8 +158,6 @@ def generate_email_draft(
         contact = db.query(CompanyContact).filter(CompanyContact.id == contact_id).first()
 
     recipient_email = (contact.email if contact else None) or company.public_email or company.decision_maker_email
-    if recipient_email and ("example.com" in recipient_email.lower() or "example.org" in recipient_email.lower()):
-        recipient_email = None
 
     recipient_name = (contact.name if contact else None) or company.decision_maker_name
 

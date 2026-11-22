@@ -9,6 +9,7 @@ class QualificationFactorResult(BaseModel):
     score_weight: float
     evidence: str
     evidence_source: Optional[str] = None
+    verification_state: str = "UNKNOWN"  # VERIFIED, CLAIMED, UNKNOWN, CONFLICTING, OUTDATED
     confidence: float = 1.0
     explanation: Optional[str] = None
 
