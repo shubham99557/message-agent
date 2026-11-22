@@ -196,9 +196,18 @@ def send_approved_email(
             message=f"Idempotency Guard: Approved draft version was already dispatched (attempt #{prior_success.attempt_number})."
         )
 
-    # 4. SUPPRESSION LIST ENFORCEMENT
+    # 4. RECIPIENT VALIDATION & SUPPRESSION LIST ENFORCEMENT
+    if not draft.recipient_email or not draft.recipient_email.strip():
+        return EmailSendResult(
+            draft_id=draft_id,
+            status="failed",
+            provider=draft.provider,
+            message="Security Block: Email has no recipient email address (missing_recipient)"
+        )
+
+    clean_recipient = draft.recipient_email.strip().lower()
     suppressed = db.query(SuppressionList).filter(
-        SuppressionList.identifier == draft.recipient_email.strip().lower()
+        SuppressionList.identifier == clean_recipient
     ).first()
     if suppressed:
         draft.approval_status = "rejected"

@@ -18,6 +18,7 @@ import { InboxView } from './views/InboxView';
 import { CrmPipelineView } from './views/CrmPipelineView';
 import { AnalyticsView } from './views/AnalyticsView';
 import { IntegrationsView } from './views/IntegrationsView';
+import { AutomationCenterView } from './views/AutomationCenterView';
 import { SettingsView } from './views/SettingsView';
 
 import { Shield, Lock } from 'lucide-react';
@@ -160,6 +161,7 @@ export const App: React.FC = () => {
       case 'crm': return { title: 'CRM Sales Pipeline', sub: '16-stage opportunity and 90-day evaluation tracking' };
       case 'analytics': return { title: 'Campaign Analytics', sub: 'Genuine conversion metrics with authentic denominators' };
       case 'integrations': return { title: 'Integrations & Credentials', sub: 'Configure AI, Gmail/SMTP and Meta WhatsApp Cloud API' };
+      case 'automation': return { title: 'Automation Center', sub: 'Persistent background scheduler, IST business hours guards, and execution telemetry' };
       case 'settings': return { title: 'Settings & Audit Logs', sub: 'Security audit trail and global suppression registry' };
       default: return { title: 'ActTrident Agent', sub: '' };
     }
@@ -202,6 +204,7 @@ export const App: React.FC = () => {
           {currentView === 'crm' && <CrmPipelineView />}
           {currentView === 'analytics' && <AnalyticsView />}
           {currentView === 'integrations' && <IntegrationsView />}
+          {currentView === 'automation' && <AutomationCenterView />}
           {currentView === 'settings' && <SettingsView />}
         </main>
       </div>

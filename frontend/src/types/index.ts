@@ -12,6 +12,7 @@ export type ViewType =
   | 'crm'
   | 'analytics'
   | 'integrations'
+  | 'automation'
   | 'settings';
 
 export interface Company {

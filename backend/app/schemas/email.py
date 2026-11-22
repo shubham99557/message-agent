@@ -33,7 +33,7 @@ class EmailDraftResponse(BaseModel):
     campaign_id: Optional[int] = None
     company_id: int
     contact_id: Optional[int] = None
-    recipient_email: str
+    recipient_email: Optional[str] = None
     recipient_name: Optional[str] = None
     subject: str
     body_html: str

@@ -61,6 +61,7 @@ class CompanyBase(BaseModel):
     
     laptop_count_verified: Optional[int] = None
     laptop_count_evidence: Optional[str] = None
+    laptop_fleet_status: Optional[str] = "UNKNOWN"  # VERIFIED, CLAIMED, UNKNOWN
     has_verified_5_plus_laptops: bool = False
     
     public_email: Optional[str] = None
@@ -93,6 +94,7 @@ class CompanyUpdate(BaseModel):
     employee_size_evidence: Optional[str] = None
     laptop_count_verified: Optional[int] = None
     laptop_count_evidence: Optional[str] = None
+    laptop_fleet_status: Optional[str] = None
     has_verified_5_plus_laptops: Optional[bool] = None
     public_email: Optional[str] = None
     public_phone: Optional[str] = None
@@ -114,6 +116,7 @@ class CompanyVerifyRequest(BaseModel):
     notes: Optional[str] = None
     laptop_count_verified: Optional[int] = None
     laptop_count_evidence: Optional[str] = None
+    laptop_fleet_status: Optional[str] = None
     public_email: Optional[str] = None
     public_phone: Optional[str] = None
     decision_maker_name: Optional[str] = None

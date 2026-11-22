@@ -1,11 +1,15 @@
 from datetime import datetime, timezone
 from typing import Optional
+import logging
 from sqlalchemy.orm import Session
 
 from app.models.company import Company, CompanyContact
 from app.models.campaign import Campaign
 from app.models.email import EmailDraft
 from app.schemas.email import EmailGenerateRequest
+from app.core.product_claims import validate_message_against_claims
+
+logger = logging.getLogger("acttrident.email_generator")
 
 
 def build_email_content(
@@ -153,8 +157,8 @@ def generate_email_draft(
         contact = db.query(CompanyContact).filter(CompanyContact.id == contact_id).first()
 
     recipient_email = (contact.email if contact else None) or company.public_email or company.decision_maker_email
-    if not recipient_email:
-        recipient_email = f"contact@{company.name.lower().replace(' ', '')}.example.com"
+    if recipient_email and ("example.com" in recipient_email.lower() or "example.org" in recipient_email.lower()):
+        recipient_email = None
 
     recipient_name = (contact.name if contact else None) or company.decision_maker_name
 
@@ -164,6 +168,13 @@ def generate_email_draft(
         tone=tone,
         custom_notes=custom_notes
     )
+
+    # Validate against central product claims
+    valid_claims, claim_warnings = validate_message_against_claims(f"{subject}\n{body_text}")
+    if not valid_claims:
+        logger.warning(f"Claims validation warnings for {company.name}: {claim_warnings}")
+
+    approval_status = "draft" if recipient_email else "missing_recipient"
 
     draft = EmailDraft(
         campaign_id=campaign_id,
@@ -175,14 +186,14 @@ def generate_email_draft(
         body_text=body_text,
         body_html=body_html,
         tone=tone,
-        approval_status="draft",  # ALWAYS draft initially (Mandatory Human Approval)
+        approval_status=approval_status,  # Mandatory Human Approval: draft or missing_recipient
         provider="smtp"
     )
     db.add(draft)
 
-    # Update CRM lead status to 'draft_ready' if currently 'new' or 'qualified'
+    # Update CRM lead status to 'draft_ready' if currently 'new' or 'qualified' and email is available
     if company.lead and company.lead.pipeline_status in ["new", "researching", "qualified"]:
-        company.lead.pipeline_status = "draft_ready"
+        company.lead.pipeline_status = "draft_ready" if recipient_email else "needs_contact_info"
 
     db.commit()
     db.refresh(draft)

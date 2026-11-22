@@ -16,6 +16,7 @@ import {
   Layers,
   Settings,
   Shield,
+  Clock,
   LogOut
 } from 'lucide-react';
 
@@ -60,6 +61,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'crm' as ViewType, label: 'CRM Pipeline', icon: GitBranch },
     { id: 'analytics' as ViewType, label: 'Analytics', icon: BarChart3 },
     { id: 'integrations' as ViewType, label: 'Integrations', icon: Layers },
+    { id: 'automation' as ViewType, label: 'Automation Center', icon: Clock },
     { id: 'settings' as ViewType, label: 'Settings', icon: Settings },
   ];
 

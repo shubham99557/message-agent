@@ -24,6 +24,7 @@ class Company(Base):
     # Managed Laptops / Devices (Strictly separated from employee count!)
     laptop_count_verified = Column(Integer, nullable=True)
     laptop_count_evidence = Column(Text, nullable=True)
+    laptop_fleet_status = Column(String(50), default="UNKNOWN", nullable=False)  # VERIFIED, CLAIMED, UNKNOWN
     has_verified_5_plus_laptops = Column(Boolean, default=False)
     
     # Primary public business channels

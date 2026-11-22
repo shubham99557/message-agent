@@ -42,8 +42,14 @@ def find_duplicate_company(db: Session, name: str, website: Optional[str] = None
 
 
 def create_company(db: Session, comp_in: CompanyCreate, user_id: Optional[int] = None) -> Company:
-    # Validate verified laptops: never label as having 5+ laptops without evidence
+    # Validate verified laptops: strictly track states VERIFIED, CLAIMED, UNKNOWN
     has_5_laptops = bool(comp_in.laptop_count_verified and comp_in.laptop_count_verified >= 5 and comp_in.laptop_count_evidence)
+    if has_5_laptops:
+        fleet_status = "VERIFIED"
+    elif comp_in.laptop_count_verified and comp_in.laptop_count_verified >= 5:
+        fleet_status = "CLAIMED"
+    else:
+        fleet_status = "UNKNOWN"
 
     # Quarantine .example.com / demo fixtures so fictional domains are never marked as verified real businesses
     auto_demo = bool(
@@ -67,6 +73,7 @@ def create_company(db: Session, comp_in: CompanyCreate, user_id: Optional[int] =
         employee_size_evidence=comp_in.employee_size_evidence,
         laptop_count_verified=comp_in.laptop_count_verified,
         laptop_count_evidence=comp_in.laptop_count_evidence,
+        laptop_fleet_status=fleet_status,
         has_verified_5_plus_laptops=has_5_laptops,
         public_email=comp_in.public_email.strip() if comp_in.public_email else None,
         public_phone=comp_in.public_phone.strip() if comp_in.public_phone else None,
@@ -183,13 +190,20 @@ def update_company(db: Session, company_id: int, comp_update: CompanyUpdate) -> 
     for field, value in update_data.items():
         setattr(company, field, value)
 
-    # Recalculate laptop verification flag if updated
+    # Recalculate laptop verification flag and fleet status if updated
     if "laptop_count_verified" in update_data or "laptop_count_evidence" in update_data:
-        company.has_verified_5_plus_laptops = bool(
+        has_5 = bool(
             company.laptop_count_verified and
             company.laptop_count_verified >= 5 and
             company.laptop_count_evidence
         )
+        company.has_verified_5_plus_laptops = has_5
+        if has_5:
+            company.laptop_fleet_status = "VERIFIED"
+        elif company.laptop_count_verified and company.laptop_count_verified >= 5:
+            company.laptop_fleet_status = "CLAIMED"
+        else:
+            company.laptop_fleet_status = "UNKNOWN"
 
     company.date_last_verified = datetime.now(timezone.utc)
     db.commit()

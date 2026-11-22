@@ -514,4 +514,13 @@ export const api = {
     request<any>('/ai/test', { method: 'POST', body: JSON.stringify({ prompt }) }),
   getDesktopStorageStatus: () => request<any>('/ai/storage'),
   triggerInstantBackup: () => request<any>('/ai/backup', { method: 'POST' }),
+
+  // Persistent Local Automation & Scheduler
+  getAutomationStatus: () => request<any>('/automation/status'),
+  startAutomation: () => request<any>('/automation/start', { method: 'POST' }),
+  stopAutomation: () => request<any>('/automation/stop', { method: 'POST' }),
+  pauseAutomation: () => request<any>('/automation/pause', { method: 'POST' }),
+  resumeAutomation: () => request<any>('/automation/resume', { method: 'POST' }),
+  triggerAutomationJob: (job_name: string) =>
+    request<any>('/automation/trigger-job', { method: 'POST', body: JSON.stringify({ job_name }) }),
 };

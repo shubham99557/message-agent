@@ -125,3 +125,33 @@ def check_storage_health() -> Dict[str, Any]:
         "backups_stored": backups_count,
         "wal_mode_enabled": True,
     }
+
+
+def create_database_backup() -> Dict[str, Any]:
+    """Creates a point-in-time SQLite database backup into %LOCALAPPDATA%\\ActTrident\\backups."""
+    from datetime import datetime, timezone
+    root = get_acttrident_data_dir()
+    backups_dir = root / "backups"
+    backups_dir.mkdir(parents=True, exist_ok=True)
+
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    out_file = backups_dir / f"acttrident_backup_{timestamp}.db"
+
+    db_path = resolve_local_database_path()
+    if db_path.exists():
+        try:
+            conn = sqlite3.connect(str(db_path))
+            dest = sqlite3.connect(str(out_file))
+            conn.backup(dest)
+            dest.close()
+            conn.close()
+            return {
+                "status": "success",
+                "backup_file": str(out_file),
+                "timestamp": timestamp,
+                "size_bytes": out_file.stat().st_size,
+            }
+        except Exception as exc:
+            logger.warning(f"Database backup failed: {exc}")
+            return {"status": "failed", "error": str(exc)}
+    return {"status": "skipped", "reason": "Database file not found"}

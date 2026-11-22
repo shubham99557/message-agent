@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
+from app.core.config import settings
 from app.api.deps import get_db, get_current_user, require_role
 from app.models.user import User
 from app.schemas.email import EmailDraftResponse, EmailDraftUpdate, BulkApprovalRequest
@@ -116,6 +117,11 @@ def bulk_approve_endpoint(
     current_user: User = Depends(require_role(["admin", "manager"]))
 ):
     """Bulk approvals are restricted strictly to managers and administrators with rate bounds."""
+    if bulk_req.action == "approve" and getattr(settings, "LIVE_SEND_ENABLED", False):
+        raise HTTPException(
+            status_code=400,
+            detail="Bulk approval is disallowed when LIVE_SEND_ENABLED is active. Each live outreach message requires individual human operator review."
+        )
     if len(bulk_req.draft_ids) > 100:
         raise HTTPException(status_code=400, detail="Bulk approval limit is 100 drafts per request.")
     result = bulk_handle_approvals(db, bulk_req, current_user.id)

@@ -6,6 +6,7 @@ from app.core.database import Base
 
 EMAIL_STATES = [
     "draft",
+    "missing_recipient",
     "awaiting_approval",
     "approved",
     "queued",
@@ -32,7 +33,7 @@ class EmailDraft(Base):
     company_id = Column(Integer, ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
     contact_id = Column(Integer, ForeignKey("company_contacts.id", ondelete="SET NULL"), nullable=True)
     
-    recipient_email = Column(String(255), nullable=False)
+    recipient_email = Column(String(255), nullable=True)
     recipient_name = Column(String(255), nullable=True)
     subject = Column(String(512), nullable=False)
     body_html = Column(Text, nullable=False)

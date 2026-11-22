@@ -89,6 +89,10 @@ async def lifespan(app: FastAPI):
             seed_default_admin(db)
         seed_default_meta_templates(db)
         apply_saved_integrations(db)
+
+        # Start persistent local background scheduler
+        from app.services.local_scheduler import local_scheduler
+        local_scheduler.start()
     except Exception as exc:
         logger.warning(f"Startup bootstrap notice: {redact_sensitive_text(str(exc))}")
     finally:
@@ -96,6 +100,13 @@ async def lifespan(app: FastAPI):
 
     logger.info(f"ActTrident API started (environment={settings.ENVIRONMENT})")
     yield
+
+    # Clean shutdown of local scheduler thread
+    try:
+        from app.services.local_scheduler import local_scheduler
+        local_scheduler.stop()
+    except Exception:
+        pass
 
 
 app = FastAPI(

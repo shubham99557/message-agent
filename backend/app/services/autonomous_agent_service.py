@@ -228,6 +228,7 @@ def ensure_verified_targets(db: Session, target_city: Optional[str] = None, max_
                 linkedin_url=item["linkedin_url"],
                 laptop_count_verified=item["laptop_count_verified"],
                 laptop_count_evidence=item["laptop_count_evidence"],
+                laptop_fleet_status="VERIFIED",
                 has_verified_5_plus_laptops=True,
                 employee_count_min=item["employee_count_min"],
                 employee_count_max=item["employee_count_max"],
@@ -282,6 +283,7 @@ def ensure_verified_targets(db: Session, target_city: Optional[str] = None, max_
             comp.linkedin_url = item["linkedin_url"]
             comp.laptop_count_verified = item["laptop_count_verified"]
             comp.laptop_count_evidence = item["laptop_count_evidence"]
+            comp.laptop_fleet_status = "VERIFIED"
             comp.has_verified_5_plus_laptops = True
             comp.employee_count_min = item["employee_count_min"]
             comp.employee_count_max = item["employee_count_max"]
@@ -410,12 +412,11 @@ def ensure_verified_targets(db: Session, target_city: Optional[str] = None, max_
                 ).first()
 
                 if not existing_comp:
-                    domain_hint = ""
-                    if website:
-                        domain_hint = website.replace("https://", "").replace("http://", "").split("/")[0].strip()
-
                     extracted_city = addr.get("city") or addr.get("town") or addr.get("municipality") or query_city
                     extracted_state = addr.get("state") or "India"
+
+                    raw_email = extra.get("email") or extra.get("contact:email")
+                    raw_phone = extra.get("phone") or extra.get("contact:phone")
 
                     new_comp = Company(
                         name=sanitize_untrusted_text(d_name[:120]),
@@ -425,20 +426,21 @@ def ensure_verified_targets(db: Session, target_city: Optional[str] = None, max_
                         city=extracted_city,
                         state=extracted_state,
                         country="India",
-                        public_email=extra.get("email") or extra.get("contact:email") or (f"contact@{domain_hint}" if domain_hint else None),
-                        public_phone=extra.get("phone") or extra.get("contact:phone"),
-                        public_whatsapp=extra.get("phone") or extra.get("contact:phone"),
-                        laptop_count_verified=6,
-                        laptop_count_evidence="OpenStreetMap corporate infrastructure assessment",
-                        has_verified_5_plus_laptops=True,
-                        employee_count_min=8,
-                        employee_count_max=25,
-                        employee_size_evidence="OpenStreetMap business registry",
-                        decision_maker_name="Head of Operations",
-                        decision_maker_role="Director",
-                        decision_maker_email=extra.get("email") or extra.get("contact:email") or (f"director@{domain_hint}" if domain_hint else None),
-                        verification_status="verified",
-                        verification_method="public_evidence_review",
+                        public_email=raw_email,
+                        public_phone=raw_phone,
+                        public_whatsapp=raw_phone,
+                        laptop_count_verified=None,
+                        laptop_count_evidence=None,
+                        laptop_fleet_status="UNKNOWN",
+                        has_verified_5_plus_laptops=False,
+                        employee_count_min=None,
+                        employee_count_max=None,
+                        employee_size_evidence=None,
+                        decision_maker_name=None,
+                        decision_maker_role=None,
+                        decision_maker_email=None,
+                        verification_status="unverified",
+                        verification_method="public_directory_discovery",
                         is_demo=False,
                         date_last_verified=now_utc,
                     )
@@ -447,13 +449,13 @@ def ensure_verified_targets(db: Session, target_city: Optional[str] = None, max_
 
                     db.add(ContactSource(
                         company_id=new_comp.id,
-                        field_name="laptop_count_verified",
+                        field_name="directory_listing",
                         source_url=website or f"https://nominatim.openstreetmap.org/search?q={query_city}",
                         source_type="openstreetmap_public",
-                        extracted_text=f"Verified 6+ laptops: {d_name} in {extracted_city}",
-                        verification_status="verified",
-                        verification_method="public_evidence_review",
-                        confidence=0.85,
+                        extracted_text=f"Public directory listing for {d_name} in {extracted_city}. Laptop fleet unverified.",
+                        verification_status="unverified",
+                        verification_method="public_directory_discovery",
+                        confidence=0.75,
                         retrieved_at=now_utc,
                     ))
 
@@ -650,8 +652,14 @@ async def run_autonomous_outreach_cycle(
                 draft = existing_draft
 
             # Step 7: Approval & Outbox Staging
-            if auto_approve_simulation and draft.approval_status in ("draft", "awaiting_approval"):
-                # Human / Automated Safe Pre-Approval for Simulation
+            can_simulate_approve = (
+                auto_approve_simulation
+                and not getattr(settings, "LIVE_SEND_ENABLED", False)
+                and draft.approval_status in ("draft", "awaiting_approval")
+                and bool(draft.recipient_email)
+            )
+            if can_simulate_approve:
+                # Human / Automated Safe Pre-Approval for Simulation ONLY
                 approved_draft = approve_email_draft(db, draft_id=draft.id, user_id=user_id or 1)
                 if approved_draft:
                     approved_count += 1

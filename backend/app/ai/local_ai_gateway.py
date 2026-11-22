@@ -62,50 +62,50 @@ class DeterministicFallbackProvider(BaseAIProvider):
         # Research dossier fallback
         if "dossier" in combined or "intelligence" in combined or "tech_stack" in combined:
             return {
-                "summary": "Enterprise technological operations recorded in target cluster. Managed laptops verified from documented source evidence.",
-                "products_and_services": "Software development and cloud infrastructure solutions.",
-                "tech_stack_observations": "Standard cloud platforms and hybrid workstation deployments.",
-                "it_pain_points": "Browser session isolation and workstation credential protection.",
-                "relevance_score": 88.0,
-                "confidence_rating": "high",
-                "missing_information": [],
+                "summary": "Local AI model is unavailable. Deep research dossier requires automated AI analysis or manual operator review.",
+                "products_and_services": "Not analyzed (AI engine offline)",
+                "tech_stack_observations": "Not analyzed (AI engine offline)",
+                "it_pain_points": "Workstation posture analysis pending",
+                "relevance_score": 0.0,
+                "confidence_rating": "low",
+                "missing_information": ["AI engine offline"],
             }
 
-        # Qualification fallback
+        # Qualification fallback - Rule 3.4: Never return synthetic passing 90.0 score when AI is offline
         if "qualify" in combined or "factor" in combined:
             return {
-                "factor_1_tech_related": True,
-                "factor_2_at_least_5_people": True,
-                "factor_3_managed_laptops_evidence": True,
-                "factor_4_browser_workflows": True,
-                "factor_5_handles_customer_data": True,
-                "factor_6_acttrident_relevance": True,
-                "factor_7_accessible_contact": True,
-                "overall_status": "High priority",
-                "score": 90.0,
-                "reason": "Strong alignment: verified technical operations with 5+ documented managed laptops.",
+                "factor_1_tech_related": False,
+                "factor_2_at_least_5_people": False,
+                "factor_3_managed_laptops_evidence": False,
+                "factor_4_browser_workflows": False,
+                "factor_5_handles_customer_data": False,
+                "factor_6_acttrident_relevance": False,
+                "factor_7_accessible_contact": False,
+                "overall_status": "NEEDS_REVIEW",
+                "score": 0.0,
+                "reason": "Local AI engine is unavailable; automated qualification requires manual review.",
             }
 
         # Reply classification fallback
         if "classify" in combined or "reply" in combined or "interested" in combined:
             return {
-                "classification": "interested",
-                "confidence": 0.95,
-                "reason": "Prospect requested demonstration or evaluation details.",
-                "suggested_response": "Thank you for getting back to us. We would be delighted to schedule a brief 15-minute walkthrough of ActTrident.",
+                "classification": "needs_review",
+                "confidence": 0.0,
+                "reason": "Local AI engine unavailable; manual operator review required for inbound reply.",
+                "suggested_response": "",
             }
 
         # Email draft fallback
         return {
-            "subject": "ActTrident 90-day Evaluation Program",
-            "body_text": "We would welcome the opportunity to share a concise 15-minute product overview.",
+            "subject": "Proposed 90-Day Enterprise Evaluation: ActTrident Workspace Protection",
+            "body_text": "I am reaching out from ActTrident regarding enterprise endpoint security and browser workspace protection. We are offering a proposed 90-day free product evaluation for qualifying companies managing 5+ laptops.",
         }
 
     async def check_health(self) -> Dict[str, Any]:
         return {
-            "status": "ready",
+            "status": "fallback_active",
             "provider": "deterministic",
-            "message": "Deterministic rule engine active and zero-failure ready.",
+            "message": "Fallback rule engine active (Ollama offline or not responding).",
         }
 
     async def list_models(self) -> List[Dict[str, Any]]:

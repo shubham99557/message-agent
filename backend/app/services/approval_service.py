@@ -112,6 +112,10 @@ def approve_email_draft(db: Session, draft_id: int, user_id: int) -> Optional[Em
     draft = db.query(EmailDraft).filter(EmailDraft.id == draft_id).first()
     if not draft:
         return None
+    if not draft.recipient_email or not draft.recipient_email.strip():
+        draft.approval_status = "missing_recipient"
+        db.commit()
+        return None
     if draft.approval_status in ("sending", "sent", "delivered"):
         return draft
 

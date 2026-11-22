@@ -24,16 +24,16 @@ class ResearchDossierOutput(BaseModel):
 
 
 class QualificationAIOutput(BaseModel):
-    factor_1_tech_related: bool = True
-    factor_2_at_least_5_people: bool = True
-    factor_3_managed_laptops_evidence: bool = True
-    factor_4_browser_workflows: bool = True
-    factor_5_handles_customer_data: bool = True
-    factor_6_acttrident_relevance: bool = True
-    factor_7_accessible_contact: bool = True
-    overall_status: str = Field("High priority", description="High priority, Medium priority, or Unqualified")
-    score: float = Field(85.0, ge=0.0, le=100.0)
-    reason: str = Field("Qualified based on verified technological operations and device fleet.")
+    factor_1_tech_related: bool = False
+    factor_2_at_least_5_people: bool = False
+    factor_3_managed_laptops_evidence: bool = False
+    factor_4_browser_workflows: bool = False
+    factor_5_handles_customer_data: bool = False
+    factor_6_acttrident_relevance: bool = False
+    factor_7_accessible_contact: bool = False
+    overall_status: str = Field("Unqualified", description="High priority, Medium priority, or Unqualified")
+    score: float = Field(0.0, ge=0.0, le=100.0)
+    reason: str = Field("Pending qualification analysis.")
 
 
 class EmailDraftOutput(BaseModel):
