@@ -15,6 +15,9 @@ set USE_LOCAL_WORKER=true
 set ENVIRONMENT=development
 set LOCAL_APP_DATA_DIR=%LOCALAPPDATA%\ActTrident
 
+:: Ensure logs directory exists
+if not exist "%LOCALAPPDATA%\ActTrident\logs" mkdir "%LOCALAPPDATA%\ActTrident\logs"
+
 :: 2. Check if Ollama is running on 127.0.0.1:11434
 echo [1/4] Checking Local AI Brain (Ollama)...
 powershell -Command "try { $r = Invoke-WebRequest -Uri 'http://127.0.0.1:11434/api/tags' -TimeoutSec 1; exit 0 } catch { exit 1 }" >nul 2>&1
@@ -26,7 +29,28 @@ if %ERRORLEVEL% EQU 0 (
     timeout /t 3 /nobreak >nul
 )
 
-:: 3. Start Unified ActTrident Application Server (Port 8000)
+:: 3. Check if ActTrident is ALREADY running and healthy
+echo [2/4] Verifying Application Server State...
+powershell -Command "try { $r = Invoke-RestMethod -Uri 'http://127.0.0.1:8000/ready' -TimeoutSec 1; if ($r.status -eq 'ready') { exit 0 } } catch {}; exit 1" >nul 2>&1
+if %ERRORLEVEL% EQU 0 (
+    echo   [OK] ActTrident Server is already running and ready on 127.0.0.1:8000.
+    goto launch_ui
+)
+
+:: If port 8000 is occupied but not ready, terminate the stale process
+powershell -Command "
+$conns = Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue
+if ($conns) {
+    foreach ($c in $conns) {
+        $p = Get-Process -Id $c.OwningProcess -ErrorAction SilentlyContinue
+        if ($p -and $p.ProcessName -like '*python*') {
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+" >nul 2>&1
+
+:: Start Unified ActTrident Application Server (Port 8000)
 echo [2/4] Starting ActTrident Desktop Backend (127.0.0.1:8000)...
 cd /d "%~dp0\..\backend"
 start /B "" python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 > "%LOCALAPPDATA%\ActTrident\logs\acttrident_server.log" 2>&1
@@ -40,6 +64,7 @@ if %ERRORLEVEL% NEQ 0 (
     echo   [OK] Application server is healthy and ready.
 )
 
+:launch_ui
 :: 5. Launch User Interface
 echo [4/4] Launching ActTrident Desktop Window...
 where msedge >nul 2>&1

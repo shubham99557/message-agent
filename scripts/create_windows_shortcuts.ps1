@@ -2,20 +2,29 @@
 $WshShell = New-Object -ComObject WScript.Shell
 $repoRoot = (Get-Item $PSScriptRoot\..).FullName
 
-$launcherTarget = Join-Path $repoRoot "scripts\start_acttrident_desktop.bat"
 $vbsTarget = Join-Path $repoRoot "scripts\ActTrident.vbs"
+$icoPath = Join-Path $repoRoot "frontend\public\favicon.ico"
 
-# 1. Desktop Shortcut
-$desktopPath = [Environment]::GetFolderPath('Desktop')
-$desktopLnk = Join-Path $desktopPath "ActTrident AI Sales Agent.lnk"
+# 1. Desktop Shortcuts (Handle standard Desktop and OneDrive redirected Desktop)
+$desktopPaths = @(
+    [Environment]::GetFolderPath('Desktop'),
+    (Join-Path $env:USERPROFILE "Desktop"),
+    (Join-Path $env:USERPROFILE "OneDrive\Desktop")
+) | Select-Object -Unique | Where-Object { Test-Path $_ }
 
-$shortcut = $WshShell.CreateShortcut($desktopLnk)
-$shortcut.TargetPath = "wscript.exe"
-$shortcut.Arguments = "`"$vbsTarget`""
-$shortcut.WorkingDirectory = $repoRoot
-$shortcut.Description = "ActTrident Local AI Sales Outreach & Research Agent"
-$shortcut.Save()
-Write-Host "Created Desktop Shortcut: $desktopLnk"
+foreach ($dp in $desktopPaths) {
+    $desktopLnk = Join-Path $dp "ActTrident AI Sales Agent.lnk"
+    $shortcut = $WshShell.CreateShortcut($desktopLnk)
+    $shortcut.TargetPath = "wscript.exe"
+    $shortcut.Arguments = "`"$vbsTarget`""
+    $shortcut.WorkingDirectory = $repoRoot
+    $shortcut.Description = "ActTrident Local AI Sales Outreach & Research Agent"
+    if (Test-Path $icoPath) {
+        $shortcut.IconLocation = "$icoPath,0"
+    }
+    $shortcut.Save()
+    Write-Host "Created Desktop Shortcut: $desktopLnk"
+}
 
 # 2. Start Menu Shortcut
 $startMenuPath = Join-Path ([Environment]::GetFolderPath('Programs')) "ActTrident"
@@ -29,5 +38,8 @@ $smShortcut.TargetPath = "wscript.exe"
 $smShortcut.Arguments = "`"$vbsTarget`""
 $smShortcut.WorkingDirectory = $repoRoot
 $smShortcut.Description = "ActTrident Local AI Sales Outreach & Research Agent"
+if (Test-Path $icoPath) {
+    $smShortcut.IconLocation = "$icoPath,0"
+}
 $smShortcut.Save()
 Write-Host "Created Start Menu Shortcut: $startMenuLnk"
