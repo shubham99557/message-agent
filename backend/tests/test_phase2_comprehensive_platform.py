@@ -124,7 +124,7 @@ async def test_granular_contact_verification_and_website_classification():
         industry="Information Technology"
     )
     verified_item = await verify_discovered_company(item)
-    assert verified_item.email_verification_status in ("domain_checked", "syntax_valid", "independently_verified", "source_confirmed")
+    assert verified_item.email_verification_status in ("domain_mx_confirmed", "domain_checked", "syntax_valid", "independently_verified", "source_confirmed")
     assert verified_item.phone_verification_status == "format_valid"
     assert verified_item.website_classification == "unavailable"
 

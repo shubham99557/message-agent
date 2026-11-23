@@ -1036,7 +1036,7 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onCompanyImported 
                 {filteredResults.map((comp, idx) => {
                   const isDemoItem = comp.is_demo || comp.verification_status === 'demo_fixture';
                   const score = comp.qualification_score;
-                  const cat = comp.qualification_category || (score !== undefined ? (score >= 80 ? 'High priority' : score >= 60 ? 'Medium priority' : score >= 40 ? 'Low priority' : 'Not suitable') : 'Pending');
+                  const cat = comp.qualification_category || (score !== undefined ? (score >= 80 ? 'High priority' : score >= 60 ? 'Medium priority' : 'Low priority') : 'Pending');
 
                   return (
                     <tr key={idx} className="hover:bg-cobalt-850/50 transition-colors">
@@ -1131,19 +1131,39 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onCompanyImported 
                         {comp.public_email ? (
                           <div className="text-slate-200 flex items-center space-x-1.5 flex-wrap">
                             <span>✉ {comp.public_email}</span>
-                            <span className={`px-1 rounded text-[9px] font-mono border ${
-                              comp.email_verification_status === 'independently_verified' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' :
-                              comp.email_verification_status === 'source_confirmed' ? 'bg-teal-500/20 text-teal-300 border-teal-500/30' :
-                              comp.email_verification_status === 'domain_checked' ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30' :
-                              'bg-slate-800 text-slate-400 border-slate-700'
-                            }`}>
+                            <span 
+                              className={`px-1 rounded text-[9px] font-mono border ${
+                                comp.email_verification_status === 'independently_verified' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' :
+                                comp.email_verification_status === 'source_confirmed' ? 'bg-teal-500/20 text-teal-300 border-teal-500/30' :
+                                (comp.email_verification_status === 'domain_mx_confirmed' || comp.email_verification_status === 'domain_checked') ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30' :
+                                comp.email_verification_status === 'syntax_valid' ? 'bg-blue-500/20 text-blue-300 border-blue-500/30' :
+                                'bg-slate-800 text-slate-400 border-slate-700'
+                              }`}
+                              title={
+                                comp.email_verification_status === 'domain_mx_confirmed' ? 'DNS MX records active. Does not guarantee inbox existence or deliverability.' :
+                                comp.email_verification_status === 'syntax_valid' ? 'RFC 5322 syntax valid. Inbox existence not verified.' :
+                                comp.email_verification_status
+                              }
+                            >
                               {comp.email_verification_status || 'publicly_listed'}
                             </span>
                           </div>
                         ) : (
                           <div className="text-slate-500 italic">Email not found</div>
                         )}
-                        {comp.public_phone && <div className="text-slate-400">☎ {comp.public_phone}</div>}
+                        {comp.public_phone && (
+                          <div className="text-slate-400 flex items-center space-x-1.5 flex-wrap">
+                            <span>☎ {comp.public_phone}</span>
+                            {comp.phone_verification_status && (
+                              <span 
+                                className="px-1 rounded text-[9px] font-mono border bg-slate-800 text-slate-400 border-slate-700"
+                                title={comp.phone_verification_status === 'format_valid' ? 'E.164 phone format valid. Active line status not verified.' : comp.phone_verification_status}
+                              >
+                                {comp.phone_verification_status}
+                              </span>
+                            )}
+                          </div>
+                        )}
                         {comp.public_whatsapp && <div className="text-emerald-400">📱 WA: {comp.public_whatsapp}</div>}
                         {comp.decision_maker_name && (
                           <div className="text-slate-300 font-sans text-[10px] mt-0.5">
@@ -1157,12 +1177,12 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onCompanyImported 
                           <div className="space-y-0.5">
                             <div className="flex items-center space-x-1.5">
                               <span className={`font-mono font-bold text-xs ${
-                                score >= 80 ? 'text-emerald-400' : score >= 60 ? 'text-cobalt-400' : score >= 40 ? 'text-amber-400' : 'text-rose-400'
+                                score >= 80 ? 'text-emerald-400' : score >= 60 ? 'text-cobalt-400' : 'text-amber-400'
                               }`}>
                                 {score} / 100
                               </span>
-                              <span className={`px-1.5 py-0.2 rounded text-[10px] font-medium ${
-                                cat === 'High priority' ? 'bg-emerald-500/20 text-emerald-300' : cat === 'Medium priority' ? 'bg-cobalt-500/20 text-cobalt-300' : 'bg-slate-800 text-slate-400'
+                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                                cat === 'High priority' ? 'bg-emerald-500/20 text-emerald-300' : cat === 'Medium priority' ? 'bg-cobalt-500/20 text-cobalt-300' : cat === 'Needs manual verification' ? 'bg-amber-500/20 text-amber-300' : 'bg-slate-800 text-slate-400'
                               }`}>
                                 {cat}
                               </span>

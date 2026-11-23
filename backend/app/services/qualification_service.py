@@ -267,24 +267,28 @@ def evaluate_discovered_item_qualification(item: DiscoveredCompanyItem) -> Tuple
         explanation="Outreach requires an authenticated, non-private business email or WhatsApp channel."
     ))
 
-    # Determine status & reason
+    # Determine status & reason based on canonical thresholds (High: 80-100, Medium: 60-79, Low: <60)
     total_score = round(total_score, 1)
-    if total_score >= 80.0 and has_laptop_verified:
-        cat_status = "High priority"
-        cat_reason = f"Excellent candidate for ActTrident workspace protection: verified {item.laptop_count_verified} managed laptops, tech sector, accessible contact."
-    elif total_score >= 50.0:
+    if total_score >= 80.0:
+        if has_laptop_verified:
+            cat_status = "High priority"
+            cat_reason = f"Excellent candidate for ActTrident workspace protection (Score: {total_score}/100): verified {item.laptop_count_verified} managed laptops, tech sector, accessible contact."
+        else:
+            cat_status = "High priority"
+            cat_reason = f"Strong prospect meeting core qualification criteria (Score: {total_score}/100): tech sector with documented operational signals."
+    elif total_score >= 60.0:
         if not has_laptop_verified:
             cat_status = "Needs manual verification"
-            cat_reason = "Matches technology and employee size criteria, but managed laptop count (5+) requires manual confirmation."
+            cat_reason = f"Viable candidate (Score: {total_score}/100): matches technology criteria, but managed laptop count (5+) requires manual confirmation."
         else:
             cat_status = "Medium priority"
-            cat_reason = "Meets core technology and device criteria with moderate overall fit."
+            cat_reason = f"Moderate fit (Score: {total_score}/100): meets core technology and device criteria."
     elif total_score >= 40.0:
         cat_status = "Low priority"
-        cat_reason = "Limited technology fit or insufficient contact channels available."
+        cat_reason = f"Limited technology fit or insufficient contact channels available (Score: {total_score}/100)."
     else:
         cat_status = "Not suitable"
-        cat_reason = "Does not align with ActTrident target criteria for managed laptop deployments."
+        cat_reason = f"Does not align with ActTrident target criteria for managed laptop deployments (Score: {total_score}/100)."
 
     return total_score, cat_status, cat_reason, factors
 
@@ -535,24 +539,29 @@ def qualify_company(db: Session, company: Company) -> QualificationResult:
         explanation="Outreach requires an authenticated, non-private business email or WhatsApp channel."
     ))
 
-    # Determine Classification Status & Recommended Next Action
+    # Determine Classification Status & Recommended Next Action based on canonical thresholds (High: 80-100, Medium: 60-79, Low: <60)
     total_score = round(total_score, 1)
-    if total_score >= 80.0 and has_laptop_verified:
-        status = "High priority"
-        reason = f"Excellent candidate for ActTrident workspace protection: verified {company.laptop_count_verified} managed laptops, tech sector, accessible contact."
-        action = "Generate AI email draft and route to manager approval queue for evaluation invitation."
-    elif total_score >= 50.0:
+    if total_score >= 80.0:
+        if has_laptop_verified:
+            status = "High priority"
+            reason = f"Excellent candidate for ActTrident workspace protection (Score: {total_score}/100): verified {company.laptop_count_verified} managed laptops, tech sector, accessible contact."
+            action = "Generate AI email draft and route to manager approval queue for evaluation invitation."
+        else:
+            status = "High priority"
+            reason = f"Strong prospect meeting core qualification criteria (Score: {total_score}/100): tech sector with documented operational signals."
+            action = "Generate introductory AI email draft and route to approval queue."
+    elif total_score >= 60.0:
         if not has_laptop_verified:
             status = "Needs manual verification"
-            reason = "Matches technology and employee size criteria, but managed laptop count (5+) requires manual confirmation."
+            reason = f"Viable candidate (Score: {total_score}/100): matches technology criteria, but managed laptop count (5+) requires manual confirmation."
             action = "Dispatch research specialist to review careers page, MCA filings, or LinkedIn office tours for fleet evidence."
         else:
             status = "Medium priority"
-            reason = "Meets core technology and device criteria with moderate overall fit."
+            reason = f"Moderate fit (Score: {total_score}/100): meets core technology and device criteria."
             action = "Draft introductory outreach proposing preliminary capabilities review."
     elif total_score >= 40.0:
         status = "Low priority"
-        reason = "Limited technology fit or insufficient contact channels available."
+        reason = f"Limited technology fit or insufficient contact channels available (Score: {total_score}/100)."
         action = "Monitor for future expansion or secondary outreach cycle."
     else:
         status = "Not suitable"

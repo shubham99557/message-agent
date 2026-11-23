@@ -71,7 +71,7 @@ def test_ai_qualification_7_factors(client, auth_headers):
         json={
             "name": "Unverified Laptop Services",
             "city": "Bhagalpur",
-            "industry": "Digital Marketing",
+            "industry": "Software Development",
             "employee_count_min": 10,
             "laptop_count_verified": None,
             "laptop_count_evidence": None,

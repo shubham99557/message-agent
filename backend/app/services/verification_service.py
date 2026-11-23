@@ -444,7 +444,7 @@ async def verify_discovered_company(item: DiscoveredCompanyItem) -> DiscoveredCo
             elif found_on_official_site:
                 email_status = "source_confirmed"
             elif has_mx:
-                email_status = "domain_checked"
+                email_status = "domain_mx_confirmed"
             else:
                 email_status = "syntax_valid"
 
@@ -455,8 +455,8 @@ async def verify_discovered_company(item: DiscoveredCompanyItem) -> DiscoveredCo
             "source_type": "official_website" if (verified_website and email_status in ("source_confirmed", "independently_verified")) else "directory",
             "retrieval_timestamp": now.isoformat(),
             "verification_status": email_status,
-            "confidence_score": 0.95 if email_status in ("independently_verified", "source_confirmed") else (0.70 if email_status == "domain_checked" else 0.0),
-            "evidence_snippet": f"Email status '{email_status}' (DNS MX deliverability: {has_mx})",
+            "confidence_score": 0.95 if email_status in ("independently_verified", "source_confirmed") else (0.70 if email_status in ("domain_mx_confirmed", "domain_checked") else 0.0),
+            "evidence_snippet": f"Email status '{email_status}' (DNS MX records confirmed: {has_mx}; mailbox existence not verified)",
         })
     else:
         email_status = "unknown"
@@ -494,7 +494,7 @@ async def verify_discovered_company(item: DiscoveredCompanyItem) -> DiscoveredCo
         phone_status = "unknown"
 
     # Overall verification status
-    if website_status == "accessible" and selected_email and email_status in ("independently_verified", "source_confirmed", "domain_checked"):
+    if website_status == "accessible" and selected_email and email_status in ("independently_verified", "source_confirmed", "domain_mx_confirmed", "domain_checked"):
         overall_v_status = "verified"
         confidence = 0.90
     elif website_status == "accessible":
