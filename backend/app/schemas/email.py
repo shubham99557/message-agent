@@ -12,6 +12,7 @@ class EmailGenerateRequest(BaseModel):
 
 
 class EmailDraftUpdate(BaseModel):
+    recipient_email: Optional[str] = None
     subject: Optional[str] = None
     body_html: Optional[str] = None
     body_text: Optional[str] = None

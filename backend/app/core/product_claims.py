@@ -70,10 +70,16 @@ def get_approved_claims_summary() -> str:
 
 
 def validate_message_against_claims(message_text: str) -> tuple[bool, List[str]]:
-    """Checks whether outreach copy contains prohibited exaggerated claims."""
+    """Checks whether outreach copy contains prohibited exaggerated claims or unauthorized offers."""
+    from app.core.config import settings
+
     violations: List[str] = []
     text_lower = message_text.lower()
     for claim in DISALLOWED_CLAIMS:
         if claim.lower() in text_lower:
             violations.append(f"Prohibited claim detected: '{claim}'")
+
+    if not getattr(settings, "ALLOW_90_DAY_EVALUATION_OFFER", True) and "90-day" in text_lower:
+        violations.append("Prohibited claim detected: 90-day evaluation offer is disabled by administrative policy")
+
     return len(violations) == 0, violations

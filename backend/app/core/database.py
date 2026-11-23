@@ -1,11 +1,36 @@
 import logging
+import os
 from sqlalchemy import create_engine, inspect, text, event
 from sqlalchemy.orm import declarative_base, sessionmaker
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-db_url = settings.DATABASE_URL
+
+def _resolve_database_url() -> str:
+    """
+    Resolves the operational database URL:
+    1. If explicit environment variable DATABASE_URL is set and not the default project-relative path, use it.
+    2. If settings.DATABASE_URL is set and not the default project-relative path, use it.
+    3. Default desktop mode: Resolve to %LOCALAPPDATA%\\ActTrident\\data\\acttrident.db.
+    """
+    env_url = os.getenv("DATABASE_URL", "").strip()
+    if env_url and env_url != "sqlite:///./acttrident.db":
+        return env_url
+
+    if settings.DATABASE_URL and settings.DATABASE_URL != "sqlite:///./acttrident.db":
+        return settings.DATABASE_URL
+
+    try:
+        from app.core.storage import resolve_local_database_path
+        db_path = resolve_local_database_path()
+        return f"sqlite:///{db_path}"
+    except Exception as exc:
+        logger.debug(f"Defaulting to settings.DATABASE_URL: {exc}")
+        return settings.DATABASE_URL or "sqlite:///./acttrident.db"
+
+
+db_url = _resolve_database_url()
 
 connect_args = {}
 if db_url.startswith("sqlite"):

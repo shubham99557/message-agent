@@ -101,6 +101,7 @@ class Settings(BaseSettings):
     SEARCH_PROVIDER: str = os.getenv("SEARCH_PROVIDER", "hybrid")
     SERPAPI_API_KEY: str = os.getenv("SERPAPI_API_KEY", "")
     TAVILY_API_KEY: str = os.getenv("TAVILY_API_KEY", "")
+    ENABLE_OPENSTREETMAP_DISCOVERY: bool = True
     GOOGLE_SEARCH_API_KEY: str = os.getenv("GOOGLE_SEARCH_API_KEY", "")
     GOOGLE_SEARCH_ENGINE_ID: str = os.getenv("GOOGLE_SEARCH_ENGINE_ID", "")
 

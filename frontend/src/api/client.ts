@@ -252,7 +252,10 @@ export const api = {
     scope?: string;
     industry?: string;
     query?: string;
+    company_size?: string;
     min_devices?: number;
+    min_employees?: number;
+    max_employees?: number;
     include_demo?: boolean;
     page?: number;
     page_size?: number;
@@ -265,12 +268,61 @@ export const api = {
       page: number;
       page_size: number;
       total_pages: number;
+      commercial_relevant?: number;
+      verified_websites?: number;
+      verified_emails?: number;
+      verified_phones?: number;
+      high_priority_count?: number;
+      medium_priority_count?: number;
+      low_priority_count?: number;
       scope: string;
       search_strategy: string;
       coverage_note: string;
       active_providers: string[];
       failed_providers: string[];
     }>('/discovery/search-paginated', { method: 'POST', body: JSON.stringify(params), signal }),
+  runDiscoveryPipeline: (params: {
+    industry?: string;
+    city: string;
+    state?: string;
+    country?: string;
+    scope?: string;
+    query?: string;
+    company_size?: string;
+    target_category?: string;
+    max_leads?: number;
+    min_score?: number;
+    min_devices?: number;
+    min_employees?: number;
+    max_employees?: number;
+    include_demo?: boolean;
+    auto_verify?: boolean;
+    auto_research?: boolean;
+    auto_qualify?: boolean;
+    auto_save_crm?: boolean;
+  }, signal?: AbortSignal) =>
+    request<{
+      query_summary: string;
+      steps: Array<{ step_number: number; step_name: string; status: string; detail: string; timestamp: string }>;
+      total_discovered: number;
+      commercial_relevant?: number;
+      websites_verified: number;
+      public_emails_found: number;
+      contacts_verified: number;
+      verified_websites?: number;
+      verified_emails?: number;
+      verified_phones?: number;
+      high_priority_count?: number;
+      medium_priority_count?: number;
+      low_priority_count?: number;
+      companies_researched: number;
+      companies_qualified: number;
+      saved_to_crm: number;
+      items: any[];
+      active_providers: string[];
+      failed_providers: string[];
+      duration_seconds: number;
+    }>('/discovery/pipeline', { method: 'POST', body: JSON.stringify(params), signal }),
   importDiscoveredLead: (lead: any) => request<any>('/discovery/import', { method: 'POST', body: JSON.stringify(lead) }),
   batchImportDiscoveredLeads: (companies: any[]) =>
     request<any[]>('/discovery/batch-import', { method: 'POST', body: JSON.stringify({ companies }) }),

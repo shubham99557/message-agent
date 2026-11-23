@@ -196,4 +196,4 @@ def test_discovery_search_history_and_multi_city(client, auth_headers):
     )
     assert r_csv.status_code == 200
     assert "text/csv" in r_csv.headers.get("content-type", "")
-    assert "Name,Website,City" in r_csv.text
+    assert "Company Name" in r_csv.text and "City" in r_csv.text

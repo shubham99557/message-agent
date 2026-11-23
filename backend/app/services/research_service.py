@@ -100,6 +100,82 @@ def _assess_evidence_and_gaps(
     return missing, round(min(confidence, 1.0), 2)
 
 
+async def generate_research_dossier_for_item(item: DiscoveredCompanyItem) -> Dict[str, Any]:
+    """
+    Generates a structured 13-dimension research dossier for a DiscoveredCompanyItem using local Ollama.
+    Handles Ollama unavailability honestly, produces schema-validated JSON, and records missing information.
+    """
+    website_content: Optional[str] = None
+    if item.website and not item.is_demo and is_safe_external_url(item.website):
+        website_content = await fetch_website_content_safely(item.website)
+
+    missing_items: List[str] = []
+    if not item.website:
+        missing_items.append("Official company website URL is missing")
+    elif not website_content:
+        missing_items.append("Public website could not be retrieved during research run")
+    if not item.public_email:
+        missing_items.append("Public business email address is not verified")
+    if not (item.public_phone or item.public_whatsapp):
+        missing_items.append("Public business telephone/WhatsApp number is not verified")
+    if not (item.employee_count_min or item.employee_count_max):
+        missing_items.append("Employee headcount evidence is unknown")
+    if not (item.laptop_count_verified and item.laptop_fleet_status == "VERIFIED"):
+        missing_items.append("Company-managed laptop fleet (5+ devices) is Unknown / unverified")
+    if not item.decision_maker_name:
+        missing_items.append("Decision-maker identity is not publicly confirmed")
+
+    missing_str = "; ".join(missing_items) if missing_items else "None — all core qualification fields verified"
+
+    dossier: Dict[str, Any] = {
+        "company_overview": f"{item.name} is a commercial entity in {item.city}, {item.state or 'India'}, categorized under '{item.industry or 'Technology Services'}'.",
+        "main_services": item.description or f"Services related to {item.industry or 'Business & Technology'}",
+        "industry": item.industry or "Technology Services",
+        "business_location": f"{item.city}, {item.state or 'India'}",
+        "publicly_available_company_size": (
+            f"{item.employee_count_min}-{item.employee_count_max} employees" if (item.employee_count_min and item.employee_count_max)
+            else (f"{item.employee_count_min}+ employees" if item.employee_count_min else "Unknown — pending verification")
+        ),
+        "operational_characteristics": f"Operations in {item.city}. Website status: {item.website_status or 'unverified'}.",
+        "potential_acttrident_use_cases": "Centralized endpoint visibility, browser workspace isolation, and SaaS account data protection.",
+        "potential_security_challenges": "[Inferred hypothesis] Potential web-borne exfiltration risks and browser credential exposure during distributed operations.",
+        "possible_decision_maker_roles": item.decision_maker_role or "Managing Director / CTO / Head of Engineering / IT Lead",
+        "available_contact_channels": ", ".join([c for c in [item.public_email, item.public_phone, item.public_whatsapp] if c]) or "None verified",
+        "evidence_backed_qualification_explanation": f"Evaluation based on industry '{item.industry}', city '{item.city}', and contact channel availability.",
+        "missing_information": missing_str,
+        "recommended_next_research_step": "Confirm managed laptop count (5+) and establish authenticated contact via official email.",
+        "ai_status": "completed",
+    }
+
+    try:
+        from app.ai.local_ai_gateway import local_ai_gateway
+        comp_payload = {
+            "name": item.name,
+            "website": item.website,
+            "industry": item.industry,
+            "city": item.city,
+            "state": item.state,
+            "laptop_count_verified": item.laptop_count_verified,
+            "laptop_count_evidence": item.laptop_count_evidence,
+            "decision_maker_name": item.decision_maker_name,
+            "decision_maker_role": item.decision_maker_role,
+        }
+        res_dossier = await local_ai_gateway.generate_research_dossier(comp_payload, web_content=website_content or "")
+        if res_dossier and res_dossier.summary and len(res_dossier.summary) > 20:
+            dossier["company_overview"] = res_dossier.summary
+        if res_dossier and res_dossier.products_and_services:
+            dossier["main_services"] = res_dossier.products_and_services
+        if res_dossier and getattr(res_dossier, "it_pain_points", None):
+            dossier["potential_security_challenges"] = f"[Hypothesis] {res_dossier.it_pain_points}"
+        if getattr(local_ai_gateway, "active_provider", "") == "deterministic":
+            dossier["ai_status"] = "ai_unavailable"
+    except Exception as exc:
+        logger.debug(f"AI dossier generation for item skipped/failed: {exc}")
+        dossier["ai_status"] = "ai_unavailable"
+
+    return dossier
+
+
 async def generate_company_research_report(db: Session, company: Company) -> ResearchReport:
     """
     Generates a truthful, source-attributed research report.

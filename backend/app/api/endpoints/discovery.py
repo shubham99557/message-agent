@@ -14,6 +14,8 @@ from app.schemas.research import (
     BatchImportRequest,
     MultiCityDiscoveryQuery,
     DiscoverySearchHistoryItem,
+    DiscoveryPipelineRequest,
+    DiscoveryPipelineResponse,
 )
 from app.schemas.company import CompanyResponse, CompanyCreate
 from app.services.discovery_service import (
@@ -23,7 +25,8 @@ from app.services.discovery_service import (
     get_recent_search_history,
     export_discovered_companies_csv,
     crawl_company_website_for_contacts,
-    parse_csv_discovery_file
+    parse_csv_discovery_file,
+    run_real_lead_discovery_pipeline,
 )
 from app.core.locations import (
     get_states_and_uts,
@@ -104,6 +107,19 @@ def search_discovery_directory_paginated_endpoint(
     with provider health reporting and sorting controls.
     """
     return search_public_company_directory_paginated(query_params)
+
+
+@router.post("/pipeline", response_model=DiscoveryPipelineResponse)
+async def run_lead_discovery_pipeline_endpoint(
+    request_params: DiscoveryPipelineRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Executes the comprehensive 10-step autonomous lead discovery, verification,
+    research, qualification, and CRM ingestion workflow.
+    """
+    return await run_real_lead_discovery_pipeline(db, request_params)
 
 
 @router.get("/history", response_model=List[DiscoverySearchHistoryItem])

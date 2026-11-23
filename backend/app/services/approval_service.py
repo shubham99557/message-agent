@@ -209,6 +209,9 @@ def edit_email_draft(
 
     was_approved = draft.approval_status == "approved"
     content_changed = False
+    if update_in.recipient_email is not None and update_in.recipient_email != draft.recipient_email:
+        draft.recipient_email = update_in.recipient_email
+        content_changed = True
     if update_in.subject is not None and update_in.subject != draft.subject:
         draft.subject = update_in.subject
         content_changed = True

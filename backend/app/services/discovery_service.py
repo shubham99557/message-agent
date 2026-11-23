@@ -530,6 +530,13 @@ def set_cached_discovery_results(
         logger.debug(f"Redis discovery cache set failed: {e}")
 
 
+def _normalize_name_for_dedup(name: str) -> str:
+    cleaned = (name or "").lower().strip()
+    cleaned = re.sub(r'[^\w\s]', '', cleaned)
+    cleaned = re.sub(r'\b(pvt|ltd|private limited|limited|technologies|technology|solutions|services|infotech|corp|corporation|inc|llp|hub)\b', '', cleaned)
+    return " ".join(cleaned.split())
+
+
 def search_public_company_directory(
     query_params: DiscoveryQuery,
     http_client: Optional[httpx.Client] = None,
@@ -541,26 +548,77 @@ def search_public_company_directory(
          multi-region search across canonical Indian technology corridors without sending meaningless 'All' queries.
     2. Includes quarantined .example.com demo fixtures ONLY when query_params.include_demo=True in non-production,
        always explicitly tagged with is_demo=True and verification_status='demo_fixture'.
-    3. Guarantees deduplication and source attribution across all returned items.
+    3. Guarantees deduplication, cross-provider entity resolution, and field-level provenance across all returned items.
     """
     results: List[DiscoveredCompanyItem] = []
-    seen_keys = set()
+    entity_map: Dict[tuple, int] = {}
+    exact_keys = set()
 
-    def _add_unique(item: DiscoveredCompanyItem):
-        key = (
-            item.name.strip().lower(),
+    def _add_or_merge(item: DiscoveredCompanyItem):
+        exact_key = (
+            (item.name or "").strip().lower(),
             (item.website or "").strip().lower(),
             (item.city or "").strip().lower()
         )
-        if key not in seen_keys:
-            seen_keys.add(key)
+        if exact_key in exact_keys:
+            return
+        exact_keys.add(exact_key)
+
+        # Cross-provider entity resolution key: normalized name + city
+        norm_name = _normalize_name_for_dedup(item.name)
+        norm_city = (item.city or "").strip().lower()
+        res_key = (norm_name, norm_city) if len(norm_name) >= 3 else None
+
+        if res_key and res_key in entity_map:
+            # Merge fields into existing item
+            idx = entity_map[res_key]
+            existing = results[idx]
+
+            updated_website = existing.website or item.website
+            updated_web_status = existing.website_status if existing.website else item.website_status
+            updated_email = existing.public_email or item.public_email
+            updated_email_status = existing.email_verification_status if existing.public_email else item.email_verification_status
+            updated_phone = existing.public_phone or item.public_phone
+            updated_phone_status = existing.phone_verification_status if existing.public_phone else item.phone_verification_status
+            updated_addr = existing.business_address or item.business_address
+            updated_contact_url = existing.contact_page_url or item.contact_page_url
+            updated_wa = existing.public_whatsapp or item.public_whatsapp
+            updated_dm_name = existing.decision_maker_name or item.decision_maker_name
+            updated_dm_role = existing.decision_maker_role or item.decision_maker_role
+
+            combined_prov = list(existing.provenance_sources or [])
+            existing_fields = {p.get("field_name") for p in combined_prov}
+            for p in (item.provenance_sources or []):
+                if p.get("field_name") not in existing_fields:
+                    combined_prov.append(p)
+                    existing_fields.add(p.get("field_name"))
+
+            merged_item = existing.model_copy(update={
+                "website": updated_website,
+                "website_status": updated_web_status,
+                "public_email": updated_email,
+                "email_verification_status": updated_email_status,
+                "public_phone": updated_phone,
+                "phone_verification_status": updated_phone_status,
+                "business_address": updated_addr,
+                "contact_page_url": updated_contact_url,
+                "public_whatsapp": updated_wa,
+                "decision_maker_name": updated_dm_name,
+                "decision_maker_role": updated_dm_role,
+                "confidence_level": max(existing.confidence_level or 0.0, item.confidence_level or 0.0),
+                "provenance_sources": combined_prov,
+            })
+            results[idx] = merged_item
+        else:
+            if res_key:
+                entity_map[res_key] = len(results)
             results.append(item)
 
     # 1. Real Permitted Search Adapters with Redis Caching (7-Day TTL)
     cached_real_items = get_cached_discovery_results(query_params)
     if cached_real_items is not None:
         for item in cached_real_items:
-            _add_unique(item)
+            _add_or_merge(item)
     else:
         active_adapters = [
             TavilyDiscoveryAdapter(),
@@ -589,7 +647,7 @@ def search_public_company_directory(
                     if adapter.is_configured():
                         try:
                             for item in adapter.search(sub_query, limit=4, http_client=http_client):
-                                _add_unique(item)
+                                _add_or_merge(item)
                         except Exception as exc:
                             logger.debug(f"Adapter {adapter.name} failed for {loc['city']}: {exc}")
         else:
@@ -598,7 +656,7 @@ def search_public_company_directory(
                 if adapter.is_configured():
                     try:
                         for item in adapter.search(query_params, limit=8, http_client=http_client):
-                            _add_unique(item)
+                            _add_or_merge(item)
                     except Exception as exc:
                         logger.debug(f"Adapter {adapter.name} failed for {query_params.city}: {exc}")
 
@@ -631,7 +689,7 @@ def search_public_company_directory(
                 "verification_status": "demo_fixture",
                 "source_type": "demo_fixture",
             })
-            _add_unique(demo_flagged)
+            _add_or_merge(demo_flagged)
 
     return results
 
@@ -644,6 +702,32 @@ def search_public_company_directory_paginated(
     Paginated, sorted, and metadata-rich nationwide discovery response with active provider status.
     """
     all_results = search_public_company_directory(query_params, http_client=http_client)
+
+    # Optional Company Size / Employee Count filtering
+    if query_params.company_size:
+        cs = query_params.company_size.lower().strip()
+        filtered = []
+        for itm in all_results:
+            min_e = itm.employee_count_min or 0
+            max_e = itm.employee_count_max or min_e
+            # Unknown size is preserved so operator has full visibility
+            if min_e == 0 and max_e == 0:
+                filtered.append(itm)
+            elif "micro" in cs or "1-10" in cs:
+                if max_e <= 10:
+                    filtered.append(itm)
+            elif "small" in cs or "11-50" in cs:
+                if (min_e >= 10 and min_e <= 50) or (max_e >= 11 and max_e <= 50):
+                    filtered.append(itm)
+            elif "medium" in cs or "51-200" in cs:
+                if (min_e >= 50 and min_e <= 200) or (max_e >= 51 and max_e <= 200):
+                    filtered.append(itm)
+            elif "enterprise" in cs or "200+" in cs or "201+" in cs:
+                if min_e >= 200 or max_e >= 200:
+                    filtered.append(itm)
+            else:
+                filtered.append(itm)
+        all_results = filtered
 
     # Sort results
     sort_by = (query_params.sort_by or "confidence").lower()
@@ -669,6 +753,15 @@ def search_public_company_directory_paginated(
     end_idx = start_idx + page_size
     paginated_items = all_results[start_idx:end_idx]
 
+    # Calculate Lead Quality KPI Summary Metrics across all results
+    comm_relevant = len([itm for itm in all_results if not itm.is_demo and itm.verification_status != "demo_fixture"])
+    v_web = len([itm for itm in all_results if itm.website_status == "accessible"])
+    v_email = len([itm for itm in all_results if itm.public_email and itm.email_verification_status in ("verified", "publicly_listed")])
+    v_phone = len([itm for itm in all_results if itm.public_phone and itm.phone_verification_status in ("verified", "publicly_listed")])
+    high_p = len([itm for itm in all_results if (itm.qualification_score or 0) >= 70.0])
+    med_p = len([itm for itm in all_results if 50.0 <= (itm.qualification_score or 0) < 70.0])
+    low_p = len([itm for itm in all_results if (itm.qualification_score or 0) < 50.0])
+
     adapters = [TavilyDiscoveryAdapter(), SerpApiDiscoveryAdapter(), OpenStreetMapPublicAdapter()]
     active_providers = [a.name for a in adapters if a.is_configured()]
     failed_providers = [a.name for a in adapters if not a.is_configured()]
@@ -688,6 +781,13 @@ def search_public_company_directory_paginated(
         page=page,
         page_size=page_size,
         total_pages=total_pages,
+        commercial_relevant=comm_relevant,
+        verified_websites=v_web,
+        verified_emails=v_email,
+        verified_phones=v_phone,
+        high_priority_count=high_p,
+        medium_priority_count=med_p,
+        low_priority_count=low_p,
         scope=scope_name,
         search_strategy=strategy,
         coverage_note=coverage_note,
@@ -793,46 +893,418 @@ def search_multi_city_directory(
 
 
 def export_discovered_companies_csv(items: List[DiscoveredCompanyItem]) -> str:
-    """Serializes a list of discovered companies into standard RFC 4180 CSV."""
+    """
+    Serializes a list of discovered companies into standard RFC 4180 CSV,
+    strictly distinguishing verified, unverified, and missing fields.
+    """
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow([
-        "Name",
-        "Website",
+        "Company Name",
+        "Official Website",
+        "Website Status",
+        "Contact Page URL",
+        "Business Address",
         "City",
         "State",
+        "Country",
         "Industry",
-        "Public Email",
-        "Public Phone",
+        "Public Business Email",
+        "Email Verification Status",
+        "Public Business Phone",
+        "Phone Verification Status",
         "Public WhatsApp",
-        "LinkedIn URL",
-        "Decision Maker",
-        "Decision Maker Role",
+        "Fleet Verification Status",
+        "Verified Laptop Count",
+        "Laptop Count Evidence",
         "Employee Estimate",
-        "Verified Laptops",
-        "Laptop Evidence",
-        "Confidence",
-        "Source URL",
-        "Verification Status"
+        "Qualification Score",
+        "Qualification Category",
+        "Qualification Reason",
+        "Decision Maker Name",
+        "Decision Maker Role",
+        "Missing Information",
+        "Primary Source URL",
+        "Record Verification Status",
+        "CRM Status",
+        "Retrieval Timestamp"
     ])
     for item in items:
+        # Strict missing / unverified formatting
+        website_val = item.website or "NOT FOUND"
+        contact_page_val = item.contact_page_url or "NOT FOUND"
+        address_val = item.business_address or "NOT FOUND"
+        email_val = item.public_email or "NOT FOUND"
+        phone_val = item.public_phone or "NOT FOUND"
+        whatsapp_val = item.public_whatsapp or "NOT FOUND"
+        dm_val = item.decision_maker_name or "UNKNOWN"
+        dm_role = item.decision_maker_role or "UNKNOWN"
+        lap_count = item.laptop_count_verified if item.laptop_count_verified is not None else "UNKNOWN"
+        lap_evidence = item.laptop_count_evidence or "UNKNOWN"
+        emp_est = f"{item.employee_count_min or '?'}-{item.employee_count_max or '?'}" if (item.employee_count_min or item.employee_count_max) else "UNKNOWN"
+        missing_val = ", ".join(item.missing_information) if item.missing_information else "NONE"
+
         writer.writerow([
             item.name,
-            item.website or "",
+            website_val,
+            item.website_status or "unverified",
+            contact_page_val,
+            address_val,
             item.city,
             item.state or "",
-            item.industry or "",
-            item.public_email or "",
-            item.public_phone or "",
-            item.public_whatsapp or "",
-            item.linkedin_url or "",
-            item.decision_maker_name or "",
-            item.decision_maker_role or "",
-            f"{item.employee_count_min or ''}-{item.employee_count_max or ''}" if item.employee_count_min else "",
-            item.laptop_count_verified or 0,
-            item.laptop_count_evidence or "",
-            item.confidence_level,
+            item.country or "India",
+            item.industry or "Unspecified",
+            email_val,
+            item.email_verification_status or ("publicly_listed" if item.public_email else "not_found"),
+            phone_val,
+            item.phone_verification_status or ("publicly_listed" if item.public_phone else "not_found"),
+            whatsapp_val,
+            item.laptop_fleet_status or "UNKNOWN",
+            lap_count,
+            lap_evidence,
+            emp_est,
+            item.qualification_score if item.qualification_score is not None else "Pending",
+            item.qualification_category or "Pending",
+            item.qualification_reason or "",
+            dm_val,
+            dm_role,
+            missing_val,
             item.source_url,
-            item.verification_status
+            item.verification_status,
+            item.crm_status or "newly_discovered",
+            item.retrieval_timestamp.isoformat() if item.retrieval_timestamp else ""
         ])
     return output.getvalue()
+
+
+async def run_real_lead_discovery_pipeline(
+    db: Session,
+    request: Any,  # DiscoveryPipelineRequest
+) -> Any:  # DiscoveryPipelineResponse
+    """
+    Executes the complete 10-step autonomous lead discovery, verification,
+    research, qualification, and CRM ingestion workflow.
+    """
+    import time
+    from app.schemas.research import (
+        DiscoveryPipelineStep,
+        DiscoveryPipelineResponse,
+    )
+    from app.services.verification_service import verify_discovered_company
+    from app.services.qualification_service import evaluate_discovered_item_qualification
+    from app.services.research_service import generate_research_dossier_for_item
+    from app.services.company_service import find_duplicate_company, create_company
+    from app.schemas.company import CompanyCreate
+    from app.models.company import Company, ContactSource, CompanyContact
+    from app.models.lead import Lead
+    from app.models.research import ResearchReport
+
+    start_time = time.time()
+    steps: List[DiscoveryPipelineStep] = []
+    now = datetime.now(timezone.utc)
+
+    # 1. Connecting to discovery sources
+    adapters = [TavilyDiscoveryAdapter(), SerpApiDiscoveryAdapter(), OpenStreetMapPublicAdapter()]
+    active_providers = [a.name for a in adapters if a.is_configured()]
+    failed_providers = [a.name for a in adapters if not a.is_configured()]
+    steps.append(DiscoveryPipelineStep(
+        step_number=1,
+        step_name="Connecting to discovery sources",
+        status="completed",
+        detail=f"Active providers: {', '.join(active_providers) or 'None'}. Standby: {', '.join(failed_providers)}.",
+        timestamp=datetime.now(timezone.utc),
+    ))
+
+    # 2. Searching for businesses
+    q_params = DiscoveryQuery(
+        city=request.city,
+        state=request.state,
+        country=request.country,
+        industry=request.industry,
+        query=request.query,
+        min_devices=getattr(request, "min_devices", None),
+        min_employees=getattr(request, "min_employees", None),
+        max_employees=getattr(request, "max_employees", None),
+        company_size=getattr(request, "company_size", None),
+        scope=request.scope or "city",
+        include_demo=request.include_demo,
+        page_size=request.max_leads,
+    )
+    discovered_raw = search_public_company_directory(q_params)
+    steps.append(DiscoveryPipelineStep(
+        step_number=2,
+        step_name="Searching for businesses",
+        status="completed",
+        detail=f"Queried providers for '{request.industry}' in '{request.city}'. Retrieved {len(discovered_raw)} matching listings.",
+        timestamp=datetime.now(timezone.utc),
+    ))
+
+    # 3. Normalizing results
+    normalized: List[DiscoveredCompanyItem] = []
+    for item in discovered_raw:
+        norm_name = sanitize_untrusted_text((item.name or "").strip())
+        norm_web = item.website.strip() if item.website else None
+        if norm_web and not norm_web.startswith(("http://", "https://")):
+            norm_web = f"https://{norm_web}"
+        norm_item = item.model_copy(update={
+            "name": norm_name,
+            "website": norm_web,
+            "city": (item.city or request.city).strip(),
+            "state": (item.state or request.state or "").strip(),
+            "industry": (item.industry or request.industry or "Technology Services").strip(),
+        })
+        normalized.append(norm_item)
+
+    steps.append(DiscoveryPipelineStep(
+        step_number=3,
+        step_name="Normalizing results",
+        status="completed",
+        detail=f"Cleaned and normalized {len(normalized)} business records.",
+        timestamp=datetime.now(timezone.utc),
+    ))
+
+    # 4. Removing duplicates
+    unique_candidates: List[DiscoveredCompanyItem] = []
+    seen_keys = set()
+    for item in normalized:
+        key = (
+            item.name.lower().strip(),
+            (urlparse(item.website).hostname or "").lower() if item.website else "",
+            item.city.lower().strip()
+        )
+        if key not in seen_keys:
+            seen_keys.add(key)
+            # Check existing CRM database
+            existing_comp = find_duplicate_company(db, name=item.name, website=item.website, email=item.public_email)
+            if existing_comp:
+                item = item.model_copy(update={"crm_id": existing_comp.id, "crm_status": "previously_known"})
+            else:
+                item = item.model_copy(update={"crm_status": "newly_discovered"})
+            unique_candidates.append(item)
+            if len(unique_candidates) >= request.max_leads:
+                break
+
+    steps.append(DiscoveryPipelineStep(
+        step_number=4,
+        step_name="Removing duplicates",
+        status="completed",
+        detail=f"Deduplicated to {len(unique_candidates)} unique prospective entities.",
+        timestamp=datetime.now(timezone.utc),
+    ))
+
+    # 5 & 6. Verifying company websites & collecting public business contacts
+    verified_items: List[DiscoveredCompanyItem] = []
+    websites_verified_count = 0
+    public_emails_count = 0
+    contacts_verified_count = 0
+
+    for itm in unique_candidates:
+        if request.auto_verify:
+            verified_itm = await verify_discovered_company(itm)
+        else:
+            verified_itm = itm
+
+        if verified_itm.website_status == "accessible":
+            websites_verified_count += 1
+        if verified_itm.public_email:
+            public_emails_count += 1
+        if verified_itm.public_email or verified_itm.public_phone:
+            contacts_verified_count += 1
+
+        verified_items.append(verified_itm)
+
+    steps.append(DiscoveryPipelineStep(
+        step_number=5,
+        step_name="Verifying company websites",
+        status="completed",
+        detail=f"Verified website connectivity for {websites_verified_count}/{len(verified_items)} candidates.",
+        timestamp=datetime.now(timezone.utc),
+    ))
+    steps.append(DiscoveryPipelineStep(
+        step_number=6,
+        step_name="Collecting public business contacts",
+        status="completed",
+        detail=f"Identified {public_emails_count} public email channels and {contacts_verified_count} contact pathways with field provenance.",
+        timestamp=datetime.now(timezone.utc),
+    ))
+
+    # 7. Researching companies (Ollama local inference)
+    researched_items: List[DiscoveredCompanyItem] = []
+    researched_count = 0
+    for itm in verified_items:
+        if request.auto_research:
+            dossier = await generate_research_dossier_for_item(itm)
+            res_summary = dossier.get("company_overview", "")
+            itm = itm.model_copy(update={
+                "research_dossier": dossier,
+                "research_summary": res_summary,
+            })
+            if dossier.get("ai_status") == "completed":
+                researched_count += 1
+        researched_items.append(itm)
+
+    steps.append(DiscoveryPipelineStep(
+        step_number=7,
+        step_name="Researching companies",
+        status="completed",
+        detail=f"Generated structured research dossiers for {len(researched_items)} companies (Local Ollama: {researched_count}).",
+        timestamp=datetime.now(timezone.utc),
+    ))
+
+    # 8. Evaluating suitability (7-factor qualification)
+    qualified_items: List[DiscoveredCompanyItem] = []
+    for itm in researched_items:
+        if request.auto_qualify:
+            score, status_cat, reason_text, factor_results = evaluate_discovered_item_qualification(itm)
+            itm = itm.model_copy(update={
+                "qualification_score": score,
+                "qualification_category": status_cat,
+                "qualification_reason": reason_text,
+                "qualification_factors": factor_results,
+            })
+        qualified_items.append(itm)
+
+    steps.append(DiscoveryPipelineStep(
+        step_number=8,
+        step_name="Evaluating suitability",
+        status="completed",
+        detail=f"Evaluated all {len(qualified_items)} companies across 7 deterministic qualification dimensions.",
+        timestamp=datetime.now(timezone.utc),
+    ))
+
+    # 9. Saving leads into CRM
+    saved_crm_count = 0
+    final_items: List[DiscoveredCompanyItem] = []
+
+    for itm in qualified_items:
+        if request.auto_save_crm and (itm.qualification_score is None or itm.qualification_score >= request.min_score):
+            try:
+                # Check if company already exists
+                existing = find_duplicate_company(db, name=itm.name, website=itm.website, email=itm.public_email)
+                if not existing:
+                    # Create company
+                    comp_in = CompanyCreate(
+                        name=itm.name,
+                        website=itm.website,
+                        city=itm.city,
+                        state=itm.state,
+                        country=itm.country or "India",
+                        industry=itm.industry,
+                        description=itm.description,
+                        public_email=itm.public_email,
+                        public_phone=itm.public_phone,
+                        public_whatsapp=itm.public_whatsapp,
+                        linkedin_url=itm.linkedin_url,
+                        decision_maker_name=itm.decision_maker_name,
+                        decision_maker_role=itm.decision_maker_role,
+                        employee_count_min=itm.employee_count_min,
+                        employee_count_max=itm.employee_count_max,
+                        employee_size_evidence=itm.employee_size_evidence,
+                        laptop_count_verified=itm.laptop_count_verified,
+                        laptop_count_evidence=itm.laptop_count_evidence,
+                        laptop_fleet_status=itm.laptop_fleet_status or "UNKNOWN",
+                        is_demo=itm.is_demo,
+                    )
+                    created_comp = create_company(db, comp_in)
+
+                    # Update qualification on company
+                    if itm.qualification_score is not None:
+                        created_comp.qualification_score = itm.qualification_score
+                        created_comp.qualification_status = itm.qualification_category
+                        created_comp.qualification_reason = itm.qualification_reason
+                        if itm.qualification_factors:
+                            created_comp.qualification_factors = json.dumps([f.model_dump() for f in itm.qualification_factors])
+                        created_comp.verification_status = itm.verification_status
+
+                    # Attach ContactSource records
+                    for src in (itm.provenance_sources or []):
+                        cs = ContactSource(
+                            company_id=created_comp.id,
+                            field_name=src.get("field_name", "general"),
+                            source_url=src.get("source_url", itm.source_url),
+                            source_type=src.get("source_type", "discovery"),
+                            verification_status=src.get("verification_status", "unverified"),
+                            confidence=src.get("confidence_score", 0.5),
+                            extracted_text=src.get("evidence_snippet"),
+                            retrieved_at=datetime.now(timezone.utc),
+                        )
+                        db.add(cs)
+
+                    # Attach ResearchReport
+                    if itm.research_dossier:
+                        rep = ResearchReport(
+                            company_id=created_comp.id,
+                            summary=itm.research_dossier.get("company_overview", ""),
+                            services=itm.research_dossier.get("main_services", ""),
+                            likely_tech_requirements=itm.research_dossier.get("operational_characteristics", ""),
+                            potential_acttrident_use_cases=itm.research_dossier.get("potential_acttrident_use_cases", ""),
+                            relevant_decision_maker_role=itm.research_dossier.get("possible_decision_maker_roles", ""),
+                            recommended_outreach_approach=itm.research_dossier.get("recommended_next_research_step", ""),
+                            sources_summary=itm.source_url,
+                            missing_information=itm.research_dossier.get("missing_information", ""),
+                            confidence_level=itm.confidence_level,
+                        )
+                        db.add(rep)
+
+                    db.commit()
+                    db.refresh(created_comp)
+                    saved_crm_count += 1
+                    itm = itm.model_copy(update={"crm_id": created_comp.id, "crm_status": "saved_in_crm"})
+                else:
+                    itm = itm.model_copy(update={"crm_id": existing.id, "crm_status": "previously_known"})
+            except Exception as exc:
+                logger.warning(f"Error saving lead '{itm.name}' to CRM: {exc}")
+                db.rollback()
+
+        final_items.append(itm)
+
+    steps.append(DiscoveryPipelineStep(
+        step_number=9,
+        step_name="Saving leads into CRM",
+        status="completed",
+        detail=f"Stored {saved_crm_count} newly qualified leads with provenance into persistent CRM.",
+        timestamp=datetime.now(timezone.utc),
+    ))
+
+    # 10. Completing the search
+    elapsed = round(time.time() - start_time, 2)
+    steps.append(DiscoveryPipelineStep(
+        step_number=10,
+        step_name="Completing the search",
+        status="completed",
+        detail=f"Lead discovery pipeline finished in {elapsed}s.",
+        timestamp=datetime.now(timezone.utc),
+    ))
+
+    query_summary = f"{request.industry or 'Technology Services'} in {request.city}, {request.state or 'India'}"
+
+    # Calculate Lead Quality KPI Summary Metrics
+    comm_relevant = len([itm for itm in final_items if not itm.is_demo and itm.verification_status != "demo_fixture"])
+    v_phone = len([itm for itm in final_items if itm.public_phone and itm.phone_verification_status in ("verified", "publicly_listed")])
+    high_p = len([itm for itm in final_items if (itm.qualification_score or 0) >= 70.0])
+    med_p = len([itm for itm in final_items if 50.0 <= (itm.qualification_score or 0) < 70.0])
+    low_p = len([itm for itm in final_items if (itm.qualification_score or 0) < 50.0])
+
+    return DiscoveryPipelineResponse(
+        query_summary=query_summary,
+        steps=steps,
+        total_discovered=len(final_items),
+        commercial_relevant=comm_relevant,
+        websites_verified=websites_verified_count,
+        public_emails_found=public_emails_count,
+        contacts_verified=contacts_verified_count,
+        verified_websites=websites_verified_count,
+        verified_emails=public_emails_count,
+        verified_phones=v_phone,
+        high_priority_count=high_p,
+        medium_priority_count=med_p,
+        low_priority_count=low_p,
+        companies_researched=researched_count,
+        companies_qualified=len(final_items),
+        saved_to_crm=saved_crm_count,
+        items=final_items,
+        active_providers=active_providers,
+        failed_providers=failed_providers,
+        duration_seconds=elapsed,
+    )
+

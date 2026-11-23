@@ -83,12 +83,19 @@ def build_email_content(
     # 6. Invitation to demonstration
     demo_invitation = "We would welcome the opportunity to share a concise 15-minute product overview tailored to your environment."
 
-    # 7. Proposed 90-day evaluation programme
-    eval_proposal = (
-        f"For eligible companies managing at least five company laptops, we are currently offering a "
-        f"proposed 90-day free product evaluation. This allows your team to experience ActTrident's capabilities "
-        "in your actual environment with full technical support and zero obligation."
-    )
+    # 7. Proposed evaluation or demonstration programme
+    allow_eval_offer = getattr(settings, "ALLOW_90_DAY_EVALUATION_OFFER", False)
+    if allow_eval_offer and has_laptops:
+        eval_proposal = (
+            f"For eligible companies managing at least five company laptops, we are currently offering a "
+            f"proposed 90-day free product evaluation. This allows your team to experience ActTrident's capabilities "
+            "in your actual environment with full technical support and zero obligation."
+        )
+    else:
+        eval_proposal = (
+            "We offer a streamlined technical assessment and live demonstration tailored to your workflow, "
+            "allowing your team to evaluate ActTrident's browser workspace protection with zero disruption to active development."
+        )
 
     # 8. Simple meeting request
     meeting_request = (
@@ -171,9 +178,15 @@ def generate_email_draft(
     # Validate against central product claims
     valid_claims, claim_warnings = validate_message_against_claims(f"{subject}\n{body_text}")
     if not valid_claims:
-        logger.warning(f"Claims validation warnings for {company.name}: {claim_warnings}")
-
-    approval_status = "draft" if recipient_email else "missing_recipient"
+        logger.warning(f"Claims validation rejected draft for {company.name}: {claim_warnings}")
+        approval_status = "rejected"
+        rejection_reason = f"Unsupported product claims detected: {'; '.join(claim_warnings)}"
+    elif not recipient_email:
+        approval_status = "missing_recipient"
+        rejection_reason = "Missing recipient email address."
+    else:
+        approval_status = "draft"
+        rejection_reason = None
 
     draft = EmailDraft(
         campaign_id=campaign_id,
@@ -185,7 +198,8 @@ def generate_email_draft(
         body_text=body_text,
         body_html=body_html,
         tone=tone,
-        approval_status=approval_status,  # Mandatory Human Approval: draft or missing_recipient
+        approval_status=approval_status,  # Mandatory Human Approval: draft, missing_recipient, or rejected
+        rejection_reason=rejection_reason,
         provider="smtp"
     )
     db.add(draft)

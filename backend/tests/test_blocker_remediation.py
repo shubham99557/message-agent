@@ -92,6 +92,7 @@ def test_fix1_celery_email_dispatch_sync_and_eager_celery(client, db_session, ad
 def test_fix2_nightly_discovery_never_inserts_demo_and_campaigns_reject_demo(client, db_session, admin_auth_headers, monkeypatch):
     monkeypatch.setattr(settings, "TAVILY_API_KEY", "")
     monkeypatch.setattr(settings, "SERPAPI_API_KEY", "")
+    monkeypatch.setattr(settings, "ENABLE_OPENSTREETMAP_DISCOVERY", False)
 
     res = execute_task_logic("company_discovery", {"cities": ["Siliguri", "Gangtok", "Patna", "Bhagalpur"]}, db_session)
     assert res["new_companies_created"] == 0

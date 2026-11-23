@@ -24,6 +24,15 @@ def enable_mocked_live_send(monkeypatch):
 def configure_test_environment(monkeypatch):
     """Configures deterministic test environment flags."""
     monkeypatch.setattr(settings, "ENFORCE_TRAI_CURFEW", False)
+    # Clear Redis discovery cache keys to prevent cross-test leakage
+    try:
+        from app.services.job_service import get_redis_client
+        r = get_redis_client()
+        if r:
+            for k in r.scan_iter("discovery:*"):
+                r.delete(k)
+    except Exception:
+        pass
 
 
 @pytest.fixture(scope="function")

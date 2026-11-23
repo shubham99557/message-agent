@@ -1,7 +1,9 @@
+from app.core.config import settings
 from app.models.activity import SuppressionList
 
 
-def test_ai_email_generation_5_tones_and_structure(client, auth_headers):
+def test_ai_email_generation_5_tones_and_structure(client, auth_headers, monkeypatch):
+    monkeypatch.setattr(settings, "ALLOW_90_DAY_EVALUATION_OFFER", True)
     # Create test company in Siliguri
     comp = client.post(
         "/api/v1/companies",

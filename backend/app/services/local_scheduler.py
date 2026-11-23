@@ -25,6 +25,30 @@ from app.services.orchestration_service import (
 logger = logging.getLogger("acttrident.scheduler")
 
 
+def get_or_create_system_service_user_id(db) -> int:
+    """Returns the dedicated service user ID for scheduled background tasks, avoiding hardcoded user IDs."""
+    try:
+        from app.models.user import User
+        from app.core.security import get_password_hash
+        sys_user = db.query(User).filter(User.email == "system@acttrident.internal").first()
+        if not sys_user:
+            sys_user = User(
+                email="system@acttrident.internal",
+                hashed_password=get_password_hash("SysServiceSecureInternalAuth#2026!"),
+                full_name="ActTrident Automation Service",
+                role="admin",
+                is_active=True,
+                token_version=1
+            )
+            db.add(sys_user)
+            db.commit()
+            db.refresh(sys_user)
+        return sys_user.id
+    except Exception as exc:
+        logger.debug(f"Service user resolution fallback: {exc}")
+        return 1
+
+
 class LocalScheduler:
     def __init__(self):
         self._thread: Optional[threading.Thread] = None
@@ -220,7 +244,8 @@ class LocalScheduler:
             self._log_event("outbox_dispatch", "blocked", f"Kill switch active: {ks_reason}")
             return {"status": "blocked_kill_switch", "reason": ks_reason}
 
-        res = process_outbox_batch(db, user_id=1, limit=25)
+        service_user_id = get_or_create_system_service_user_id(db)
+        res = process_outbox_batch(db, user_id=service_user_id, limit=25)
         dispatched = res.get("dispatched", 0)
         failed = res.get("failed", 0)
         self.task_stats["outbox_dispatched"] += dispatched

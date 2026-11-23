@@ -13,6 +13,7 @@ from app.schemas.research import DiscoveryQuery
 
 
 def test_discovery_quarantines_demo_fixtures_and_respects_include_demo(client, admin_auth_headers, monkeypatch):
+    monkeypatch.setattr(settings, "ENABLE_OPENSTREETMAP_DISCOVERY", False)
     # 1. With include_demo=True in non-production, every .example.com item is strictly tagged demo_fixture
     resp_demo = client.post(
         "/api/v1/discovery/search",
