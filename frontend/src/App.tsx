@@ -20,6 +20,8 @@ import { AnalyticsView } from './views/AnalyticsView';
 import { IntegrationsView } from './views/IntegrationsView';
 import { AutomationCenterView } from './views/AutomationCenterView';
 import { SettingsView } from './views/SettingsView';
+import { ServiceCatalogueView } from './views/ServiceCatalogueView';
+import { FollowUpManagerView } from './views/FollowUpManagerView';
 
 import { Shield, Lock } from 'lucide-react';
 
@@ -151,6 +153,8 @@ export const App: React.FC = () => {
       case 'dashboard': return { title: 'Executive Overview', sub: 'Active sales campaigns and performance telemetry' };
       case 'discovery': return { title: 'Company Lead Discovery', sub: 'Public directory intelligence across initial target cities' };
       case 'leads': return { title: 'Lead Database', sub: 'Verified corporate records with source attribution' };
+      case 'followups': return { title: 'Follow-Up & Operations Manager', sub: 'Multi-touch cadence scheduling, reminders, and suppression enforcement' };
+      case 'services': return { title: 'ActTrident Service Catalogue', sub: 'Approved capabilities, qualification heuristics, and legal claims boundaries' };
       case 'research': return { title: 'AI Research Agent', sub: '7-factor qualification & truthful company dossiers' };
       case 'email': return { title: 'Email Outreach', sub: 'Personalized AI email generation across 5 tones' };
       case 'whatsapp': return { title: 'WhatsApp Outreach', sub: 'Meta Cloud API messaging with strict consent verification' };
@@ -186,6 +190,8 @@ export const App: React.FC = () => {
           {currentView === 'dashboard' && <DashboardView onNavigate={setCurrentView} />}
           {currentView === 'discovery' && <DiscoveryView onCompanyImported={() => {}} />}
           {currentView === 'leads' && <LeadsView onSelectCompany={handleSelectCompany} />}
+          {currentView === 'followups' && <FollowUpManagerView />}
+          {currentView === 'services' && <ServiceCatalogueView />}
           {currentView === 'research' && (
             <ResearchView selectedCompany={selectedCompany} onNavigate={setCurrentView} />
           )}

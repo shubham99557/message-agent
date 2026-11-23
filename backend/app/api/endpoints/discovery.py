@@ -284,3 +284,41 @@ async def upload_discovery_csv(
     content = await file.read()
     items = parse_csv_discovery_file(content, filename=file.filename)
     return items
+
+
+@router.get("/runs", response_model=List[dict])
+def get_discovery_runs(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Retrieves persistent discovery run logs with search metrics and yield transparency."""
+    from app.models.discovery import DiscoveryRun
+    runs = db.query(DiscoveryRun).order_by(DiscoveryRun.created_at.desc()).offset(skip).limit(limit).all()
+    return [
+        {
+            "id": r.id,
+            "run_uuid": r.run_uuid,
+            "query_summary": r.query_summary,
+            "city": r.city,
+            "state": r.state,
+            "country": r.country,
+            "industry": r.industry,
+            "scope": r.scope,
+            "active_providers": r.active_providers,
+            "raw_candidates_count": r.raw_candidates_count,
+            "unique_businesses_count": r.unique_businesses_count,
+            "filtered_facilities_count": r.filtered_facilities_count,
+            "authentic_websites_count": r.authentic_websites_count,
+            "listed_phones_count": r.listed_phones_count,
+            "verified_emails_count": r.verified_emails_count,
+            "high_priority_count": r.high_priority_count,
+            "medium_priority_count": r.medium_priority_count,
+            "low_priority_count": r.low_priority_count,
+            "execution_duration_seconds": r.execution_duration_seconds,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in runs
+    ]
+

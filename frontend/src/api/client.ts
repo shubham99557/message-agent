@@ -575,4 +575,45 @@ export const api = {
   resumeAutomation: () => request<any>('/automation/resume', { method: 'POST' }),
   triggerAutomationJob: (job_name: string) =>
     request<any>('/automation/trigger-job', { method: 'POST', body: JSON.stringify({ job_name }) }),
+
+  // ActTrident Service Catalogue
+  getServices: (activeOnly?: boolean) =>
+    request<any[]>(`/services${activeOnly ? '?active_only=true' : ''}`),
+  getService: (id: number) => request<any>(`/services/${id}`),
+  createService: (data: any) =>
+    request<any>('/services', { method: 'POST', body: JSON.stringify(data) }),
+  updateService: (id: number, data: any) =>
+    request<any>(`/services/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteService: (id: number) =>
+    request<void>(`/services/${id}`, { method: 'DELETE' }),
+  matchService: (data: any) =>
+    request<any>('/services/match', { method: 'POST', body: JSON.stringify(data) }),
+
+  // Follow-Up & Operations Management
+  getFollowups: (params?: { status?: string; due_only?: boolean; lead_id?: number; skip?: number; limit?: number }) => {
+    const q = new URLSearchParams();
+    if (params?.status) q.append('status', params.status);
+    if (params?.due_only) q.append('due_only', 'true');
+    if (params?.lead_id) q.append('lead_id', String(params.lead_id));
+    if (params?.skip !== undefined) q.append('skip', String(params.skip));
+    if (params?.limit !== undefined) q.append('limit', String(params.limit));
+    const qs = q.toString() ? `?${q.toString()}` : '';
+    return request<{ items: any[]; total: number }>(`/crm/followups${qs}`);
+  },
+  createFollowup: (leadId: number, data: any) =>
+    request<any>(`/crm/leads/${leadId}/followups`, { method: 'POST', body: JSON.stringify(data) }),
+  updateFollowup: (id: number, data: any) =>
+    request<any>(`/crm/followups/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteFollowup: (id: number) =>
+    request<void>(`/crm/followups/${id}`, { method: 'DELETE' }),
+
+  // Suppression Registry
+  addSuppression: (data: { identifier: string; channel?: string; reason?: string }) =>
+    request<any>('/settings/suppression-list', { method: 'POST', body: JSON.stringify(data) }),
+  removeSuppression: (id: number) =>
+    request<void>(`/settings/suppression-list/${id}`, { method: 'DELETE' }),
+
+  // Discovery Run History
+  getDiscoveryRuns: (skip?: number, limit?: number) =>
+    request<any[]>(`/discovery/runs?skip=${skip || 0}&limit=${limit || 20}`),
 };

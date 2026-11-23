@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
@@ -69,24 +69,80 @@ def change_lead_status(db: Session, lead_id: int, new_status: str, notes: Option
 
 
 def add_followup(db: Session, lead_id: int, followup_in: FollowupCreate) -> Followup:
+    lead = get_lead(db, lead_id)
     followup = Followup(
         lead_id=lead_id,
+        company_id=followup_in.company_id or (lead.company_id if lead else None),
         scheduled_date=followup_in.scheduled_date,
+        due_date=followup_in.due_date or followup_in.scheduled_date,
         suggested_channel=followup_in.suggested_channel,
+        reminder_at=followup_in.reminder_at,
+        reason=followup_in.reason,
+        next_action=followup_in.next_action,
+        assigned_user_id=followup_in.assigned_user_id,
         notes=followup_in.notes,
         status="pending"
     )
     db.add(followup)
 
-    # Update next followup date on lead
-    lead = get_lead(db, lead_id)
+    # Update next followup date on lead and company
     if lead:
         lead.next_followup_date = followup_in.scheduled_date
         lead.followup_count = (lead.followup_count or 0) + 1
+        if lead.company:
+            lead.company.followup_status = "follow_up_due"
 
     db.commit()
     db.refresh(followup)
     return followup
+
+
+def list_followups(
+    db: Session,
+    status: Optional[str] = None,
+    due_only: bool = False,
+    lead_id: Optional[int] = None,
+    skip: int = 0,
+    limit: int = 100
+) -> Tuple[List[Followup], int]:
+    query = db.query(Followup)
+    if lead_id:
+        query = query.filter(Followup.lead_id == lead_id)
+    if status:
+        query = query.filter(Followup.status == status)
+    if due_only:
+        now = datetime.now(timezone.utc)
+        query = query.filter(Followup.due_date <= now, Followup.status.in_(["pending", "not_contacted", "follow_up_due"]))
+    
+    total = query.count()
+    items = query.order_by(Followup.scheduled_date.asc()).offset(skip).limit(limit).all()
+    return items, total
+
+
+def update_followup(db: Session, followup_id: int, followup_in: Any) -> Optional[Followup]:
+    fu = db.query(Followup).filter(Followup.id == followup_id).first()
+    if not fu:
+        return None
+
+    update_dict = followup_in.model_dump(exclude_unset=True) if hasattr(followup_in, "model_dump") else followup_in
+    for field, val in update_dict.items():
+        setattr(fu, field, val)
+
+    if fu.status in ("completed", "closed", "converted") and not fu.completed_at:
+        fu.completed_at = datetime.now(timezone.utc)
+
+    db.commit()
+    db.refresh(fu)
+    return fu
+
+
+def delete_followup(db: Session, followup_id: int) -> bool:
+    fu = db.query(Followup).filter(Followup.id == followup_id).first()
+    if not fu:
+        return False
+    db.delete(fu)
+    db.commit()
+    return True
 
 
 def add_meeting(db: Session, lead_id: int, meeting_in: MeetingCreate) -> Meeting:

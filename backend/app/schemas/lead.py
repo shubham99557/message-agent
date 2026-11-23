@@ -34,15 +34,45 @@ class LeadUpdate(BaseModel):
 
 class FollowupCreate(BaseModel):
     scheduled_date: datetime
+    due_date: Optional[datetime] = None
     suggested_channel: str = "email"
+    reminder_at: Optional[datetime] = None
+    reason: Optional[str] = None
+    next_action: Optional[str] = None
+    company_id: Optional[int] = None
+    assigned_user_id: Optional[int] = None
     notes: Optional[str] = None
 
 
-class FollowupResponse(FollowupCreate):
+class FollowupUpdate(BaseModel):
+    scheduled_date: Optional[datetime] = None
+    due_date: Optional[datetime] = None
+    status: Optional[str] = None  # not_contacted, draft_ready, awaiting_approval, approved, sent, replied, interested, not_interested, follow_up_due, converted, closed, pending, completed, cancelled
+    suggested_channel: Optional[str] = None
+    reminder_at: Optional[datetime] = None
+    reason: Optional[str] = None
+    next_action: Optional[str] = None
+    assigned_user_id: Optional[int] = None
+    completed_at: Optional[datetime] = None
+    notes: Optional[str] = None
+
+
+class FollowupResponse(BaseModel):
     id: int
     lead_id: int
+    company_id: Optional[int] = None
+    scheduled_date: datetime
+    due_date: Optional[datetime] = None
     status: str
+    suggested_channel: str
+    reminder_at: Optional[datetime] = None
+    reason: Optional[str] = None
+    next_action: Optional[str] = None
+    assigned_user_id: Optional[int] = None
+    completed_at: Optional[datetime] = None
+    notes: Optional[str] = None
     created_at: datetime
+    updated_at: Optional[datetime] = None
     model_config = ConfigDict(from_attributes=True)
 
 

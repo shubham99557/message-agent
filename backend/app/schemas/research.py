@@ -17,12 +17,18 @@ class QualificationFactorResult(BaseModel):
 class QualificationResult(BaseModel):
     company_id: int
     score: float
-    status: str  # High priority, Medium priority, Low priority, Not suitable, Needs manual verification
+    status: str  # High priority, Medium priority, Low priority, Not suitable, Needs manual verification, Unqualified
     reason: str
     factors: List[QualificationFactorResult]
     has_verified_5_plus_laptops: bool
     distinction_note: str
     recommended_next_action: str = "Proceed to outreach"
+    matched_service_id: Optional[int] = None
+    matched_service_name: Optional[str] = None
+    matched_service_rationale: Optional[str] = None
+    website_classification: Optional[str] = None
+    email_verification_status: Optional[str] = None
+    phone_verification_status: Optional[str] = None
     last_verified_at: Optional[datetime] = None
     is_stale: bool = False
 
@@ -97,6 +103,10 @@ class DiscoveredCompanyItem(BaseModel):
     email_verification_status: Optional[str] = "unverified"  # verified, publicly_listed, unverified, unavailable
     phone_verification_status: Optional[str] = "unverified"
     website_status: Optional[str] = "unverified"  # accessible, inaccessible, unverified, unavailable
+    website_classification: Optional[str] = "unverified"  # authentic, likely_authentic, suspicious, parked, unrelated, unavailable, unverified
+    matched_service_id: Optional[int] = None
+    matched_service_name: Optional[str] = None
+    matched_service_rationale: Optional[str] = None
     confidence_level: float = 0.5
     retrieval_timestamp: Optional[datetime] = None
     qualification_score: Optional[float] = None

@@ -559,6 +559,35 @@ def qualify_company(db: Session, company: Company) -> QualificationResult:
         reason = "Does not align with ActTrident target criteria for managed laptop deployments."
         action = "Archive lead record to suppression list."
 
+    # Check suppression registry
+    from app.models.activity import SuppressionList
+    from urllib.parse import urlparse
+    suppressed = False
+    clean_email = (company.public_email or "").strip().lower()
+    if clean_email:
+        supp = db.query(SuppressionList).filter(SuppressionList.identifier == clean_email).first()
+        if supp:
+            suppressed = True
+    if company.website and not suppressed:
+        host = urlparse(company.website).hostname or ""
+        clean_host = host.replace("www.", "").strip().lower()
+        if clean_host:
+            supp = db.query(SuppressionList).filter(SuppressionList.identifier == clean_host).first()
+            if supp:
+                suppressed = True
+
+    if suppressed:
+        status = "Unqualified"
+        reason = "Lead contact or web domain is registered on the suppression / opt-out list."
+        action = "Do not contact. Administratively suppressed."
+
+    # Intelligent Service Matching
+    from app.services.service_catalogue_service import match_service_for_company
+    svc_match = match_service_for_company(company, db=db)
+    matched_svc_id = svc_match.service_id if svc_match else None
+    matched_svc_name = svc_match.service_name if svc_match else None
+    matched_svc_rationale = svc_match.rationale if svc_match else None
+
     v_status = getattr(company, "verification_status", None) or ("demo_fixture" if company.is_demo else "unverified")
     if company.is_demo or v_status == "demo_fixture":
         reason = f"[DEMO FIXTURE — NOT FOR LIVE OUTREACH] {reason}"
@@ -582,6 +611,12 @@ def qualify_company(db: Session, company: Company) -> QualificationResult:
         has_verified_5_plus_laptops=has_laptop_evidence,
         distinction_note=distinction_note,
         recommended_next_action=action,
+        matched_service_id=matched_svc_id,
+        matched_service_name=matched_svc_name,
+        matched_service_rationale=matched_svc_rationale,
+        website_classification=getattr(company, "website_classification", "unverified"),
+        email_verification_status=getattr(company, "email_verification_status", "unknown"),
+        phone_verification_status=getattr(company, "phone_verification_status", "unknown"),
         last_verified_at=now_utc,
         is_stale=False
     )
@@ -592,6 +627,9 @@ def qualify_company(db: Session, company: Company) -> QualificationResult:
     company.qualification_reason = result.reason
     company.qualification_factors = json.dumps([f.model_dump() for f in factors])
     company.has_verified_5_plus_laptops = has_laptop_evidence
+    company.matched_service_id = matched_svc_id
+    company.matched_service_name = matched_svc_name
+    company.matched_service_rationale = matched_svc_rationale
     company.date_last_verified = now_utc
 
     # If lead exists, update pipeline status
@@ -600,6 +638,8 @@ def qualify_company(db: Session, company: Company) -> QualificationResult:
             company.lead.pipeline_status = "qualified"
         elif status == "Needs manual verification":
             company.lead.pipeline_status = "researching"
+        elif status == "Unqualified":
+            company.lead.pipeline_status = "do_not_contact"
 
     db.commit()
     return result

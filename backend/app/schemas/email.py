@@ -7,7 +7,9 @@ class EmailGenerateRequest(BaseModel):
     company_id: int
     contact_id: Optional[int] = None
     campaign_id: Optional[int] = None
-    tone: str = "Friendly professional"  # Formal, Friendly professional, Technical, Short introductory, Follow-up
+    tone: str = "Friendly professional"  # Formal, Friendly professional, Technical, Short introductory, Follow-up, Professional, Concise, Consultative
+    draft_type: Optional[str] = "initial_email"  # initial_email, followup_email, short_intro, whatsapp_draft, linkedin_message
+    service_id: Optional[int] = None
     custom_notes: Optional[str] = None
 
 

@@ -39,11 +39,23 @@ class Company(Base):
     decision_maker_email = Column(String(255), nullable=True)
     decision_maker_linkedin = Column(String(512), nullable=True)
     
-    # AI Qualification
+    # AI Qualification & Service Matching
     qualification_score = Column(Float, default=0.0)
     qualification_status = Column(String(50), default="Needs manual verification")  # High priority, Medium priority, Low priority, Not suitable, Needs manual verification
     qualification_reason = Column(Text, nullable=True)
     qualification_factors = Column(Text, nullable=True)  # JSON formatted factors
+    matched_service_id = Column(Integer, ForeignKey("service_catalogue.id", ondelete="SET NULL"), nullable=True)
+    matched_service_name = Column(String(255), nullable=True)
+    matched_service_rationale = Column(Text, nullable=True)
+    
+    # Granular Verification & Authenticity Classifications
+    website_classification = Column(String(50), default="unverified", nullable=True)  # authentic, likely_authentic, suspicious, parked, unrelated, unavailable, unverified
+    email_verification_status = Column(String(50), default="unknown", nullable=True)  # discovered, syntax_valid, domain_checked, source_confirmed, independently_verified, invalid, unknown
+    phone_verification_status = Column(String(50), default="unknown", nullable=True)  # discovered, format_valid, source_confirmed, independently_verified, invalid, unknown
+    
+    # Follow-Up & Operations Tracking
+    followup_status = Column(String(50), default="not_contacted", nullable=True)  # not_contacted, draft_ready, awaiting_approval, approved, sent, replied, interested, not_interested, follow_up_due, converted, closed
+    internal_notes = Column(Text, nullable=True)
     
     # Demo vs Real Prospect Records Separation & Provenance
     is_demo = Column(Boolean, default=False, nullable=False, index=True)

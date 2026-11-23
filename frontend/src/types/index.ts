@@ -2,6 +2,8 @@ export type ViewType =
   | 'dashboard'
   | 'discovery'
   | 'leads'
+  | 'followups'
+  | 'services'
   | 'research'
   | 'email'
   | 'whatsapp'
@@ -41,6 +43,14 @@ export interface Company {
   qualification_status: string;
   qualification_reason?: string;
   qualification_factors?: string;
+  website_classification?: string;
+  email_verification_status?: string;
+  phone_verification_status?: string;
+  matched_service_id?: number;
+  matched_service_name?: string;
+  matched_service_rationale?: string;
+  followup_status?: string;
+  internal_notes?: string;
   is_demo?: boolean;
   verification_status?: string;
   verification_method?: string;
@@ -118,4 +128,127 @@ export interface ReplyItem {
   is_handled: boolean;
   received_at: string;
   company_name?: string;
+}
+
+export interface DiscoveredCompanyItem {
+  name: string;
+  website?: string;
+  city: string;
+  state?: string;
+  country?: string;
+  industry?: string;
+  description?: string;
+  public_email?: string;
+  public_phone?: string;
+  public_whatsapp?: string;
+  linkedin_url?: string;
+  decision_maker_name?: string;
+  decision_maker_role?: string;
+  employee_count_min?: number;
+  employee_count_max?: number;
+  employee_size_evidence?: string;
+  laptop_count_verified?: number;
+  laptop_count_evidence?: string;
+  laptop_fleet_status?: string;
+  source_url: string;
+  contact_page_url?: string;
+  business_address?: string;
+  missing_information?: string[];
+  source_type: string;
+  is_demo: boolean;
+  verification_status: string;
+  email_verification_status?: string;
+  phone_verification_status?: string;
+  website_status?: string;
+  website_classification?: string;
+  confidence_level: number;
+  qualification_score?: number;
+  qualification_category?: string;
+  qualification_reason?: string;
+  crm_id?: number;
+  crm_status?: string;
+  matched_service_id?: number;
+  matched_service_name?: string;
+  matched_service_rationale?: string;
+}
+
+export interface ServiceCatalogueItem {
+  id: number;
+  service_code: string;
+  service_name: string;
+  description: string;
+  target_business_types: string[];
+  common_business_problems: string[];
+  required_qualification_signals: Record<string, any>;
+  approved_claims: string[];
+  disallowed_claims: string[];
+  discovery_questions?: string[];
+  outreach_templates?: Record<string, Record<string, string>>;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ServiceCatalogueCreate {
+  service_code: string;
+  service_name: string;
+  description: string;
+  target_business_types: string[];
+  common_business_problems: string[];
+  required_qualification_signals?: Record<string, any>;
+  approved_claims: string[];
+  disallowed_claims: string[];
+  discovery_questions?: string[];
+  outreach_templates?: Record<string, Record<string, string>>;
+  is_active?: boolean;
+}
+
+export interface FollowupTask {
+  id: number;
+  lead_id: number;
+  company_id?: number;
+  company_name?: string;
+  scheduled_date: string;
+  due_date?: string;
+  status: string;
+  suggested_channel: string;
+  reminder_at?: string;
+  reason?: string;
+  next_action?: string;
+  assigned_user_id?: number;
+  completed_at?: string;
+  notes?: string;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface SuppressionItem {
+  id: number;
+  identifier: string;
+  channel: string;
+  reason: string;
+  created_at: string;
+}
+
+export interface DiscoveryRunItem {
+  id: number;
+  run_uuid: string;
+  query_summary: string;
+  city?: string;
+  state?: string;
+  country?: string;
+  industry?: string;
+  scope: string;
+  active_providers?: string[];
+  raw_candidates_count: number;
+  unique_businesses_count: number;
+  filtered_facilities_count: number;
+  authentic_websites_count: number;
+  listed_phones_count: number;
+  verified_emails_count: number;
+  high_priority_count: number;
+  medium_priority_count: number;
+  low_priority_count: number;
+  execution_duration_seconds: number;
+  created_at: string;
 }

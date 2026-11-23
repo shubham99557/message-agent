@@ -1060,12 +1060,23 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onCompanyImported 
                               <span className="truncate max-w-[160px]">{comp.website}</span>
                               <ExternalLink className="w-3 h-3 shrink-0" />
                             </a>
-                            <span className={`px-1 rounded text-[9px] font-mono ${comp.website_status === 'accessible' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-800 text-slate-400'}`}>
-                              {comp.website_status === 'accessible' ? 'verified' : 'unverified'}
+                            <span className={`px-1.5 py-0.2 rounded text-[9px] font-mono border ${
+                              comp.website_classification === 'authentic' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' :
+                              comp.website_classification === 'likely_authentic' ? 'bg-blue-500/20 text-blue-300 border-blue-500/30' :
+                              comp.website_classification === 'suspicious' ? 'bg-amber-500/20 text-amber-300 border-amber-500/30' :
+                              comp.website_classification === 'parked' || comp.website_classification === 'unrelated' ? 'bg-rose-500/20 text-rose-300 border-rose-500/30' :
+                              comp.website_status === 'accessible' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' : 'bg-slate-800 text-slate-400 border-slate-700'
+                            }`}>
+                              {comp.website_classification || comp.website_status || 'unverified'}
                             </span>
                           </div>
                         ) : (
                           <span className="text-[11px] text-slate-500 italic block mt-0.5">Website not published</span>
+                        )}
+                        {comp.matched_service_name && (
+                          <div className="text-[9px] font-mono text-indigo-300 bg-indigo-500/10 border border-indigo-500/20 rounded px-1.5 py-0.5 inline-block mt-1">
+                            🎯 {comp.matched_service_name}
+                          </div>
                         )}
                         {comp.contact_page_url && (
                           <div className="flex items-center space-x-1 mt-0.5">
@@ -1118,9 +1129,16 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onCompanyImported 
 
                       <td className="py-3 px-3 space-y-0.5 font-mono text-[11px]">
                         {comp.public_email ? (
-                          <div className="text-slate-200 flex items-center space-x-1">
+                          <div className="text-slate-200 flex items-center space-x-1.5 flex-wrap">
                             <span>✉ {comp.public_email}</span>
-                            <span className="text-[9px] text-emerald-400">({comp.email_verification_status || 'publicly_listed'})</span>
+                            <span className={`px-1 rounded text-[9px] font-mono border ${
+                              comp.email_verification_status === 'independently_verified' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' :
+                              comp.email_verification_status === 'source_confirmed' ? 'bg-teal-500/20 text-teal-300 border-teal-500/30' :
+                              comp.email_verification_status === 'domain_checked' ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30' :
+                              'bg-slate-800 text-slate-400 border-slate-700'
+                            }`}>
+                              {comp.email_verification_status || 'publicly_listed'}
+                            </span>
                           </div>
                         ) : (
                           <div className="text-slate-500 italic">Email not found</div>

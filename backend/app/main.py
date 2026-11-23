@@ -88,6 +88,8 @@ async def lifespan(app: FastAPI):
         if settings.ENVIRONMENT.lower() != "production":
             seed_default_admin(db)
         seed_default_meta_templates(db)
+        from app.services.service_catalogue_service import seed_default_services
+        seed_default_services(db)
         apply_saved_integrations(db)
 
         # Start persistent local background scheduler

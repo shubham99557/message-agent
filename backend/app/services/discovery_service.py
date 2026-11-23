@@ -1221,16 +1221,21 @@ async def run_real_lead_discovery_pipeline(
         timestamp=datetime.now(timezone.utc),
     ))
 
-    # 8. Evaluating suitability (7-factor qualification)
+    # 8. Evaluating suitability (7-factor qualification & service matching)
+    from app.services.service_catalogue_service import match_service_for_company
     qualified_items: List[DiscoveredCompanyItem] = []
     for itm in researched_items:
         if request.auto_qualify:
             score, status_cat, reason_text, factor_results = evaluate_discovered_item_qualification(itm)
+            svc_match = match_service_for_company(itm, db=db)
             itm = itm.model_copy(update={
                 "qualification_score": score,
                 "qualification_category": status_cat,
                 "qualification_reason": reason_text,
                 "qualification_factors": factor_results,
+                "matched_service_id": svc_match.service_id if svc_match else None,
+                "matched_service_name": svc_match.service_name if svc_match else None,
+                "matched_service_rationale": svc_match.rationale if svc_match else None,
             })
         qualified_items.append(itm)
 
@@ -1291,6 +1296,13 @@ async def run_real_lead_discovery_pipeline(
                         if itm.qualification_factors:
                             created_comp.qualification_factors = json.dumps([f.model_dump() for f in itm.qualification_factors])
                         created_comp.verification_status = itm.verification_status
+
+                    created_comp.website_classification = getattr(itm, "website_classification", "unverified")
+                    created_comp.email_verification_status = getattr(itm, "email_verification_status", "unknown")
+                    created_comp.phone_verification_status = getattr(itm, "phone_verification_status", "unknown")
+                    created_comp.matched_service_id = getattr(itm, "matched_service_id", None)
+                    created_comp.matched_service_name = getattr(itm, "matched_service_name", None)
+                    created_comp.matched_service_rationale = getattr(itm, "matched_service_rationale", None)
 
                     # Attach ContactSource records
                     for src in (itm.provenance_sources or []):
@@ -1356,10 +1368,42 @@ async def run_real_lead_discovery_pipeline(
 
     # Calculate Lead Quality KPI Summary Metrics
     comm_relevant = len([itm for itm in final_items if not itm.is_demo and itm.verification_status != "demo_fixture"])
-    v_phone = len([itm for itm in final_items if itm.public_phone and itm.phone_verification_status in ("verified", "publicly_listed")])
+    v_phone = len([itm for itm in final_items if itm.public_phone and itm.phone_verification_status in ("verified", "publicly_listed", "independently_verified", "source_confirmed")])
     high_p = len([itm for itm in final_items if (itm.qualification_score or 0) >= 70.0])
     med_p = len([itm for itm in final_items if 50.0 <= (itm.qualification_score or 0) < 70.0])
     low_p = len([itm for itm in final_items if (itm.qualification_score or 0) < 50.0])
+
+    # Persist DiscoveryRun record
+    try:
+        from app.models.discovery import DiscoveryRun
+        import uuid
+        d_run = DiscoveryRun(
+            run_uuid=str(uuid.uuid4()),
+            query_summary=query_summary,
+            city=request.city,
+            state=request.state,
+            country=request.country or "India",
+            industry=request.industry,
+            scope="city" if request.city else "country",
+            active_providers=["OpenStreetMap", "Tavily" if is_tavily_configured() else "None"],
+            failed_providers=[],
+            raw_candidates_count=len(raw_results),
+            unique_businesses_count=len(final_items),
+            filtered_facilities_count=excluded_facilities_count,
+            authentic_websites_count=websites_verified_count,
+            listed_phones_count=v_phone,
+            verified_emails_count=public_emails_count,
+            high_priority_count=high_p,
+            medium_priority_count=med_p,
+            low_priority_count=low_p,
+            execution_duration_seconds=int(elapsed),
+            created_at=datetime.now(timezone.utc),
+        )
+        db.add(d_run)
+        db.commit()
+    except Exception as exc:
+        logger.debug(f"Could not persist DiscoveryRun: {exc}")
+        db.rollback()
 
     return DiscoveryPipelineResponse(
         query_summary=query_summary,

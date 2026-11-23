@@ -43,6 +43,8 @@ def generate_email_endpoint(
         contact_id=req.contact_id,
         campaign_id=req.campaign_id,
         tone=req.tone,
+        draft_type=req.draft_type or "initial_email",
+        service_id=req.service_id,
         custom_notes=req.custom_notes
     )
     

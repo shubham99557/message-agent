@@ -14,6 +14,7 @@ from app.schemas.lead import (
     LeadResponse,
     LeadUpdate,
     FollowupCreate,
+    FollowupUpdate,
     FollowupResponse,
     MeetingCreate,
     MeetingResponse,
@@ -26,6 +27,9 @@ from app.services.crm_service import (
     update_lead,
     change_lead_status,
     add_followup,
+    list_followups,
+    update_followup,
+    delete_followup,
     add_meeting,
     create_trial,
     handle_opt_out,
@@ -158,6 +162,55 @@ def schedule_lead_followup(
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     return add_followup(db, lead_id, followup_in)
+
+
+@router.get("/followups", response_model=dict)
+def get_all_followups(
+    status: Optional[str] = None,
+    due_only: bool = False,
+    lead_id: Optional[int] = None,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Lists operational follow-up tasks across leads, with due-date and status filtering."""
+    items, total = list_followups(
+        db, status=status, due_only=due_only, lead_id=lead_id, skip=skip, limit=limit
+    )
+    results = []
+    for f in items:
+        resp = FollowupResponse.model_validate(f).model_dump()
+        resp["company_name"] = f.company.name if f.company else (f.lead.company.name if (f.lead and f.lead.company) else None)
+        results.append(resp)
+    return {"items": results, "total": total}
+
+
+@router.patch("/followups/{followup_id}", response_model=FollowupResponse)
+def update_existing_followup(
+    followup_id: int,
+    followup_in: FollowupUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["admin", "manager", "sales_rep"]))
+):
+    """Updates follow-up task details, status transition, or completion timestamp."""
+    fu = update_followup(db, followup_id, followup_in)
+    if not fu:
+        raise HTTPException(status_code=404, detail=f"Followup with ID {followup_id} not found")
+    return fu
+
+
+@router.delete("/followups/{followup_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_followup(
+    followup_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["admin", "manager"]))
+):
+    """Deletes a follow-up task."""
+    success = delete_followup(db, followup_id)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Followup with ID {followup_id} not found")
+    return None
 
 
 @router.post("/leads/{lead_id}/meetings", response_model=MeetingResponse, status_code=status.HTTP_201_CREATED)

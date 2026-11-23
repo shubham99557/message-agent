@@ -194,6 +194,16 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onSelectCompany }) => {
                         )}
                       </div>
                       {c.public_email && <div className="text-[11px] text-slate-400 font-mono">{c.public_email}</div>}
+                      {c.matched_service_name && (
+                        <div className="text-[10px] text-indigo-300 font-mono mt-0.5 truncate max-w-[200px]" title={c.matched_service_rationale || ''}>
+                          🎯 {c.matched_service_name}
+                        </div>
+                      )}
+                      {c.followup_status && c.followup_status !== 'not_contacted' && (
+                        <span className="text-[9px] px-1 py-0.2 bg-amber-500/20 text-amber-300 rounded font-mono border border-amber-500/30 inline-block mt-0.5">
+                          Status: {c.followup_status}
+                        </span>
+                      )}
                     </td>
                     <td className="py-3 px-3">
                       <div>{c.city}, {c.state || c.country}</div>

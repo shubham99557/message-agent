@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, status, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -89,6 +89,12 @@ def get_audit_logs(
     return db.query(AuditLog).order_by(AuditLog.timestamp.desc()).offset(skip).limit(limit).all()
 
 
+class SuppressionCreate(BaseModel):
+    identifier: str
+    channel: str = "all"
+    reason: str = "manual_suppression"
+
+
 @router.get("/suppression-list", response_model=List[dict])
 def get_suppression_list(
     db: Session = Depends(get_db),
@@ -104,6 +110,58 @@ def get_suppression_list(
             "created_at": i.created_at
         } for i in items
     ]
+
+
+@router.post("/suppression-list", status_code=status.HTTP_201_CREATED)
+def add_to_suppression_list(
+    payload: SuppressionCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["admin", "manager"]))
+):
+    clean_id = payload.identifier.strip().lower()
+    existing = db.query(SuppressionList).filter(SuppressionList.identifier == clean_id).first()
+    if existing:
+        return {"id": existing.id, "identifier": existing.identifier, "status": "already_present"}
+    item = SuppressionList(
+        identifier=clean_id,
+        channel=payload.channel,
+        reason=payload.reason,
+        source=f"operator:{current_user.email}"
+    )
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    record_audit_log(
+        db=db,
+        action="add_suppression",
+        entity_type="suppression",
+        entity_id=str(item.id),
+        user_id=current_user.id,
+        details={"identifier": clean_id, "reason": payload.reason}
+    )
+    return {"id": item.id, "identifier": item.identifier, "status": "added"}
+
+
+@router.delete("/suppression-list/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_from_suppression_list(
+    item_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["admin", "manager"]))
+):
+    item = db.query(SuppressionList).filter(SuppressionList.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Suppression entry not found")
+    record_audit_log(
+        db=db,
+        action="remove_suppression",
+        entity_type="suppression",
+        entity_id=str(item.id),
+        user_id=current_user.id,
+        details={"identifier": item.identifier}
+    )
+    db.delete(item)
+    db.commit()
+    return None
 
 
 @router.get("/kill-switch")

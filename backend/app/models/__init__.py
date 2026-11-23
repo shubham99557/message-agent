@@ -14,6 +14,8 @@ from app.models.whatsapp import WhatsAppTemplate, WhatsAppMessage, WebhookEvent
 from app.models.linkedin import LinkedInMessage, LINKEDIN_MESSAGE_TYPES, LINKEDIN_MESSAGE_STATES
 from app.models.reply import Conversation, Reply, REPLY_CATEGORIES
 from app.models.activity import AuditLog, IntegrationCredential, SuppressionList
+from app.models.discovery import DiscoveryRun
+from app.models.service_catalogue import ServiceCatalogueItem
 from app.models.job import BackgroundTaskRecord, DeadLetterTask, TASK_CATEGORIES, TASK_STATUSES
 from app.models.orchestration import SystemSetting, OutboundDispatchOutbox, OUTBOX_STATUSES
 

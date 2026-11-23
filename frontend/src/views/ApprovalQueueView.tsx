@@ -15,7 +15,9 @@ import {
   Layers,
   Save,
   RefreshCw,
-  Calendar
+  Calendar,
+  Copy,
+  CheckCircle2
 } from 'lucide-react';
 
 export const ApprovalQueueView: React.FC = () => {
@@ -27,6 +29,8 @@ export const ApprovalQueueView: React.FC = () => {
   const [editSubject, setEditSubject] = useState('');
   const [editBody, setEditBody] = useState('');
   const [emailMode, setEmailMode] = useState<any>(null);
+  const [manualSendDraft, setManualSendDraft] = useState<EmailDraft | null>(null);
+  const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
 
   const loadQueue = async () => {
     setLoading(true);
@@ -345,21 +349,31 @@ export const ApprovalQueueView: React.FC = () => {
                   )}
 
                   {draft.approval_status === 'approved' && (
-                    <button
-                      onClick={async () => {
-                        try {
-                          const res = await api.sendApprovedEmail(draft.id);
-                          alert(res.message || `Email status: ${res.status}`);
-                          loadQueue();
-                        } catch (err: any) {
-                          alert(`Error: ${err.message}`);
-                        }
-                      }}
-                      className="px-3 py-1 bg-cobalt-600 hover:bg-cobalt-500 text-white rounded text-xs font-medium flex items-center space-x-1 shadow-sm"
-                    >
-                      <Send className="w-3.5 h-3.5" />
-                      <span>Send Now</span>
-                    </button>
+                    <div className="flex items-center space-x-2">
+                      <button
+                        onClick={() => setManualSendDraft(draft)}
+                        className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-xs font-medium flex items-center space-x-1 shadow-sm"
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                        <span>Manual Send / Copy</span>
+                      </button>
+                      <button
+                        onClick={async () => {
+                          try {
+                            const res = await api.sendApprovedEmail(draft.id);
+                            alert(res.message || `Email status: ${res.status}`);
+                            loadQueue();
+                          } catch (err: any) {
+                            alert(`Notice: ${err.message}`);
+                          }
+                        }}
+                        className="px-3 py-1 bg-cobalt-800 hover:bg-cobalt-700 text-slate-200 rounded text-xs font-medium flex items-center space-x-1 border border-cobalt-700"
+                        title="Attempts provider dispatch if live sending is enabled"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                        <span>Dispatch Engine</span>
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>
@@ -411,6 +425,129 @@ export const ApprovalQueueView: React.FC = () => {
                   <Save className="w-3.5 h-3.5" />
                   <span>Save & Mark Approved</span>
                 </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Manual Send & Copy Modal */}
+      {manualSendDraft && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-cobalt-900 border border-cobalt-700 rounded-xl p-6 w-full max-w-2xl space-y-4 text-xs shadow-2xl">
+            <div className="flex items-center justify-between border-b border-cobalt-800 pb-3">
+              <div>
+                <h3 className="font-bold text-slate-100 text-sm flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                  Manual Outbound Send & Clipboard Verification
+                </h3>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Fail-closed protocol: copy vetted content into your corporate email or communication client.
+                </p>
+              </div>
+              <button
+                onClick={() => { setManualSendDraft(null); setCopyFeedback(null); }}
+                className="text-slate-400 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              {/* Recipient */}
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="text-[11px] font-semibold text-slate-300">Recipient</label>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(manualSendDraft.recipient_email || '');
+                      setCopyFeedback('recipient');
+                      setTimeout(() => setCopyFeedback(null), 2000);
+                    }}
+                    className="text-[10px] text-indigo-400 hover:text-indigo-300 flex items-center gap-1 font-mono"
+                  >
+                    <Copy className="w-3 h-3" />
+                    {copyFeedback === 'recipient' ? 'Copied!' : 'Copy Email'}
+                  </button>
+                </div>
+                <div className="p-2 bg-cobalt-950 border border-cobalt-800 rounded font-mono text-slate-200">
+                  {manualSendDraft.recipient_name ? `${manualSendDraft.recipient_name} <${manualSendDraft.recipient_email}>` : manualSendDraft.recipient_email}
+                </div>
+              </div>
+
+              {/* Subject */}
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="text-[11px] font-semibold text-slate-300">Subject Line</label>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(manualSendDraft.subject);
+                      setCopyFeedback('subject');
+                      setTimeout(() => setCopyFeedback(null), 2000);
+                    }}
+                    className="text-[10px] text-indigo-400 hover:text-indigo-300 flex items-center gap-1 font-mono"
+                  >
+                    <Copy className="w-3 h-3" />
+                    {copyFeedback === 'subject' ? 'Copied!' : 'Copy Subject'}
+                  </button>
+                </div>
+                <div className="p-2 bg-cobalt-950 border border-cobalt-800 rounded text-slate-200 font-medium">
+                  {manualSendDraft.subject}
+                </div>
+              </div>
+
+              {/* Body */}
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="text-[11px] font-semibold text-slate-300">Outreach Body</label>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(manualSendDraft.body_text);
+                      setCopyFeedback('body');
+                      setTimeout(() => setCopyFeedback(null), 2000);
+                    }}
+                    className="text-[10px] text-indigo-400 hover:text-indigo-300 flex items-center gap-1 font-mono"
+                  >
+                    <Copy className="w-3 h-3" />
+                    {copyFeedback === 'body' ? 'Copied!' : 'Copy Body'}
+                  </button>
+                </div>
+                <pre className="p-3 bg-cobalt-950 border border-cobalt-800 rounded text-slate-300 font-sans text-xs whitespace-pre-wrap max-h-60 overflow-y-auto leading-relaxed">
+                  {manualSendDraft.body_text}
+                </pre>
+              </div>
+
+              {/* Actions */}
+              <div className="flex justify-between items-center pt-3 border-t border-cobalt-800">
+                <span className="text-[10px] text-slate-500 font-mono">
+                  Channel: {manualSendDraft.provider || 'Corporate Email'} • Status: Approved
+                </span>
+                <div className="flex space-x-2">
+                  <button
+                    onClick={() => { setManualSendDraft(null); setCopyFeedback(null); }}
+                    className="px-3 py-1.5 bg-cobalt-950 text-slate-400 hover:text-slate-200 rounded text-xs"
+                  >
+                    Close
+                  </button>
+                  <button
+                    onClick={async () => {
+                      try {
+                        await api.updateEmailDraft(manualSendDraft.id, {
+                          approval_status: 'sent'
+                        });
+                        alert('Marked as sent manually. Record transitioned to sent state.');
+                        setManualSendDraft(null);
+                        loadQueue();
+                      } catch (err: any) {
+                        alert(`Error: ${err.message}`);
+                      }
+                    }}
+                    className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-medium flex items-center space-x-1.5 shadow-sm"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Confirm Sent Manually</span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>

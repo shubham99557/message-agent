@@ -17,6 +17,7 @@ Strict Truthfulness:
 """
 import logging
 import re
+import asyncio
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional, Tuple
 from urllib.parse import urlparse, urljoin
@@ -27,6 +28,25 @@ from app.integrations.discovery_adapters import is_demo_domain
 from app.schemas.research import DiscoveredCompanyItem
 
 logger = logging.getLogger("acttrident.verification")
+
+
+def check_email_domain_mx(email: str) -> bool:
+    """Performs DNS MX / A record check on email domain to verify deliverability."""
+    try:
+        domain = email.split("@")[-1].strip().lower()
+        if not domain or is_demo_domain(domain):
+            return False
+        import dns.resolver
+        answers = dns.resolver.resolve(domain, 'MX', lifetime=2.5)
+        return len(answers) > 0
+    except Exception:
+        try:
+            import dns.resolver
+            answers = dns.resolver.resolve(domain, 'A', lifetime=2.5)
+            return len(answers) > 0
+        except Exception:
+            return False
+
 
 # Regex for standard Indian business phone numbers
 INDIAN_PHONE_REGEX = re.compile(
@@ -119,6 +139,7 @@ async def verify_discovered_company(item: DiscoveredCompanyItem) -> DiscoveredCo
     # Initialize verification fields
     verified_website: Optional[str] = item.website
     website_status = "unavailable"
+    website_classification = "unverified"
     contact_page_url: Optional[str] = item.contact_page_url
     business_address: Optional[str] = item.business_address
     public_emails: List[str] = []
@@ -158,6 +179,7 @@ async def verify_discovered_company(item: DiscoveredCompanyItem) -> DiscoveredCo
 
             if is_gambling or is_parked:
                 rejection_reason = "gambling/betting hijack" if is_gambling else "parked/expired domain"
+                website_classification = "unrelated" if is_gambling else "parked"
                 logger.info(f"Rejecting unauthentic website {item.website}: detected {rejection_reason}")
                 website_status = "rejected_unauthentic"
                 verified_website = None
@@ -174,6 +196,12 @@ async def verify_discovered_company(item: DiscoveredCompanyItem) -> DiscoveredCo
             else:
                 website_status = "accessible"
                 verified_website = final_url or item.website
+                clean_name_tokens = [w for w in re.sub(r'[^\w\s]', '', item.name.lower()).split() if len(w) > 3]
+                has_name_token = any(t in check_sample for t in clean_name_tokens)
+                if has_name_token or any(k in check_sample for k in ["software", "technology", "solutions", "it services", "digital", "consulting", "web", "cloud"]):
+                    website_classification = "authentic"
+                else:
+                    website_classification = "likely_authentic"
                 provenance_sources.append({
                     "field_name": "official_website",
                     "field_value": verified_website,
@@ -382,6 +410,7 @@ async def verify_discovered_company(item: DiscoveredCompanyItem) -> DiscoveredCo
                             })
         else:
             website_status = "inaccessible"
+            website_classification = "unavailable"
             provenance_sources.append({
                 "field_name": "official_website",
                 "field_value": item.website,
@@ -394,32 +423,80 @@ async def verify_discovered_company(item: DiscoveredCompanyItem) -> DiscoveredCo
             })
     elif not item.website:
         website_status = "unavailable"
+        website_classification = "unavailable"
 
-    # Determine email verification status
+    # Determine granular email verification status
     selected_email = public_emails[0] if public_emails else None
+    has_mx = False
     if selected_email:
-        email_status = "publicly_listed"
+        if not EMAIL_REGEX.match(selected_email) or any(selected_email.endswith(ext) for ext in INVALID_EMAIL_EXTENSIONS):
+            email_status = "invalid"
+        else:
+            has_mx = await asyncio.to_thread(check_email_domain_mx, selected_email)
+            found_on_official_site = bool(verified_website and any(
+                p.get("field_name") == "public_email" and p.get("source_type") == "official_website"
+                for p in provenance_sources
+            ))
+            had_in_initial_item = bool(item.public_email and item.public_email.lower().strip() == selected_email)
+
+            if has_mx and found_on_official_site and had_in_initial_item:
+                email_status = "independently_verified"
+            elif found_on_official_site:
+                email_status = "source_confirmed"
+            elif has_mx:
+                email_status = "domain_checked"
+            else:
+                email_status = "syntax_valid"
+
+        provenance_sources.append({
+            "field_name": "public_email",
+            "field_value": selected_email,
+            "source_url": verified_website or item.source_url,
+            "source_type": "official_website" if (verified_website and email_status in ("source_confirmed", "independently_verified")) else "directory",
+            "retrieval_timestamp": now.isoformat(),
+            "verification_status": email_status,
+            "confidence_score": 0.95 if email_status in ("independently_verified", "source_confirmed") else (0.70 if email_status == "domain_checked" else 0.0),
+            "evidence_snippet": f"Email status '{email_status}' (DNS MX deliverability: {has_mx})",
+        })
     else:
-        email_status = "unavailable"
+        email_status = "unknown"
         provenance_sources.append({
             "field_name": "public_email",
             "field_value": None,
             "source_url": verified_website or item.source_url,
             "source_type": "verification_engine",
             "retrieval_timestamp": now.isoformat(),
-            "verification_status": "unavailable",
+            "verification_status": "unknown",
             "confidence_score": 1.0,
             "evidence_snippet": "No publicly listed business email address discovered on official website or registry.",
         })
 
-    # Determine phone verification status
+    # Determine granular phone verification status
     selected_phone = public_phones[0] if public_phones else None
-    phone_status = "publicly_listed" if selected_phone else "unavailable"
+    if selected_phone:
+        clean_phone = re.sub(r'[\s.-]', '', selected_phone)
+        if not INDIAN_PHONE_REGEX.search(selected_phone) and len(clean_phone) < 8:
+            phone_status = "invalid"
+        else:
+            found_on_official_site = bool(verified_website and any(
+                p.get("field_name") == "public_phone" and p.get("source_type") == "official_website"
+                for p in provenance_sources
+            ))
+            had_in_initial_item = bool(item.public_phone and item.public_phone.strip() == selected_phone)
+
+            if found_on_official_site and had_in_initial_item:
+                phone_status = "independently_verified"
+            elif found_on_official_site:
+                phone_status = "source_confirmed"
+            else:
+                phone_status = "format_valid"
+    else:
+        phone_status = "unknown"
 
     # Overall verification status
-    if website_status == "accessible" and selected_email:
+    if website_status == "accessible" and selected_email and email_status in ("independently_verified", "source_confirmed", "domain_checked"):
         overall_v_status = "verified"
-        confidence = 0.85
+        confidence = 0.90
     elif website_status == "accessible":
         overall_v_status = "partially_verified"
         confidence = 0.65
@@ -450,6 +527,7 @@ async def verify_discovered_company(item: DiscoveredCompanyItem) -> DiscoveredCo
     return item.model_copy(update={
         "website": verified_website,
         "website_status": website_status,
+        "website_classification": website_classification,
         "contact_page_url": contact_page_url,
         "business_address": business_address,
         "public_email": selected_email,

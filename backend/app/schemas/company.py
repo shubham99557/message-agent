@@ -73,6 +73,17 @@ class CompanyBase(BaseModel):
     decision_maker_role: Optional[str] = None
     decision_maker_email: Optional[str] = None
     decision_maker_linkedin: Optional[str] = None
+    
+    # Granular Statuses & Service Matching
+    website_classification: Optional[str] = "unverified"
+    email_verification_status: Optional[str] = "unknown"
+    phone_verification_status: Optional[str] = "unknown"
+    matched_service_id: Optional[int] = None
+    matched_service_name: Optional[str] = None
+    matched_service_rationale: Optional[str] = None
+    followup_status: Optional[str] = "not_contacted"
+    internal_notes: Optional[str] = None
+    
     is_demo: bool = False
 
 
@@ -107,6 +118,14 @@ class CompanyUpdate(BaseModel):
     qualification_status: Optional[str] = None
     qualification_score: Optional[float] = None
     qualification_reason: Optional[str] = None
+    website_classification: Optional[str] = None
+    email_verification_status: Optional[str] = None
+    phone_verification_status: Optional[str] = None
+    matched_service_id: Optional[int] = None
+    matched_service_name: Optional[str] = None
+    matched_service_rationale: Optional[str] = None
+    followup_status: Optional[str] = None
+    internal_notes: Optional[str] = None
     is_demo: Optional[bool] = None
 
 

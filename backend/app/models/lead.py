@@ -106,14 +106,24 @@ class Followup(Base):
     __tablename__ = "followups"
 
     id = Column(Integer, primary_key=True, index=True)
-    lead_id = Column(Integer, ForeignKey("leads.id", ondelete="CASCADE"), nullable=False)
-    scheduled_date = Column(DateTime, nullable=False)
-    status = Column(String(50), default="pending")  # pending, completed, cancelled
-    suggested_channel = Column(String(50), default="email")  # email, call, meeting
+    lead_id = Column(Integer, ForeignKey("leads.id", ondelete="CASCADE"), nullable=False, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id", ondelete="CASCADE"), nullable=True, index=True)
+    scheduled_date = Column(DateTime, nullable=False, index=True)
+    due_date = Column(DateTime, nullable=True, index=True)
+    status = Column(String(50), default="not_contacted", nullable=False, index=True)  # not_contacted, draft_ready, awaiting_approval, approved, sent, replied, interested, not_interested, follow_up_due, converted, closed, pending, completed, cancelled
+    suggested_channel = Column(String(50), default="email")  # email, call, whatsapp, meeting
+    reminder_at = Column(DateTime, nullable=True, index=True)
+    reason = Column(String(255), nullable=True)
+    next_action = Column(String(255), nullable=True)
+    assigned_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    completed_at = Column(DateTime, nullable=True)
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     lead = relationship("Lead", back_populates="followups")
+    company = relationship("Company")
+    assigned_user = relationship("User")
 
 
 class Meeting(Base):
