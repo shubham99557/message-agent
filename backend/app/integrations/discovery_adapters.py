@@ -51,7 +51,17 @@ EXCLUDED_FACILITY_PATTERNS = [
     "railway station", "bus terminus", "bus stand", "toll plaza",
     "temple", "mandir", "masjid", "mosque", "church", "gurudwara", "ashram",
     "airconditioning", "air conditioning", "ac repair", "surgical", "pathology",
-    "laboratory", "lab solutions", "diagnostic", "jeweller", "jewel", "sweets", "restaurant", "hotel"
+    "laboratory", "lab solutions", "diagnostic", "jeweller", "jewel", "sweets", "restaurant", "hotel",
+    # Retail hardware / computer shops / mobile repair / CCTV
+    "computer store", "computer plaza", "hardware store", "computer shop", "mobile store",
+    "laptop repair", "computer repair", "cctv camera", "cctv security", "xerox", "photocopy",
+    "computer world", "digital store", "electronics store",
+    # Training institutes / tuition centres / study centres
+    "study center", "study centre", "computer study", "training centre", "training center",
+    "computer training", "coaching", "tuition", "computer education", "study circle",
+    # Public kiosks / citizen service centers / internet cafes
+    "common service centre", "common service center", "csc", "sahaj", "citizen service",
+    "online centre", "online center", "cyber cafe", "internet cafe", "printing press"
 ]
 
 
@@ -230,8 +240,8 @@ class OpenStreetMapPublicAdapter(DiscoverySourceAdapter):
                             )
                             if not city_matched:
                                 continue
-                            # Canonicalize city name to the queried target city
-                            extracted_city = city
+                            # Preserve genuine city if present in address, otherwise use queried city
+                            extracted_city = addr.get("city") or addr.get("town") or addr.get("municipality") or city
 
                         seen_names.add(display.lower())
 
@@ -444,8 +454,8 @@ class TavilyDiscoveryAdapter(DiscoverySourceAdapter):
                     source_url=url,
                     source_type=src_type,
                     is_demo=False,
-                    verification_status="partially_verified" if official_web else "unverified",
-                    confidence_level=0.80 if official_web else 0.65,
+                    verification_status="unverified",
+                    confidence_level=0.75,
                     retrieval_timestamp=now,
                     provenance_sources=provenance,
                 ))
@@ -542,8 +552,8 @@ class SerpApiDiscoveryAdapter(DiscoverySourceAdapter):
                     source_url=link,
                     source_type=src_type,
                     is_demo=False,
-                    verification_status="partially_verified" if official_web else "unverified",
-                    confidence_level=0.80 if official_web else 0.65,
+                    verification_status="unverified",
+                    confidence_level=0.75,
                     retrieval_timestamp=now,
                 ))
                 if len(items) >= limit:

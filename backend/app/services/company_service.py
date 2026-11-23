@@ -21,7 +21,21 @@ def normalize_domain(url_or_domain: Optional[str]) -> Optional[str]:
     return val
 
 
-def find_duplicate_company(db: Session, name: str, website: Optional[str] = None, email: Optional[str] = None) -> Optional[Company]:
+def find_duplicate_company(
+    db: Session,
+    name: str,
+    website: Optional[str] = None,
+    email: Optional[str] = None,
+    source_url: Optional[str] = None,
+) -> Optional[Company]:
+    if source_url:
+        from app.models.company import ContactSource
+        matched_source = db.query(ContactSource).filter(ContactSource.source_url == source_url.strip()).first()
+        if matched_source and matched_source.company_id:
+            comp = db.query(Company).filter(Company.id == matched_source.company_id).first()
+            if comp:
+                return comp
+
     query = db.query(Company)
     conditions = []
     

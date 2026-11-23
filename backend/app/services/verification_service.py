@@ -53,6 +53,19 @@ INVALID_EMAIL_EXTENSIONS = (
 # Non-contact generic email prefixes to de-prioritize or flag
 ROLE_BASED_PREFIXES = ('info@', 'contact@', 'support@', 'sales@', 'hello@', 'admin@', 'office@', 'enquiry@', 'queries@')
 
+# Keywords indicative of hijacked, gambling, parked, or expired domains
+UNAUTHENTIC_GAMBLING_KEYWORDS = (
+    "togel", "slot", "casino", "judi", "sbobet", "gambling", "betting",
+    "poker", "jackpot", "rtp live", "situs judi", "pragmatic play", "maxwin", "gacor"
+)
+PARKED_EXPIRED_KEYWORDS = (
+    "buy this domain", "domain is for sale", "domain for sale", "parked domain",
+    "this domain is parked", "sedo domain parking", "godaddy parking", "domain expired",
+    "account suspended", "cpanel default page", "iis windows server",
+    "website under construction", "domain available for purchase", "namecheap parking",
+    "hugedomains", "dan.com", "afternic", "renew your domain"
+)
+
 
 def _strip_html_to_text(html: str) -> str:
     """Strips scripts, styles, and tags, returning clean normalized text."""
@@ -135,114 +148,135 @@ async def verify_discovered_company(item: DiscoveredCompanyItem) -> DiscoveredCo
             max_redirects=3,
         )
         if success and homepage_html:
-            website_status = "accessible"
-            verified_website = final_url or item.website
-            provenance_sources.append({
-                "field_name": "official_website",
-                "field_value": verified_website,
-                "source_url": verified_website,
-                "source_type": "official_website",
-                "retrieval_timestamp": now.isoformat(),
-                "verification_status": "verified",
-                "confidence_score": 0.95,
-                "evidence_snippet": f"Successfully verified reachability of {verified_website}",
-            })
-
-            # Extract Title & Description
+            # Check for domain hijacking, gambling, or parked domain signatures
             title_m = re.search(r'<title[^>]*>(.*?)</title>', homepage_html, re.IGNORECASE | re.DOTALL)
-            if title_m:
-                title_clean = sanitize_untrusted_text(title_m.group(1).strip()[:180])
-                if not description or len(description) < 40:
-                    description = title_clean
+            title_clean = sanitize_untrusted_text(title_m.group(1).strip()[:180]) if title_m else ""
+            check_sample = f"{title_clean} {homepage_html[:4000]}".lower()
 
-            meta_desc_m = re.search(r'<meta[^>]*name=["\']description["\'][^>]*content=["\'](.*?)["\']', homepage_html, re.IGNORECASE)
-            if meta_desc_m:
-                meta_desc = sanitize_untrusted_text(meta_desc_m.group(1).strip()[:400])
-                if meta_desc:
-                    description = meta_desc
-                    extracted_snippets.append(f"Official meta description: {meta_desc[:150]}")
+            is_gambling = any(kw in check_sample for kw in UNAUTHENTIC_GAMBLING_KEYWORDS)
+            is_parked = any(kw in check_sample for kw in PARKED_EXPIRED_KEYWORDS)
 
-            # Extract Contact / Enquiry page link from homepage
-            contact_links = _extract_links_by_keywords(homepage_html, verified_website, ["contact", "enquiry", "inquiry", "reach-us", "reach", "location"])
-            if contact_links and not contact_page_url:
-                contact_page_url = contact_links[0]
+            if is_gambling or is_parked:
+                rejection_reason = "gambling/betting hijack" if is_gambling else "parked/expired domain"
+                logger.info(f"Rejecting unauthentic website {item.website}: detected {rejection_reason}")
+                website_status = "rejected_unauthentic"
+                verified_website = None
                 provenance_sources.append({
-                    "field_name": "contact_page",
-                    "field_value": contact_page_url,
-                    "source_url": contact_page_url,
+                    "field_name": "official_website",
+                    "field_value": item.website,
+                    "source_url": item.website,
                     "source_type": "official_website",
                     "retrieval_timestamp": now.isoformat(),
-                    "verification_status": "verified",
-                    "confidence_score": 0.90,
-                    "evidence_snippet": f"Discovered official contact/enquiry link: {contact_page_url}",
+                    "verification_status": "unverified",
+                    "confidence_score": 0.0,
+                    "evidence_snippet": f"Website rejected: detected {rejection_reason} (title: '{title_clean[:80]}')",
                 })
-
-            # Extract Indian Business Address from Homepage
-            home_text = _strip_html_to_text(homepage_html)
-            addr_m = INDIAN_ADDRESS_REGEX.search(home_text)
-            if addr_m and not business_address:
-                business_address = sanitize_untrusted_text(addr_m.group(0).strip()[:200])
+            else:
+                website_status = "accessible"
+                verified_website = final_url or item.website
                 provenance_sources.append({
-                    "field_name": "business_address",
-                    "field_value": business_address,
+                    "field_name": "official_website",
+                    "field_value": verified_website,
                     "source_url": verified_website,
                     "source_type": "official_website",
                     "retrieval_timestamp": now.isoformat(),
-                    "verification_status": "publicly_listed",
-                    "confidence_score": 0.85,
-                    "evidence_snippet": f"Found business address on homepage: {business_address}",
+                    "verification_status": "verified",
+                    "confidence_score": 0.95,
+                    "evidence_snippet": f"Successfully verified reachability and content of {verified_website}",
                 })
 
-            # Extract Emails from Homepage
-            home_emails = set(EMAIL_REGEX.findall(homepage_html))
-            for em in home_emails:
-                em_l = em.lower().strip()
-                if not any(em_l.endswith(ext) for ext in INVALID_EMAIL_EXTENSIONS) and not is_demo_domain(em_l):
-                    if em_l not in public_emails:
-                        public_emails.append(em_l)
-                        provenance_sources.append({
-                            "field_name": "public_email",
-                            "field_value": em_l,
-                            "source_url": verified_website,
-                            "source_type": "official_website",
-                            "retrieval_timestamp": now.isoformat(),
-                            "verification_status": "publicly_listed",
-                            "confidence_score": 0.90,
-                            "evidence_snippet": f"Found public email on official homepage: {em_l}",
-                        })
+                # Extract Title & Description
+                if not description or len(description) < 40:
+                    description = title_clean
 
-            # Extract Phones from Homepage
-            home_phones = set(INDIAN_PHONE_REGEX.findall(homepage_html))
-            for ph in home_phones:
-                cleaned_ph = re.sub(r'[\s.-]', '', ph)
-                if len(cleaned_ph) >= 10 and ph.strip() not in public_phones:
-                    public_phones.append(ph.strip())
+                meta_desc_m = re.search(r'<meta[^>]*name=["\']description["\'][^>]*content=["\'](.*?)["\']', homepage_html, re.IGNORECASE)
+                if meta_desc_m:
+                    meta_desc = sanitize_untrusted_text(meta_desc_m.group(1).strip()[:400])
+                    if meta_desc:
+                        description = meta_desc
+                        extracted_snippets.append(f"Official meta description: {meta_desc[:150]}")
+
+                # Extract Contact / Enquiry page link from homepage
+                contact_links = _extract_links_by_keywords(homepage_html, verified_website, ["contact", "enquiry", "inquiry", "reach-us", "reach", "location"])
+                if contact_links and not contact_page_url:
+                    contact_page_url = contact_links[0]
                     provenance_sources.append({
-                        "field_name": "public_phone",
-                        "field_value": ph.strip(),
+                        "field_name": "contact_page",
+                        "field_value": contact_page_url,
+                        "source_url": contact_page_url,
+                        "source_type": "official_website",
+                        "retrieval_timestamp": now.isoformat(),
+                        "verification_status": "verified",
+                        "confidence_score": 0.90,
+                        "evidence_snippet": f"Discovered official contact/enquiry link: {contact_page_url}",
+                    })
+
+                # Extract Indian Business Address from Homepage
+                home_text = _strip_html_to_text(homepage_html)
+                addr_m = INDIAN_ADDRESS_REGEX.search(home_text)
+                if addr_m and not business_address:
+                    business_address = sanitize_untrusted_text(addr_m.group(0).strip()[:200])
+                    provenance_sources.append({
+                        "field_name": "business_address",
+                        "field_value": business_address,
                         "source_url": verified_website,
                         "source_type": "official_website",
                         "retrieval_timestamp": now.isoformat(),
                         "verification_status": "publicly_listed",
                         "confidence_score": 0.85,
-                        "evidence_snippet": f"Found public phone on official homepage: {ph.strip()}",
+                        "evidence_snippet": f"Found business address on homepage: {business_address}",
                     })
 
-            # Check for WhatsApp on Homepage
-            wa_m = re.search(r'(?:wa\.me/|api\.whatsapp\.com/send\?phone=)(\+?\d{10,13})', homepage_html, re.IGNORECASE)
-            if wa_m and not public_whatsapp:
-                wa_num = f"+{wa_m.group(1).lstrip('+')}"
-                public_whatsapp = wa_num
-                provenance_sources.append({
-                    "field_name": "public_whatsapp",
-                    "field_value": wa_num,
-                    "source_url": verified_website,
-                    "source_type": "official_website",
-                    "retrieval_timestamp": now.isoformat(),
-                    "verification_status": "publicly_listed",
-                    "confidence_score": 0.92,
-                    "evidence_snippet": f"Discovered official WhatsApp Click-to-Chat link: {wa_num}",
-                })
+                # Extract Emails from Homepage
+                home_emails = set(EMAIL_REGEX.findall(homepage_html))
+                for em in home_emails:
+                    em_l = em.lower().strip()
+                    if not any(em_l.endswith(ext) for ext in INVALID_EMAIL_EXTENSIONS) and not is_demo_domain(em_l):
+                        if em_l not in public_emails:
+                            public_emails.append(em_l)
+                            provenance_sources.append({
+                                "field_name": "public_email",
+                                "field_value": em_l,
+                                "source_url": verified_website,
+                                "source_type": "official_website",
+                                "retrieval_timestamp": now.isoformat(),
+                                "verification_status": "publicly_listed",
+                                "confidence_score": 0.90,
+                                "evidence_snippet": f"Found public email on official homepage: {em_l}",
+                            })
+
+                # Extract Phones from Homepage
+                home_phones = set(INDIAN_PHONE_REGEX.findall(homepage_html))
+                for ph in home_phones:
+                    cleaned_ph = re.sub(r'[\s.-]', '', ph)
+                    if len(cleaned_ph) >= 10 and ph.strip() not in public_phones:
+                        public_phones.append(ph.strip())
+                        provenance_sources.append({
+                            "field_name": "public_phone",
+                            "field_value": ph.strip(),
+                            "source_url": verified_website,
+                            "source_type": "official_website",
+                            "retrieval_timestamp": now.isoformat(),
+                            "verification_status": "publicly_listed",
+                            "confidence_score": 0.85,
+                            "evidence_snippet": f"Found public phone on official homepage: {ph.strip()}",
+                        })
+
+                # Check for WhatsApp on Homepage
+                wa_m = re.search(r'(?:wa\.me/|api\.whatsapp\.com/send\?phone=)(\+?\d{10,13})', homepage_html, re.IGNORECASE)
+                if wa_m and not public_whatsapp:
+                    wa_num = f"+{wa_m.group(1).lstrip('+')}"
+                    public_whatsapp = wa_num
+                    provenance_sources.append({
+                        "field_name": "public_whatsapp",
+                        "field_value": wa_num,
+                        "source_url": verified_website,
+                        "source_type": "official_website",
+                        "retrieval_timestamp": now.isoformat(),
+                        "verification_status": "publicly_listed",
+                        "confidence_score": 0.92,
+                        "evidence_snippet": f"Discovered official WhatsApp Click-to-Chat link: {wa_num}",
+                    })
 
             # 3. Follow contact and about links
             sub_links = _extract_links_by_keywords(homepage_html, verified_website, ["contact", "about", "team", "careers"])

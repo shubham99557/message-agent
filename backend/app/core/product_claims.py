@@ -59,7 +59,7 @@ def get_approved_claims_summary() -> str:
         for c in APPROVED_PRODUCT_CAPABILITIES.values()
         if c.get("is_approved")
     ])
-    allow_eval = getattr(settings, "ALLOW_90_DAY_EVALUATION_OFFER", True)
+    allow_eval = getattr(settings, "ALLOW_90_DAY_EVALUATION_OFFER", False)
     eval_text = ""
     if allow_eval and APPROVED_EVALUATION_OFFER.get("is_approved"):
         eval_text = (
@@ -79,7 +79,7 @@ def validate_message_against_claims(message_text: str) -> tuple[bool, List[str]]
         if claim.lower() in text_lower:
             violations.append(f"Prohibited claim detected: '{claim}'")
 
-    if not getattr(settings, "ALLOW_90_DAY_EVALUATION_OFFER", True) and "90-day" in text_lower:
+    if not getattr(settings, "ALLOW_90_DAY_EVALUATION_OFFER", False) and "90-day" in text_lower:
         violations.append("Prohibited claim detected: 90-day evaluation offer is disabled by administrative policy")
 
     return len(violations) == 0, violations

@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     OUTBOUND_RATE_LIMIT_WA_PER_MIN: int = int(os.getenv("OUTBOUND_RATE_LIMIT_WA_PER_MIN", "10"))
 
     # Product Claims & Offer Guards
-    ALLOW_90_DAY_EVALUATION_OFFER: bool = os.getenv("ALLOW_90_DAY_EVALUATION_OFFER", "true").lower() in ("true", "1", "yes")
+    ALLOW_90_DAY_EVALUATION_OFFER: bool = os.getenv("ALLOW_90_DAY_EVALUATION_OFFER", "false").lower() in ("true", "1", "yes")
     ALLOW_DESKTOP_SQLITE: bool = os.getenv("ALLOW_DESKTOP_SQLITE", "false").lower() in ("true", "1", "yes")
 
     # Live Outreach Safety Gate (Default: False — fail-closed)

@@ -13,6 +13,8 @@ from app.core.config import settings
 from app.core.security import is_safe_external_url, sanitize_untrusted_text, safe_fetch_untrusted_url
 from app.integrations.discovery_adapters import (
     is_demo_domain,
+    DIRECTORY_AGGREGATOR_DOMAINS,
+    EXCLUDED_FACILITY_PATTERNS,
     TavilyDiscoveryAdapter,
     SerpApiDiscoveryAdapter,
     OpenStreetMapPublicAdapter,
@@ -537,6 +539,42 @@ def _normalize_name_for_dedup(name: str) -> str:
     return " ".join(cleaned.split())
 
 
+def _extract_stable_entity_keys(item: DiscoveredCompanyItem) -> List[str]:
+    """
+    Extracts canonical cross-provider, cross-district stable entity resolution keys.
+    Prevents duplicate entries across regional district overlaps (e.g. Siliguri vs Darjeeling).
+    """
+    keys: List[str] = []
+
+    # 1. OpenStreetMap Node / Way / Relation stable ID
+    src = (item.source_url or "").strip().lower()
+    osm_m = re.search(r'openstreetmap\.org/(node|way|relation)/(\d+)', src)
+    if osm_m:
+        keys.append(f"osm:{osm_m.group(1)}:{osm_m.group(2)}")
+    elif src and not is_demo_domain(src) and "search" not in src:
+        keys.append(f"src:{src}")
+
+    # 2. Canonical Web Domain (rejecting directory aggregators and demo domains)
+    web = (item.website or "").strip().lower()
+    if web and not is_demo_domain(web):
+        host = (urlparse(web).hostname or "").replace("www.", "")
+        if host and host not in DIRECTORY_AGGREGATOR_DOMAINS and len(host) >= 4:
+            keys.append(f"domain:{host}")
+
+    # 3. Normalized Name + 6-Digit Indian PIN code (pinpoints exact physical commercial location)
+    norm_name = _normalize_name_for_dedup(item.name)
+    pin_m = re.search(r'\b[1-9]\d{5}\b', item.business_address or "")
+    if len(norm_name) >= 3 and pin_m:
+        keys.append(f"name_pin:{norm_name}:{pin_m.group(0)}")
+
+    # 4. Normalized Name + City
+    norm_city = (item.city or "").strip().lower()
+    if len(norm_name) >= 3 and norm_city:
+        keys.append(f"name_city:{norm_name}:{norm_city}")
+
+    return keys
+
+
 def search_public_company_directory(
     query_params: DiscoveryQuery,
     http_client: Optional[httpx.Client] = None,
@@ -551,10 +589,19 @@ def search_public_company_directory(
     3. Guarantees deduplication, cross-provider entity resolution, and field-level provenance across all returned items.
     """
     results: List[DiscoveredCompanyItem] = []
-    entity_map: Dict[tuple, int] = {}
+    stable_key_map: Dict[str, int] = {}
     exact_keys = set()
 
     def _add_or_merge(item: DiscoveredCompanyItem):
+        # 1. Relevance check: reject non-B2B facilities, training centres, kiosks, and retail
+        text_check = f"{item.name} {item.description or ''} {item.business_address or ''}".lower()
+        if any(pat in text_check for pat in EXCLUDED_FACILITY_PATTERNS):
+            return
+
+        norm_name = _normalize_name_for_dedup(item.name)
+        if len(norm_name) < 4 and not item.website and not any(k in (item.industry or "").lower() for k in ["soft", "tech", "it", "infotech"]):
+            return
+
         exact_key = (
             (item.name or "").strip().lower(),
             (item.website or "").strip().lower(),
@@ -564,15 +611,17 @@ def search_public_company_directory(
             return
         exact_keys.add(exact_key)
 
-        # Cross-provider entity resolution key: normalized name + city
-        norm_name = _normalize_name_for_dedup(item.name)
-        norm_city = (item.city or "").strip().lower()
-        res_key = (norm_name, norm_city) if len(norm_name) >= 3 else None
+        # 2. Stable identifier resolution
+        item_keys = _extract_stable_entity_keys(item)
+        matched_idx: Optional[int] = None
+        for k in item_keys:
+            if k in stable_key_map:
+                matched_idx = stable_key_map[k]
+                break
 
-        if res_key and res_key in entity_map:
+        if matched_idx is not None and matched_idx < len(results):
             # Merge fields into existing item
-            idx = entity_map[res_key]
-            existing = results[idx]
+            existing = results[matched_idx]
 
             updated_website = existing.website or item.website
             updated_web_status = existing.website_status if existing.website else item.website_status
@@ -608,10 +657,13 @@ def search_public_company_directory(
                 "confidence_level": max(existing.confidence_level or 0.0, item.confidence_level or 0.0),
                 "provenance_sources": combined_prov,
             })
-            results[idx] = merged_item
+            results[matched_idx] = merged_item
+            for k in item_keys:
+                stable_key_map[k] = matched_idx
         else:
-            if res_key:
-                entity_map[res_key] = len(results)
+            new_idx = len(results)
+            for k in item_keys:
+                stable_key_map[k] = new_idx
             results.append(item)
 
     # 1. Real Permitted Search Adapters with Redis Caching (7-Day TTL)
@@ -845,13 +897,11 @@ def search_multi_city_directory(
         )
         city_results = search_public_company_directory(sub_query, http_client=http_client)
         for item in city_results:
-            key = (
-                item.name.strip().lower(),
-                (item.website or "").strip().lower(),
-                (item.city or "").strip().lower()
-            )
-            if key not in seen_keys:
-                seen_keys.add(key)
+            item_keys = _extract_stable_entity_keys(item)
+            is_dup = any(k in seen_keys for k in item_keys)
+            if not is_dup:
+                for k in item_keys:
+                    seen_keys.add(k)
                 all_results.append(item)
 
     # Sort
@@ -1065,24 +1115,44 @@ async def run_real_lead_discovery_pipeline(
 
     # 4. Removing duplicates
     unique_candidates: List[DiscoveredCompanyItem] = []
-    seen_keys = set()
+    seen_stable_keys: Dict[str, int] = {}
     for item in normalized:
-        key = (
-            item.name.lower().strip(),
-            (urlparse(item.website).hostname or "").lower() if item.website else "",
-            item.city.lower().strip()
-        )
-        if key not in seen_keys:
-            seen_keys.add(key)
-            # Check existing CRM database
-            existing_comp = find_duplicate_company(db, name=item.name, website=item.website, email=item.public_email)
-            if existing_comp:
-                item = item.model_copy(update={"crm_id": existing_comp.id, "crm_status": "previously_known"})
-            else:
-                item = item.model_copy(update={"crm_status": "newly_discovered"})
-            unique_candidates.append(item)
-            if len(unique_candidates) >= request.max_leads:
+        desc_l = f"{item.name} {item.description or ''} {item.business_address or ''}".lower()
+        if any(pat in desc_l for pat in EXCLUDED_FACILITY_PATTERNS):
+            continue
+        norm_name = _normalize_name_for_dedup(item.name)
+        if len(norm_name) < 4 and not item.website and not any(k in (item.industry or "").lower() for k in ["soft", "tech", "it", "infotech"]):
+            continue
+
+        item_keys = _extract_stable_entity_keys(item)
+        matched_idx = None
+        for k in item_keys:
+            if k in seen_stable_keys:
+                matched_idx = seen_stable_keys[k]
                 break
+
+        if matched_idx is not None:
+            continue
+
+        cur_idx = len(unique_candidates)
+        for k in item_keys:
+            seen_stable_keys[k] = cur_idx
+
+        # Check existing CRM database
+        existing_comp = find_duplicate_company(
+            db,
+            name=item.name,
+            website=item.website,
+            email=item.public_email,
+            source_url=item.source_url
+        )
+        if existing_comp:
+            item = item.model_copy(update={"crm_id": existing_comp.id, "crm_status": "previously_known"})
+        else:
+            item = item.model_copy(update={"crm_status": "newly_discovered"})
+        unique_candidates.append(item)
+        if len(unique_candidates) >= request.max_leads:
+            break
 
     steps.append(DiscoveryPipelineStep(
         step_number=4,
@@ -1180,7 +1250,13 @@ async def run_real_lead_discovery_pipeline(
         if request.auto_save_crm and (itm.qualification_score is None or itm.qualification_score >= request.min_score):
             try:
                 # Check if company already exists
-                existing = find_duplicate_company(db, name=itm.name, website=itm.website, email=itm.public_email)
+                existing = find_duplicate_company(
+                    db,
+                    name=itm.name,
+                    website=itm.website,
+                    email=itm.public_email,
+                    source_url=itm.source_url
+                )
                 if not existing:
                     # Create company
                     comp_in = CompanyCreate(
