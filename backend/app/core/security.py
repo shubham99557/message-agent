@@ -59,6 +59,38 @@ def compute_content_hash(text_parts: List[str]) -> str:
     return hashlib.sha256(combined.encode('utf-8')).hexdigest()
 
 
+def compute_draft_approval_hash(
+    company_id: Optional[int],
+    recipient: Optional[str],
+    channel: Optional[str],
+    subject: Optional[str],
+    body_text: Optional[str],
+    version: Optional[int],
+    approved_by_id: Optional[int]
+) -> str:
+    """
+    Computes a canonical SHA-256 hash binding all 7 approval-governed fields:
+    1. company_id
+    2. recipient (email or phone)
+    3. channel (email or whatsapp)
+    4. subject
+    5. body_text
+    6. version
+    7. approved_by_id
+    Tampering with any single field invalidates the approval cryptographic seal.
+    """
+    parts = [
+        f"company_id:{company_id}",
+        f"recipient:{(recipient or '').strip().lower()}",
+        f"channel:{(channel or 'email').strip().lower()}",
+        f"subject:{(subject or '').strip()}",
+        f"body:{(body_text or '').strip()}",
+        f"version:{version or 1}",
+        f"approved_by_id:{approved_by_id}"
+    ]
+    return compute_content_hash(parts)
+
+
 def verify_meta_hmac_signature(payload: bytes, signature_header: Optional[str], app_secret: str) -> bool:
     """Verifies that an incoming Meta WhatsApp webhook payload was signed by Meta using HMAC-SHA256."""
     if not app_secret or not signature_header:
@@ -85,6 +117,50 @@ DISALLOWED_HOSTS = {
 DISALLOWED_TLDS = (".local", ".internal", ".localhost", ".arpa", ".test", ".example", ".invalid")
 
 DISALLOWED_PORTS = {22, 25, 110, 143, 465, 587, 993, 995, 2375, 2376, 5432, 6379, 8000, 27017, 11211}
+
+
+def is_safe_ip_address(ip_val: Any) -> bool:
+    """
+    Validates that an IP address is a safe public address.
+    Rejects private, loopback, link-local, reserved, multicast, unspecified (0.0.0.0),
+    IPv4-mapped IPv6 internal spaces, and explicit cloud metadata addresses.
+    """
+    try:
+        if isinstance(ip_val, (ipaddress.IPv4Address, ipaddress.IPv6Address)):
+            ip_obj = ip_val
+        else:
+            ip_obj = ipaddress.ip_address(str(ip_val).strip())
+
+        if (
+            ip_obj.is_private
+            or ip_obj.is_loopback
+            or ip_obj.is_link_local
+            or ip_obj.is_reserved
+            or ip_obj.is_multicast
+            or ip_obj.is_unspecified
+        ):
+            return False
+
+        # Check IPv4-mapped IPv6 address spaces (e.g. ::ffff:127.0.0.1)
+        if isinstance(ip_obj, ipaddress.IPv6Address) and ip_obj.ipv4_mapped:
+            if (
+                ip_obj.ipv4_mapped.is_private
+                or ip_obj.ipv4_mapped.is_loopback
+                or ip_obj.ipv4_mapped.is_link_local
+                or ip_obj.ipv4_mapped.is_reserved
+                or ip_obj.ipv4_mapped.is_multicast
+                or ip_obj.ipv4_mapped.is_unspecified
+            ):
+                return False
+
+        # Explicit AWS/GCP/Azure link-local metadata guard & loopback prefixes
+        ip_str = str(ip_obj)
+        if ip_str == "169.254.169.254" or ip_str == "fd00:ec2::254" or ip_str.startswith("127."):
+            return False
+
+        return True
+    except Exception:
+        return False
 
 
 def is_safe_external_url(url: str) -> bool:
@@ -116,22 +192,8 @@ def is_safe_external_url(url: str) -> bool:
         # If hostname is a literal IP address
         try:
             ip_literal = ipaddress.ip_address(hostname_lower)
-            if (
-                ip_literal.is_private
-                or ip_literal.is_loopback
-                or ip_literal.is_link_local
-                or ip_literal.is_reserved
-                or ip_literal.is_multicast
-            ):
+            if not is_safe_ip_address(ip_literal):
                 return False
-            # Check IPv4-mapped IPv6 (e.g. ::ffff:127.0.0.1)
-            if isinstance(ip_literal, ipaddress.IPv6Address) and ip_literal.ipv4_mapped:
-                if (
-                    ip_literal.ipv4_mapped.is_private
-                    or ip_literal.ipv4_mapped.is_loopback
-                    or ip_literal.ipv4_mapped.is_link_local
-                ):
-                    return False
         except ValueError:
             # Not an IP literal, proceed to DNS resolution
             pass
@@ -145,31 +207,8 @@ def is_safe_external_url(url: str) -> bool:
             for item in addr_info:
                 sockaddr = item[4]
                 ip_str = sockaddr[0]
-                ip_obj = ipaddress.ip_address(ip_str)
-
-                # Check private, loopback, link-local, or reserved
-                if (
-                    ip_obj.is_private
-                    or ip_obj.is_loopback
-                    or ip_obj.is_link_local
-                    or ip_obj.is_reserved
-                    or ip_obj.is_multicast
-                ):
+                if not is_safe_ip_address(ip_str):
                     return False
-
-                # Check IPv4-mapped IPv6 address spaces
-                if isinstance(ip_obj, ipaddress.IPv6Address) and ip_obj.ipv4_mapped:
-                    if (
-                        ip_obj.ipv4_mapped.is_private
-                        or ip_obj.ipv4_mapped.is_loopback
-                        or ip_obj.ipv4_mapped.is_link_local
-                    ):
-                        return False
-
-                # Explicit AWS/GCP/Azure link-local metadata guard
-                if str(ip_obj) == "169.254.169.254" or str(ip_obj) == "fd00:ec2::254":
-                    return False
-
         except Exception:
             # If DNS resolution fails, fail closed (unsafe)
             return False
@@ -177,6 +216,61 @@ def is_safe_external_url(url: str) -> bool:
         return True
     except Exception:
         return False
+
+
+import httpcore
+import httpx
+
+
+class SSRFSafeBackend(httpcore.AnyIOBackend):
+    """
+    Custom NetworkBackend that enforces connection-time IP validation on raw TCP sockets.
+    Defends against DNS rebinding (TOCTOU) by checking the actual connected peer address
+    before any HTTP request headers or bodies are transmitted.
+    """
+    async def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: Optional[float] = None,
+        local_address: Optional[str] = None,
+        socket_options: Any = None,
+    ):
+        stream = await super().connect_tcp(
+            host,
+            port,
+            timeout=timeout,
+            local_address=local_address,
+            socket_options=socket_options,
+        )
+        sock = stream.get_extra_info("socket")
+        if sock:
+            try:
+                peer = sock.getpeername()
+                peer_ip = peer[0] if isinstance(peer, (tuple, list)) else str(peer)
+                if not is_safe_ip_address(peer_ip):
+                    await stream.aclose()
+                    raise httpcore.ConnectError(
+                        f"SSRF connection-time blocked: destination IP {peer_ip} is non-public or restricted"
+                    )
+            except httpcore.ConnectError:
+                raise
+            except Exception:
+                pass
+        return stream
+
+
+class SSRFSafeTransport(httpx.AsyncHTTPTransport):
+    """
+    HTTPX Async Transport backed by SSRFSafeBackend with connection-time IP validation.
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._pool = httpcore.AsyncConnectionPool(
+            ssl_context=self._pool._ssl_context,
+            network_backend=SSRFSafeBackend(),
+            retries=0
+        )
 
 
 async def safe_fetch_untrusted_url(
@@ -188,7 +282,8 @@ async def safe_fetch_untrusted_url(
 ) -> Tuple[bool, Optional[str], Optional[str], Optional[str]]:
     """
     Safely retrieves public web content while defending against:
-    - DNS rebinding & private/internal IPs
+    - Connection-time DNS rebinding (TOCTOU) & private/internal socket connections
+    - Pre-flight SSRF & private/internal IPs
     - Redirect-based SSRF (revalidating every hop)
     - Excessive redirects
     - Oversized responses (memory exhaustion)
@@ -197,7 +292,6 @@ async def safe_fetch_untrusted_url(
 
     Returns: (success: bool, content: Optional[str], final_url: Optional[str], error_message: Optional[str])
     """
-    import httpx
     from urllib.parse import urljoin
 
     if allowed_content_types is None:
@@ -207,8 +301,9 @@ async def safe_fetch_untrusted_url(
     redirect_count = 0
 
     try:
-        # Use follow_redirects=False to manually inspect every hop
-        async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=False) as client:
+        # Use SSRFSafeTransport to enforce connection-time IP verification on the actual socket
+        transport = SSRFSafeTransport(verify=True)
+        async with httpx.AsyncClient(transport=transport, timeout=timeout_seconds, follow_redirects=False) as client:
             while redirect_count <= max_redirects:
                 if not is_safe_external_url(current_url):
                     return False, None, current_url, f"SSRF security check rejected destination URL: {current_url}"

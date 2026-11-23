@@ -13,7 +13,7 @@ from app.models.campaign import Campaign
 from app.schemas.email import EmailSendResult
 from app.core.config import settings
 from app.core.audit import record_audit_log
-from app.core.security import compute_content_hash
+from app.core.security import compute_content_hash, compute_draft_approval_hash
 from app.integrations.gmail_adapter import (
     get_active_gmail_connection,
     send_gmail_message,
@@ -167,9 +167,20 @@ def send_approved_email(
             message="Security Block: Email has not been approved by a designated reviewer"
         )
 
-    # 3. IMMUTABLE CONTENT HASH VERIFICATION
-    current_hash = compute_content_hash([draft.subject, draft.body_text])
-    if not draft.approved_content_hash or current_hash != draft.approved_content_hash:
+    # 3. IMMUTABLE CONTENT HASH VERIFICATION (7-FACTOR INTEGRITY CHECK)
+    expected_7_hash = compute_draft_approval_hash(
+        company_id=draft.company_id,
+        recipient=draft.recipient_email,
+        channel="email",
+        subject=draft.subject,
+        body_text=draft.body_text,
+        version=draft.version or 1,
+        approved_by_id=draft.approved_by_id
+    )
+    legacy_hash = compute_content_hash([draft.subject, draft.body_text])
+    current_hash = expected_7_hash if draft.approved_content_hash == expected_7_hash else legacy_hash
+
+    if not draft.approved_content_hash or draft.approved_content_hash not in (expected_7_hash, legacy_hash):
         draft.approval_status = "draft"
         draft.approved_by_id = None
         draft.approved_at = None
@@ -179,7 +190,7 @@ def send_approved_email(
             draft_id=draft_id,
             status="failed",
             provider=draft.provider,
-            message="Security Block: Draft content was modified after approval was granted. Re-approval required."
+            message="Security Block: Draft content was modified or approval metadata was altered after approval was granted. Re-approval required."
         )
 
     # Deterministic idempotency key for this approved version

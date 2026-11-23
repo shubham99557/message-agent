@@ -8,7 +8,7 @@ from app.models.company import Company
 from app.models.consent import ContactConsent
 from app.schemas.email import EmailDraftResponse, EmailDraftUpdate, BulkApprovalRequest
 from app.core.audit import record_audit_log
-from app.core.security import compute_content_hash
+from app.core.security import compute_content_hash, compute_draft_approval_hash
 
 
 def enrich_draft_response(db: Session, draft: EmailDraft) -> EmailDraftResponse:
@@ -119,8 +119,30 @@ def approve_email_draft(db: Session, draft_id: int, user_id: int) -> Optional[Em
     if draft.approval_status in ("sending", "sent", "delivered"):
         return draft
 
-    # Compute and bind immutable content hash to approval record
-    current_hash = compute_content_hash([draft.subject, draft.body_text])
+    # Duplicate approval check: if already approved with valid cryptographic seal, handle idempotently
+    if draft.approval_status == "approved" and draft.approved_content_hash:
+        expected_existing_hash = compute_draft_approval_hash(
+            company_id=draft.company_id,
+            recipient=draft.recipient_email,
+            channel="email",
+            subject=draft.subject,
+            body_text=draft.body_text,
+            version=draft.version or 1,
+            approved_by_id=draft.approved_by_id or user_id
+        )
+        if draft.approved_content_hash == expected_existing_hash:
+            return draft
+
+    # Compute and bind immutable 7-factor content hash to approval record
+    current_hash = compute_draft_approval_hash(
+        company_id=draft.company_id,
+        recipient=draft.recipient_email,
+        channel="email",
+        subject=draft.subject,
+        body_text=draft.body_text,
+        version=draft.version or 1,
+        approved_by_id=user_id
+    )
     draft.content_hash = current_hash
     draft.approved_content_hash = current_hash
     draft.approval_status = "approved"

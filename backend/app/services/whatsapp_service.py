@@ -16,7 +16,7 @@ from app.models.reply import Reply, Conversation
 from app.schemas.whatsapp import WhatsAppDraftRequest, ContactConsentCreate
 from app.core.config import settings
 from app.core.audit import record_audit_log
-from app.core.security import compute_content_hash, verify_meta_hmac_signature
+from app.core.security import compute_content_hash, compute_draft_approval_hash, verify_meta_hmac_signature
 
 logger = logging.getLogger(__name__)
 
@@ -223,7 +223,15 @@ def approve_whatsapp_message_internal(db: Session, msg: WhatsAppMessage, user_id
         db.commit()
         raise ValueError("Unsolicited WhatsApp outreach is forbidden. Documented consent is mandatory before approval.")
 
-    current_hash = compute_content_hash([msg.message_text])
+    current_hash = compute_draft_approval_hash(
+        company_id=msg.company_id,
+        recipient=msg.recipient_phone,
+        channel="whatsapp",
+        subject="",
+        body_text=msg.message_text,
+        version=msg.version or 1,
+        approved_by_id=user_id
+    )
     msg.has_valid_consent = True
     msg.consent_id = consent_rec.id if consent_rec else msg.consent_id
     msg.content_hash = current_hash
@@ -317,15 +325,26 @@ def send_approved_whatsapp_message(
     if msg.approval_status != "approved":
         return False, "Cannot send: Message must be explicitly approved by a designated reviewer"
 
-    # Rule 2: Content Hash Immutability
-    current_hash = compute_content_hash([msg.message_text])
-    if not msg.approved_content_hash or current_hash != msg.approved_content_hash:
+    # Rule 2: Content Hash Immutability (7-Factor Approval Seal)
+    expected_7_hash = compute_draft_approval_hash(
+        company_id=msg.company_id,
+        recipient=msg.recipient_phone,
+        channel="whatsapp",
+        subject="",
+        body_text=msg.message_text,
+        version=msg.version or 1,
+        approved_by_id=msg.approved_by_id
+    )
+    legacy_hash = compute_content_hash([msg.message_text])
+    current_hash = expected_7_hash if msg.approved_content_hash == expected_7_hash else legacy_hash
+
+    if not msg.approved_content_hash or msg.approved_content_hash not in (expected_7_hash, legacy_hash):
         msg.approval_status = "draft"
         msg.approved_by_id = None
         msg.approved_at = None
         msg.approved_content_hash = None
         db.commit()
-        return False, "Security Block: Message content changed after approval. Re-approval required."
+        return False, "Security Block: Message content or approval metadata changed after approval. Re-approval required."
 
     # Rule 3: LIVE Consent Re-Check immediately before dispatch (catches post-draft opt-outs)
     live_consent, _ = verify_active_whatsapp_consent(db, msg.company_id, msg.recipient_phone)
