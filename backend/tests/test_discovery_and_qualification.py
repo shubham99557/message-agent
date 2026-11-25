@@ -1,4 +1,5 @@
 import pytest
+from sqlalchemy.orm import Session
 from app.core.security import is_safe_external_url, sanitize_untrusted_text
 
 
