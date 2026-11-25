@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     # JWT Security & Encryption at Rest
     SECRET_KEY: str = os.getenv("SECRET_KEY", "acttrident-dev-secret-key-replace-in-env-at-least-32-chars")
     CREDENTIAL_ENCRYPTION_KEY: str = os.getenv("CREDENTIAL_ENCRYPTION_KEY", "")
+    APPROVAL_SECRET_KEY: str = os.getenv("APPROVAL_SECRET_KEY", "acttrident-approval-hmac-secret-key-32-bytes-minimum-security-seal")
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))  # 30 min lifetime
     REFRESH_TOKEN_EXPIRE_DAYS: int = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "14"))  # 14 days
@@ -60,8 +61,19 @@ class Settings(BaseSettings):
     OPENAI_BASE_URL: str = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
     AI_MODEL_NAME: str = os.getenv("AI_MODEL_NAME", "llama3.2:latest")
 
-    # Email Settings (SMTP / Gmail)
-    EMAIL_PROVIDER: str = os.getenv("EMAIL_PROVIDER", "mock")  # smtp, gmail, mock
+    # Email Settings (Resend Primary / SMTP / Gmail / Phase 4A.1 Test-Mode)
+    EMAIL_PROVIDER: str = os.getenv("EMAIL_PROVIDER", "resend")  # resend, smtp, gmail, mock
+    RESEND_API_KEY: str = os.getenv("RESEND_API_KEY", "")
+    RESEND_FROM_EMAIL: str = os.getenv("RESEND_FROM_EMAIL", "onboarding@resend.dev")
+    RESEND_WEBHOOK_SECRET: str = os.getenv("RESEND_WEBHOOK_SECRET", "")
+    EMAIL_TEST_MODE_ENABLED: bool = os.getenv("EMAIL_TEST_MODE_ENABLED", "false").lower() in ("true", "1", "yes")
+    EMAIL_TEST_ALLOWLIST: str = os.getenv("EMAIL_TEST_ALLOWLIST", "")  # Comma-separated operator-owned test recipients
+    EMAIL_SANDBOX_PROVIDER: str = os.getenv("EMAIL_SANDBOX_PROVIDER", "resend")  # resend, sandbox_mock, postmark_sandbox, smtp_sandbox
+    EMAIL_PROVIDER_API_KEY: str = os.getenv("EMAIL_PROVIDER_API_KEY", "")
+    EMAIL_WEBHOOK_SECRET: str = os.getenv("EMAIL_WEBHOOK_SECRET", "")
+    EMAIL_DKIM_SELECTOR: str = os.getenv("EMAIL_DKIM_SELECTOR", "resend")
+    PUBLIC_BASE_URL: str = os.getenv("PUBLIC_BASE_URL", "http://localhost:8000")
+    UNSUBSCRIBE_SECRET_KEY: str = os.getenv("UNSUBSCRIBE_SECRET_KEY", "")
     SMTP_HOST: str = os.getenv("SMTP_HOST", "smtp.gmail.com")
     SMTP_PORT: int = int(os.getenv("SMTP_PORT", "587"))
     SMTP_USER: str = os.getenv("SMTP_USER", "")
@@ -165,6 +177,19 @@ class Settings(BaseSettings):
             }
             if self.INITIAL_ADMIN_PASSWORD and self.INITIAL_ADMIN_PASSWORD in known_insecure_defaults:
                 raise ValueError("CRITICAL SECURITY ERROR: INITIAL_ADMIN_PASSWORD must not use a known default development password in production.")
+        if env in ("production", "staging"):
+            approval_key = (self.APPROVAL_SECRET_KEY or "").strip()
+            insecure_approval_default = "acttrident-approval-hmac-secret-key-32-bytes-minimum-security-seal"
+            if (
+                not approval_key
+                or approval_key == insecure_approval_default
+                or "replace-in-env" in approval_key.lower()
+                or len(approval_key) < 32
+                or len(set(approval_key)) < 10
+            ):
+                raise ValueError(
+                    "CRITICAL SECURITY ERROR: Production APPROVAL_SECRET_KEY must be a unique, high-entropy key of at least 32 characters."
+                )
 
 
 settings = Settings()

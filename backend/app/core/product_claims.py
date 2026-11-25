@@ -44,10 +44,18 @@ DISALLOWED_CLAIMS: List[str] = [
     "unbreakable security",
     "guaranteed compliance with zero effort",
     "military grade encryption",
+    "military-grade",
     "instant zero-day immunity",
     "unlimited free trial for everyone",
     "official partner of Google/Microsoft/Apple (unless verified)",
     "certified SOC2 Type II / ISO 27001 (unless verified corporate certificate provided)",
+    "hardware-accelerated workspace sandboxing",
+    "hardware-accelerated browser sandboxing",
+    "ephemeral credential shielding",
+    "cookies in memory",
+    "zero cloud data leakage",
+    "audit-ready access logging",
+    "security whitepaper",
 ]
 
 
