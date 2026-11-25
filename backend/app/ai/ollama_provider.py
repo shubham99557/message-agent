@@ -55,6 +55,7 @@ class OllamaProvider(BaseAIProvider):
             "prompt": prompt,
             "system": system_prompt or "",
             "stream": False,
+            "keep_alive": "10m",
             "options": {
                 "temperature": temperature,
                 "num_predict": max_tokens,
@@ -106,8 +107,10 @@ class OllamaProvider(BaseAIProvider):
             "system": sys_directive,
             "format": "json",
             "stream": False,
+            "keep_alive": "10m",
             "options": {
                 "temperature": temperature,
+                "num_predict": 700,
                 "num_ctx": self._num_ctx,
             },
         }
@@ -134,7 +137,15 @@ class OllamaProvider(BaseAIProvider):
                     clean_text = clean_text[:-3]
                 clean_text = clean_text.strip()
 
-                parsed = json.loads(clean_text)
+                try:
+                    parsed = json.loads(clean_text)
+                except json.JSONDecodeError:
+                    start_idx = clean_text.find("{")
+                    end_idx = clean_text.rfind("}")
+                    if start_idx != -1 and end_idx > start_idx:
+                        parsed = json.loads(clean_text[start_idx:end_idx + 1])
+                    else:
+                        raise
                 return parsed
         except json.JSONDecodeError as jde:
             logger.error(f"Failed to decode JSON from Ollama response: {raw_text[:200]}")

@@ -58,8 +58,8 @@ DEFAULT_SERVICE_ITEMS = [
                 "body": "Hi {contact_name},\n\nMany tech firms in {city} are navigating the balance between developer speed and client data protection across remote machines.\n\nActTrident's workspace isolation helps technology firms safeguard proprietary code without imposing heavy MDM surveillance on developers.\n\nWould you be open to exploring whether this fits {company_name}'s current security posture?\n\nWarm regards,\nActTrident Team"
             },
             "technical": {
-                "subject": "Zero-trust session & clipboard sandboxing for {company_name}",
-                "body": "Hi {contact_name},\n\nGiven {company_name}'s technical footprint in {industry}, we developed ActTrident to provide hardware-accelerated browser sandboxing and ephemeral session protection for software engineers.\n\nIt isolates repo access, shields API tokens in memory, and prevents clipboard exfiltration.\n\nOpen to reviewing our architecture brief?\n\nRegards,\nActTrident Engineering"
+                "subject": "Zero-trust browser workspace & credential isolation for {company_name}",
+                "body": "Hi {contact_name},\n\nGiven {company_name}'s work in {industry}, ActTrident provides non-intrusive runtime workspace protection and browser credential isolation for distributed company laptops.\n\nIt isolates browser workspaces and safeguards cloud credentials against session hijacking and unauthorized copy/paste operations.\n\nWould you be open to a brief technical overview?\n\nRegards,\nActTrident Business Development"
             }
         },
         "is_active": True
@@ -84,16 +84,18 @@ DEFAULT_SERVICE_ITEMS = [
             "target_signals": ["cloud", "devops", "aws", "gcp", "azure", "saas", "infrastructure"]
         },
         "approved_claims": [
-            "Real-time token shielding preventing credential extraction from developer memory",
-            "Encrypted ephemeral sessions for production cloud dashboards",
-            "Audit-ready access logging compliant with modern security frameworks",
-            "Zero persistent credential storage on local workstations"
+            "Non-intrusive runtime protection for distributed company laptops",
+            "Browser credential isolation safeguarding cloud credentials and web sessions",
+            "Protection against session hijacking, malicious extensions, and unauthorized copy/paste",
+            "Continuous device posture verification against security health baselines"
         ],
         "disallowed_claims": [
             "Complete automated cloud compliance without human audit",
             "Zero setup effort guaranteed in 10 seconds",
             "Free lifetime enterprise tier",
-            "Eliminates 100% of insider threats automatically"
+            "Eliminates 100% of insider threats automatically",
+            "Audit-ready access logging compliant with modern security frameworks",
+            "Security whitepaper"
         ],
         "discovery_questions": [
             "How are AWS/GCP production tokens isolated on developer workstations?",
@@ -114,8 +116,8 @@ DEFAULT_SERVICE_ITEMS = [
                 "body": "Hi {contact_name},\n\nAs cloud environments grow, credential sprawl and persistent session tokens on developer machines represent an increasing security risk.\n\nActTrident's cloud credential shielding ensures ephemeral, tamper-proof access to management consoles without breaking existing CI/CD or admin tooling.\n\nWould you be open to a 5-minute conversation on this?\n\nBest regards,\nActTrident Team"
             },
             "technical": {
-                "subject": "Ephemeral session shielding for AWS/GCP console access at {company_name}",
-                "body": "Hi {contact_name},\n\nWe built ActTrident's credential shielding engine to automatically inject ephemeral tokens into production consoles while encrypting developer session state in memory.\n\nIt eliminates plaintext credentials on developer machines and blocks token exfiltration.\n\nWould you like to examine our security whitepaper?\n\nRegards,\nActTrident Engineering"
+                "subject": "Browser credential isolation & device posture verification for {company_name}",
+                "body": "Hi {contact_name},\n\nActTrident safeguards cloud credentials and sensitive web sessions against session hijacking and unauthorized copy/paste operations while verifying device security health baselines.\n\nWould you be open to a brief technical exchange?\n\nRegards,\nActTrident Business Development"
             }
         },
         "is_active": True
@@ -328,6 +330,7 @@ def match_service_for_company(
     best_score = 0.0
     best_rationale = ""
     best_angle = ""
+    best_evidence = ""
 
     for svc in catalogue:
         if not svc.is_active:
@@ -392,14 +395,38 @@ def match_service_for_company(
             else:
                 best_angle = "Verified B2B outreach & sender domain protection"
 
-    # Default to first active service if no specific high score
-    if not best_match and catalogue:
-        best_match = catalogue[0]
-        best_score = 40.0
-        best_rationale = f"Matched to primary ActTrident service {best_match.service_name}"
-        best_angle = "Endpoint security & workspace isolation"
+            evidence_items = []
+            if matched_types:
+                evidence_items.append(f"Target types: {', '.join(matched_types)}")
+            if matched_problems:
+                evidence_items.append(f"Problem signals: {', '.join(matched_problems)}")
+            best_evidence = "; ".join(evidence_items) if evidence_items else "Keyword match in company description"
+
+    if not best_match or best_score < 20.0:
+        return ServiceMatchResult(
+            service_id=None,
+            service_code=None,
+            service_name="No suitable service identified",
+            match_confidence=0.0,
+            rationale="Insufficient commercial technology evidence to recommend an ActTrident security capability.",
+            recommended_outreach_angle="None (Hold outreach until business profile is verified)",
+            evidence_supporting_match="No relevant signals found in public profile",
+            unsupported_assumptions=["Requires manual research or public website verification"]
+        )
 
     confidence = min(max(round(best_score / 100.0, 2), 0.40), 0.98)
+
+    # Document unsupported assumptions
+    unsupported_assumptions = []
+    has_laptops = getattr(company_or_data, "has_verified_5_plus_laptops", False) if not isinstance(company_or_data, dict) else company_or_data.get("has_verified_5_plus_laptops", False)
+    if not has_laptops:
+        unsupported_assumptions.append("Laptop fleet size is unverified; outreach must not claim a specific device count.")
+    if best_match.service_code == "ACT-WS-01":
+        unsupported_assumptions.append("Assumes developers access internal repositories on hybrid/remote machines.")
+    elif best_match.service_code == "ACT-CL-02":
+        unsupported_assumptions.append("Assumes team uses cloud consoles and API keys in daily developer operations.")
+    elif best_match.service_code == "ACT-AU-03":
+        unsupported_assumptions.append("Assumes business conducts active B2B prospecting requiring domain reputation controls.")
 
     return ServiceMatchResult(
         service_id=best_match.id if best_match.id else 1,
@@ -407,5 +434,7 @@ def match_service_for_company(
         service_name=best_match.service_name,
         match_confidence=confidence,
         rationale=best_rationale,
-        recommended_outreach_angle=best_angle
+        recommended_outreach_angle=best_angle,
+        evidence_supporting_match=best_evidence or "General industry and operational profile match",
+        unsupported_assumptions=unsupported_assumptions
     )

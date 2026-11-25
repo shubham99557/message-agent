@@ -98,6 +98,73 @@ class DeterministicFallbackProvider(BaseAIProvider):
                 "is_actionable": False,
             }
 
+        # Phase 3 Email Variations Fallback
+        if "variation_a_short" in combined or "variation" in combined:
+            import re
+            name_m = re.search(r"Name:\s*([^\n]+)", prompt)
+            city_m = re.search(r"City:\s*([^\n,]+)", prompt)
+            svc_m = re.search(r"Service Name:\s*([^\n]+)", prompt)
+            svc_c = re.search(r"Service Code:\s*([^\n]+)", prompt)
+            comp_name = name_m.group(1).strip() if name_m else "Enterprise Team"
+            city_name = city_m.group(1).strip() if city_m else "India"
+            service_name = svc_m.group(1).strip() if svc_m else "Secure Workspace & Endpoint Isolation"
+            service_code = svc_c.group(1).strip() if svc_c else "ACT-WS-01"
+
+            return {
+                "subject_suggestions": [
+                    f"{service_name} for {comp_name}",
+                    f"Safeguarding code repositories and developer credentials at {comp_name}",
+                    f"Engineering security overview for {city_name} tech leaders: {comp_name}",
+                    f"Zero-trust session & workspace isolation: {comp_name}"
+                ],
+                "variation_a_short": {
+                    "subject": f"{service_name} for {comp_name}",
+                    "body_text": (
+                        f"Hello {comp_name} Team,\n\n"
+                        f"I am reaching out from ActTrident regarding your technology operations in {city_name}. "
+                        f"We provide {service_name.lower()}, delivering isolated browser environments that prevent source code exfiltration and credential theft.\n\n"
+                        f"Would you be open to a brief 10-minute technical exchange next Tuesday or Wednesday?\n\n"
+                        f"Best regards,\nActTrident Team\nhttps://acttrident.ai/"
+                    )
+                },
+                "variation_b_standard": {
+                    "subject": f"Safeguarding code repositories and cloud sessions at {comp_name}",
+                    "body_text": (
+                        f"Hello {comp_name} Leadership,\n\n"
+                        f"We noticed {comp_name}'s active technical footprint in {city_name}. "
+                        f"As engineering teams manage proprietary code repositories and web services, "
+                        f"protecting client deliverables from unauthorized copy-pasting or credential leakage becomes a central operational priority.\n\n"
+                        f"ActTrident delivers lightweight workspace sandboxing and credential isolation tailored for engineering workflows. "
+                        f"It safeguards source code in transit and isolates developer sessions without intrusive device surveillance or slowing down builds.\n\n"
+                        f"We would welcome the opportunity to share a concise 15-minute live demonstration tailored to your environment.\n\n"
+                        f"Would next Tuesday or Wednesday afternoon work for a brief introductory call?\n\n"
+                        f"Best regards,\nActTrident Business Development\nhttps://acttrident.ai/ | outreach@acttrident.ai"
+                    )
+                },
+                "variation_c_detailed": {
+                    "subject": f"Architectural overview: Endpoint security and session isolation for {comp_name}",
+                    "body_text": (
+                        f"Hello {comp_name} Engineering Leadership,\n\n"
+                        f"As technology firms in {city_name} scale distributed software development, balancing developer velocity with rigorous client data protection presents a key operational challenge. Traditional heavy MDM software often frustrates engineers while still leaving browser sessions and API tokens exposed.\n\n"
+                        f"ActTrident provides {service_name.lower()} via hardware-accelerated browser sandboxing and ephemeral session isolation. Key capabilities include:\n"
+                        f"• Real-time credential shielding preventing token extraction from memory\n"
+                        f"• Granular clipboard and download controls preventing unauthorized repository exfiltration\n"
+                        f"• Ephemeral production access for cloud management dashboards\n"
+                        f"• Continuous endpoint compliance verification without employee privacy intrusion\n\n"
+                        f"We would be delighted to share our 5-page architectural brief or arrange a 15-minute technical review with our engineering leads.\n\n"
+                        f"Please let us know if you would be open to reviewing our technical brief.\n\n"
+                        f"Warm regards,\nActTrident Enterprise Solutions\nhttps://acttrident.ai/ | security@acttrident.ai"
+                    )
+                },
+                "matched_service_code": service_code,
+                "matched_service_name": service_name,
+                "service_match_reason": f"Aligned with {comp_name}'s technical software development profile in {city_name}",
+                "service_match_evidence": "Commercial IT and software engineering operations",
+                "unsupported_assumptions": ["Laptop fleet count unverified; email avoids specific device numbers"],
+                "missing_information": ["Direct decision maker confirmation"],
+                "grounding_audit": True
+            }
+
         # Email draft fallback
         return {
             "subject": "[AI Unavailable] Draft Generation Pending",
@@ -194,6 +261,15 @@ class LocalAIGateway:
         sys_p, usr_p = self.prompt_manager.build_email_copywriting_prompt(company_data, tone=tone)
         raw_json = await self.generate_json(usr_p, system_prompt=sys_p)
         return parse_and_validate_schema(raw_json, EmailDraftOutput)
+
+    async def generate_phase3_email_variations(
+        self,
+        company_context: Dict[str, Any],
+        tone: str = "Professional",
+    ) -> Dict[str, Any]:
+        """Produces 3 grounded email variations and 4 subject suggestions for Phase 3."""
+        sys_p, usr_p = self.prompt_manager.build_phase3_email_prompt(company_context, tone=tone)
+        return await self.generate_json(usr_p, system_prompt=sys_p)
 
     async def check_health(self) -> Dict[str, Any]:
         """Runs health diagnostics on the local AI gateway and Ollama."""

@@ -94,3 +94,48 @@ Tone: {tone}
 
 Generate subject and body_text in JSON."""
         return system_prompt, user_prompt
+
+    @staticmethod
+    def build_phase3_email_prompt(company_context: Dict[str, Any], tone: str = "Professional") -> tuple[str, str]:
+        """
+        Assembles a comprehensive 11-input prompt for Phase 3 personalized email generation.
+        Strictly enforces anti-hallucination rules, verified-source constraints, and claims boundaries.
+        """
+        system_prompt = (
+            "You are the ActTrident Autonomous Enterprise B2B Sales Outreach Engine.\n"
+            "Your objective is to craft tailored, truthful, highly personalized business introduction emails "
+            "proposing ActTrident's cybersecurity and workspace protection capabilities.\n\n"
+            "MANDATORY COMPLIANCE & ACCURACY RULES:\n"
+            "1. REASON FOR CONTACT: Clearly explain WHY ActTrident is contacting the business based on their verified industry and technical activities.\n"
+            "2. FACTUAL GROUNDING: Refer ONLY to verified facts present in the provided profile, research dossier, and website text. NEVER extrapolate unverified claims.\n"
+            "3. ZERO FABRICATION:\n"
+            "   - NEVER allege or imply that the prospect has suffered a cyberattack, security breach, malware infection, or incident.\n"
+            "   - NEVER fabricate previous meetings, phone calls, interactions, or vendor relationships.\n"
+            "   - NEVER invent employee counts, laptop counts, device counts, or IT infrastructure. If laptop count is unverified, omit specific device fleet numbers.\n"
+            "4. SERVICE ALIGNMENT: Introduce ONLY the approved capabilities of the matched ActTrident service catalogue item. NEVER invent features or promise '100% hack-proof' protection.\n"
+            "5. CALL TO ACTION: Propose a natural, low-friction next step (e.g., a brief 10-15 minute technical exchange next Tuesday or Wednesday).\n"
+            "6. AVOID MARKETING FLUFF: Avoid generic AI hype, buzzwords ('revolutionary', 'game-changer', 'unparalleled'), and exaggerated promises.\n"
+            "7. MISSING INFORMATION: If key facts are unverified, acknowledge them and do not invent assumptions. If Website is 'Not available' or unverified, NEVER claim an active technical footprint.\n"
+            "8. ZERO PLACEHOLDERS & SIGNOFF: NEVER output bracketed or braced placeholders such as [Your Name], [Company Name], [CTA Button: ...], [Insert ...], or {{...}}. Always sign off as 'ActTrident Business Development'.\n"
+            "9. FORMAT: Respond ONLY with a valid JSON object matching the requested schema."
+        )
+
+        user_prompt = f"""Generate 3 concise personalized email variations and 4 subject suggestions:
+
+Company: {company_context.get('company_name')} ({company_context.get('city')}, {company_context.get('industry') or 'Technology'})
+Website: {company_context.get('website') or 'Not available'}
+Recipient: {company_context.get('recipient_name') or 'Leadership Team'} ({company_context.get('recipient_role') or 'Technology Leadership'})
+Research Summary: {(company_context.get('research_summary') or 'Not available')[:280]}
+Matched Service: [{company_context.get('matched_service_code')}] {company_context.get('matched_service_name')}
+Approved Claims: {company_context.get('approved_claims')}
+Disallowed Claims: {company_context.get('disallowed_claims')}
+Tone: {tone}
+
+Respond ONLY with JSON matching this compact schema:
+{{
+  "subject_suggestions": ["Subject 1", "Subject 2", "Subject 3", "Subject 4"],
+  "variation_a_short": {{"subject": "...", "body_text": "Concise 60-80 word intro signed ActTrident Business Development"}},
+  "variation_b_standard": {{"subject": "...", "body_text": "Personalized 100-130 word email signed ActTrident Business Development"}},
+  "variation_c_detailed": {{"subject": "...", "body_text": "Consultative 130-160 word email signed ActTrident Business Development"}}
+}}"""
+        return system_prompt, user_prompt
