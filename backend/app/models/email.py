@@ -45,6 +45,15 @@ class EmailDraft(Base):
     content_hash = Column(String(64), nullable=True)  # SHA-256 of subject + body_text
     approved_content_hash = Column(String(64), nullable=True)  # Set strictly upon human approval
 
+    # Phase 3 AI Generation Provenance & Variations
+    generation_model = Column(String(100), default="llama3.2:latest", nullable=True)
+    matched_service_code = Column(String(50), nullable=True)
+    matched_service_name = Column(String(255), nullable=True)
+    variation_type = Column(String(50), default="standard", nullable=True)  # short, standard, consultative
+    subject_suggestions = Column(Text, nullable=True)  # JSON list of alternative subject lines
+    source_evidence = Column(Text, nullable=True)  # JSON list of field sources & provenance URLs
+    missing_information = Column(Text, nullable=True)  # JSON list of missing/unverified prospect attributes
+
     # Mandatory Human Approval Status
     approval_status = Column(String(50), default="draft", index=True)  # draft, awaiting_approval, approved, queued, sending, sent, delivered, bounced, failed, rejected, skipped, cancelled, simulated
     approved_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)

@@ -3,7 +3,7 @@ from app.api.endpoints import (
     auth, companies, crm, discovery, qualification,
     research, emails, approvals, campaigns, whatsapp, replies,
     analytics, settings, jobs, integrations, linkedin, agent, local_ai, automation,
-    service_catalogue
+    service_catalogue, unsubscribe
 )
 
 api_router = APIRouter()
@@ -28,3 +28,4 @@ api_router.include_router(settings.router, prefix="/settings", tags=["Settings &
 api_router.include_router(jobs.router, prefix="/jobs", tags=["Background Jobs & Queue Engine"])
 api_router.include_router(integrations.router, prefix="/integrations", tags=["Channel OAuth & Provider Integrations"])
 api_router.include_router(service_catalogue.router, prefix="/services", tags=["Service Catalogue & Offerings"])
+api_router.include_router(unsubscribe.router, prefix="/unsubscribe", tags=["Unsubscribe & Opt-Out"])

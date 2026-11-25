@@ -42,9 +42,11 @@ class ServiceCatalogueResponse(ServiceCatalogueBase):
 
 
 class ServiceMatchResult(BaseModel):
-    service_id: int
-    service_code: str
+    service_id: Optional[int] = None
+    service_code: Optional[str] = None
     service_name: str
     match_confidence: float
     rationale: str
     recommended_outreach_angle: str
+    evidence_supporting_match: Optional[str] = None
+    unsupported_assumptions: List[str] = Field(default_factory=list)
