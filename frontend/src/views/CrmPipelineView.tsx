@@ -19,6 +19,7 @@ export const CrmPipelineView: React.FC = () => {
   const [validStatuses, setValidStatuses] = useState<string[]>([]);
   const [statusFilter, setStatusFilter] = useState('All');
   const [cityFilter, setCityFilter] = useState('All');
+  const [sortBy, setSortBy] = useState<string>(() => localStorage.getItem('acttrident_pipeline_sort') || 'newest_first');
   const [loading, setLoading] = useState(true);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
 
@@ -58,7 +59,8 @@ export const CrmPipelineView: React.FC = () => {
     try {
       const data = await api.getLeads(
         statusFilter === 'All' ? undefined : statusFilter,
-        cityFilter === 'All' ? undefined : cityFilter
+        cityFilter === 'All' ? undefined : cityFilter,
+        sortBy
       );
       setLeads(data.items);
       setValidStatuses(data.valid_statuses);
@@ -71,7 +73,7 @@ export const CrmPipelineView: React.FC = () => {
 
   useEffect(() => {
     loadLeads();
-  }, [statusFilter, cityFilter]);
+  }, [statusFilter, cityFilter, sortBy]);
 
   const handleExportCsv = async () => {
     try {
@@ -163,6 +165,21 @@ export const CrmPipelineView: React.FC = () => {
             {availableCities.map((c) => (
               <option key={c} value={c}>{c}</option>
             ))}
+          </select>
+
+          <select
+            aria-label="Sort pipeline leads"
+            value={sortBy}
+            onChange={(e) => {
+              const next = e.target.value;
+              setSortBy(next);
+              localStorage.setItem('acttrident_pipeline_sort', next);
+            }}
+            className="bg-cobalt-950 border border-cobalt-800 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-cobalt-600"
+          >
+            <option value="newest_first">Newest first</option>
+            <option value="oldest_first">Oldest first</option>
+            <option value="updated_desc">Recently updated</option>
           </select>
 
           <select

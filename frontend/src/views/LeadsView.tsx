@@ -25,6 +25,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onSelectCompany }) => {
   const [loading, setLoading] = useState(true);
   const [cityFilter, setCityFilter] = useState('All');
   const [searchTerm, setSearchTerm] = useState('');
+  const [sortBy, setSortBy] = useState<string>(() => localStorage.getItem('acttrident_leads_sort') || 'newest_first');
   const [total, setTotal] = useState(0);
   const [showAddModal, setShowAddModal] = useState(false);
   const [contactQuality, setContactQuality] = useState<any | null>(null);
@@ -49,12 +50,13 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onSelectCompany }) => {
   });
   const [creating, setCreating] = useState(false);
 
-  const loadCompanies = async () => {
+  const loadCompanies = async (overrideSort?: string) => {
     setLoading(true);
     try {
       const data = await api.getCompanies({
         city: cityFilter === 'All' ? undefined : cityFilter,
         search: searchTerm || undefined,
+        sort_by: overrideSort || sortBy,
         limit: 100
       });
       setCompanies(data.items);
@@ -68,7 +70,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onSelectCompany }) => {
 
   useEffect(() => {
     loadCompanies();
-  }, [cityFilter]);
+  }, [cityFilter, sortBy]);
 
   useEffect(() => {
     api.getContactQualitySummary().then(setContactQuality).catch(() => null);
@@ -189,25 +191,51 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onSelectCompany }) => {
           </button>
         </form>
 
-        <div className="flex items-center space-x-2">
-          <span className="text-slate-400 text-[11px]">Filter City:</span>
-          <select
-            value={cityFilter}
-            onChange={(e) => setCityFilter(e.target.value)}
-            className="bg-cobalt-950 border border-cobalt-800 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-cobalt-600"
-          >
-            <option value="All">All Cities ({total})</option>
-            {availableCities.map((c) => (
-              <option key={c} value={c}>{c}</option>
-            ))}
-          </select>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center space-x-2">
+            <span className="text-slate-400 text-[11px]">Sort:</span>
+            <select
+              aria-label="Sort leads"
+              data-testid="leads-sort-select"
+              value={sortBy}
+              onChange={(e) => {
+                const next = e.target.value;
+                setSortBy(next);
+                localStorage.setItem('acttrident_leads_sort', next);
+              }}
+              className="bg-cobalt-950 border border-cobalt-800 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-cobalt-600"
+            >
+              <option value="newest_first">Newest first</option>
+              <option value="oldest_first">Oldest first</option>
+              <option value="qualification_desc">Highest qualification</option>
+              <option value="name_asc">Name (A–Z)</option>
+            </select>
+          </div>
+          <div className="flex items-center space-x-2">
+            <span className="text-slate-400 text-[11px]">Filter City:</span>
+            <select
+              value={cityFilter}
+              onChange={(e) => setCityFilter(e.target.value)}
+              className="bg-cobalt-950 border border-cobalt-800 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-cobalt-600"
+            >
+              <option value="All">All Cities ({total})</option>
+              {availableCities.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
 
       {/* Companies Table */}
       <div className="bg-cobalt-900/80 border border-cobalt-800 rounded-lg overflow-hidden">
         <div className="p-3.5 border-b border-cobalt-800 flex items-center justify-between">
-          <span className="text-xs font-semibold text-slate-200">Registered Companies ({total})</span>
+          <div className="flex items-center space-x-2">
+            <span className="text-xs font-semibold text-slate-200">Registered Companies ({total})</span>
+            <span data-testid="leads-active-sort-badge" className="text-[10px] px-2 py-0.5 rounded bg-cobalt-950 border border-cobalt-700 text-cobalt-300">
+              {sortBy === 'newest_first' ? 'Newest first' : sortBy === 'oldest_first' ? 'Oldest first' : sortBy === 'qualification_desc' ? 'Highest qualification' : 'Name (A–Z)'}
+            </span>
+          </div>
           <span className="text-[11px] font-mono text-slate-400">Strict Source Verification</span>
         </div>
 
@@ -376,7 +404,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onSelectCompany }) => {
                 e.preventDefault();
                 setCreating(true);
                 try {
-                  await api.createCompany({
+                  const created = await api.createCompany({
                     name: newCompany.name,
                     website: newCompany.website || undefined,
                     city: newCompany.city,
@@ -398,7 +426,11 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onSelectCompany }) => {
                     decision_maker_name: '', decision_maker_role: '',
                     laptop_count_verified: '', laptop_count_evidence: '', source_url: ''
                   });
+                  if (sortBy === 'newest_first' && (cityFilter === 'All' || created.city === cityFilter)) {
+                    setCompanies((prev) => [created, ...prev.filter((item) => item.id !== created.id)]);
+                  }
                   loadCompanies();
+                  api.getContactQualitySummary().then(setContactQuality).catch(() => null);
                 } catch (err: any) {
                   alert(`Create error: ${err.message}`);
                 } finally {

@@ -41,19 +41,21 @@ def get_all_companies(
     has_laptops: Optional[bool] = None,
     search: Optional[str] = None,
     is_demo: Optional[bool] = None,
+    sort_by: str = Query("newest_first"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     companies, total = list_companies(
         db, skip=skip, limit=limit, city=city, state=state,
         industry=industry, qualification_status=qualification_status,
-        has_laptops=has_laptops, search=search, is_demo=is_demo
+        has_laptops=has_laptops, search=search, is_demo=is_demo, sort_by=sort_by
     )
     return {
         "items": [CompanyResponse.model_validate(c) for c in companies],
         "total": total,
         "skip": skip,
-        "limit": limit
+        "limit": limit,
+        "sort_by": sort_by,
     }
 
 

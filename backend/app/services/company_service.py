@@ -161,7 +161,8 @@ def list_companies(
     qualification_status: Optional[str] = None,
     has_laptops: Optional[bool] = None,
     search: Optional[str] = None,
-    is_demo: Optional[bool] = None
+    is_demo: Optional[bool] = None,
+    sort_by: str = "newest_first",
 ) -> Tuple[List[Company], int]:
     query = db.query(Company)
 
@@ -187,7 +188,16 @@ def list_companies(
         ))
 
     total = query.count()
-    companies = query.order_by(Company.id.desc()).offset(skip).limit(limit).all()
+    sort_key = (sort_by or "newest_first").strip().lower()
+    if sort_key == "oldest_first":
+        order_clauses = (Company.created_at.asc(), Company.id.asc())
+    elif sort_key == "qualification_desc":
+        order_clauses = (Company.qualification_score.desc(), Company.created_at.desc(), Company.id.desc())
+    elif sort_key == "name_asc":
+        order_clauses = (Company.name.asc(), Company.id.desc())
+    else:
+        order_clauses = (Company.created_at.desc(), Company.id.desc())
+    companies = query.order_by(*order_clauses).offset(skip).limit(limit).all()
     return companies, total
 
 

@@ -103,14 +103,16 @@ def get_leads_pipeline(
     city: Optional[str] = None,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
+    sort_by: str = Query("newest_first"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    leads, total = list_leads(db, status=pipeline_status, city=city, skip=skip, limit=limit)
+    leads, total = list_leads(db, status=pipeline_status, city=city, skip=skip, limit=limit, sort_by=sort_by)
     return {
         "items": [LeadResponse.model_validate(l) for l in leads],
         "total": total,
-        "valid_statuses": PIPELINE_STATUSES
+        "valid_statuses": PIPELINE_STATUSES,
+        "sort_by": sort_by,
     }
 
 
