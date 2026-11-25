@@ -549,3 +549,163 @@ async def verify_discovered_company(item: DiscoveredCompanyItem) -> DiscoveredCo
         "confidence_level": confidence,
         "provenance_sources": provenance_sources,
     })
+
+
+def is_browser_request_allowed(req_url: str) -> bool:
+    """
+    Validates every Playwright navigation, redirect, and subresource URL.
+    Blocks non-HTTP(S) schemes (file://, ftp://), localhost, private/loopback/link-local IPs,
+    cloud metadata endpoints (169.254.169.254 / fd00:ec2::254), demo domains, and LinkedIn.
+    """
+    if not req_url:
+        return False
+    low = req_url.strip().lower()
+    if low == "about:blank":
+        return True
+    parsed = urlparse(low)
+    if parsed.scheme not in ("http", "https"):
+        return False
+    host = (parsed.netloc or "").lower()
+    if "linkedin.com" in host:
+        return False
+    if is_demo_domain(req_url):
+        return False
+    return is_safe_external_url(req_url)
+
+
+async def browser_extract_company_contact(website_url: str) -> Dict[str, Any]:
+    """
+    Phase 4D Optional Operator-Triggered Browser-Assisted Public Contact Extractor.
+    Strictly local, respects robots/anti-bot/CAPTCHA gates without bypassing,
+    never scrapes LinkedIn, enforces SSRF checks, caps at 3 pages, and keeps statuses honest.
+    """
+    from app.core.security import validate_recipient_email_syntax
+
+    raw_url = (website_url or "").strip()
+    if not raw_url:
+        return {"status": "NOT_FOUND", "reason": "No website URL provided."}
+    if not raw_url.startswith(("http://", "https://")):
+        raw_url = "https://" + raw_url
+
+    parsed = urlparse(raw_url)
+    host = (parsed.netloc or "").lower()
+    if "linkedin.com" in host:
+        return {"status": "BLOCKED", "reason": "LinkedIn scraping is strictly prohibited."}
+    if not is_safe_external_url(raw_url) or is_demo_domain(raw_url):
+        return {"status": "BLOCKED", "reason": "URL failed SSRF or demo-domain safety policy."}
+
+    try:
+        from playwright.async_api import async_playwright
+    except Exception as exc:
+        return {"status": "DEFERRED", "reason": f"Playwright unavailable: {exc}"}
+
+    root = f"{parsed.scheme}://{parsed.netloc}"
+    candidate_urls = [raw_url, urljoin(root, "/contact"), urljoin(root, "/about")]
+    # Deduplicate preserving order, max 3 pages
+    urls: List[str] = []
+    for u in candidate_urls:
+        if u not in urls and is_safe_external_url(u):
+            urls.append(u)
+    urls = urls[:3]
+
+    found_emails: List[Tuple[str, str]] = []
+    found_phones: List[Tuple[str, str]] = []
+    antibot_markers = ("verify you are human", "captcha", "cf-browser-verification", "access denied", "sign in to continue")
+    noise_domains = ("sentry.io", "wixpress.com", "schema.org", "w3.org", "wordpress.org", "cloudflare.com")
+    retrieved_at = datetime.now(timezone.utc).isoformat()
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        try:
+            context = await browser.new_context(
+                user_agent="ActTrident-Local-Contact-Inspector/1.0 (+https://acttrident.ai)"
+            )
+
+            async def _ssrf_route_guard(route):
+                if is_browser_request_allowed(route.request.url):
+                    await route.continue_()
+                else:
+                    logger.warning(f"Blocked unsafe browser request/redirect/subresource: {route.request.url}")
+                    await route.abort("blockedbyclient")
+
+            await context.route("**/*", _ssrf_route_guard)
+            page = await context.new_page()
+            for target_url in urls:
+                try:
+                    resp = await page.goto(target_url, wait_until="domcontentloaded", timeout=8000)
+                    if not is_browser_request_allowed(page.url):
+                        return {
+                            "status": "BLOCKED",
+                            "reason": "Navigation redirected to a disallowed internal or restricted URL.",
+                            "source_url": target_url,
+                            "retrieved_at": retrieved_at,
+                        }
+                    if resp and resp.status in (401, 403, 429):
+                        return {
+                            "status": "NEEDS_REVIEW",
+                            "reason": f"Website returned HTTP {resp.status}; respected restriction without bypass.",
+                            "source_url": target_url,
+                            "retrieved_at": retrieved_at,
+                        }
+                    await page.wait_for_timeout(800)
+                    content_text = await page.inner_text("body")
+                    html_content = await page.content()
+                    low_text = (content_text or "").lower()
+                    if any(m in low_text for m in antibot_markers):
+                        return {
+                            "status": "NEEDS_REVIEW",
+                            "reason": "Anti-bot/CAPTCHA/auth gate detected; stopped without bypassing.",
+                            "source_url": target_url,
+                            "retrieved_at": retrieved_at,
+                        }
+                    for em in EMAIL_REGEX.findall(html_content + " " + content_text):
+                        em_low = em.strip().lower()
+                        if any(em_low.endswith(ext) for ext in INVALID_EMAIL_EXTENSIONS):
+                            continue
+                        if is_demo_domain(em_low) or any(nd in em_low.split("@")[-1] for nd in noise_domains):
+                            continue
+                        if validate_recipient_email_syntax(em_low) and all(e[0] != em_low for e in found_emails):
+                            found_emails.append((em_low, page.url or target_url))
+                    for ph in INDIAN_PHONE_REGEX.findall(content_text):
+                        ph_clean = re.sub(r"\s+", " ", ph).strip()
+                        if len(re.sub(r"\D", "", ph_clean)) >= 10 and all(x[0] != ph_clean for x in found_phones):
+                            found_phones.append((ph_clean, page.url or target_url))
+                    if found_emails:
+                        break
+                except Exception:
+                    continue
+        finally:
+            await browser.close()
+
+    if not found_emails:
+        return {
+            "status": "NOT_FOUND",
+            "reason": "No public business email found across checked official pages.",
+            "source_url": urls[0],
+            "retrieved_at": retrieved_at,
+            "phones": [p[0] for p in found_phones[:2]],
+        }
+
+    found_emails.sort(key=lambda pair: 1 if pair[0].startswith(ROLE_BASED_PREFIXES) else 0)
+    best_email, src_url = found_emails[0]
+    mx_ok = check_email_domain_mx(best_email)
+    comp_dom = parsed.netloc.lower().lstrip("www.")
+    em_dom = best_email.split("@")[-1].lower()
+    dom_match = (comp_dom == em_dom) or em_dom.endswith("." + comp_dom) or comp_dom.endswith("." + em_dom)
+
+    if mx_ok and dom_match:
+        v_status = "DOMAIN_MX_CHECKED"
+    elif mx_ok:
+        v_status = "NEEDS_REVIEW"
+    else:
+        v_status = "SYNTAX_VALID"
+
+    return {
+        "status": v_status,
+        "email": best_email,
+        "mx_ok": mx_ok,
+        "domain_matches": dom_match,
+        "source_url": src_url,
+        "retrieved_at": retrieved_at,
+        "phones": [p[0] for p in found_phones[:2]],
+    }
