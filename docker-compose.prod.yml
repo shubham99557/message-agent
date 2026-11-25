@@ -15,7 +15,7 @@ services:
     restart: always
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-acttrident}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?CRITICAL: POSTGRES_PASSWORD must be provided}
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?CRITICAL: POSTGRES_PASSWORD must be provided}"
       POSTGRES_DB: ${POSTGRES_DB:-acttrident_db}
     volumes:
       - pgdata_prod:/var/lib/postgresql/data
@@ -77,8 +77,8 @@ services:
     environment:
       ENVIRONMENT: production
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-acttrident}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-acttrident_db}
-      SECRET_KEY: ${SECRET_KEY:?CRITICAL: SECRET_KEY must be provided in production}
-      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:?CRITICAL: CREDENTIAL_ENCRYPTION_KEY must be provided in production}
+      SECRET_KEY: "${SECRET_KEY:?CRITICAL: SECRET_KEY must be provided in production}"
+      CREDENTIAL_ENCRYPTION_KEY: "${CREDENTIAL_ENCRYPTION_KEY:?CRITICAL: CREDENTIAL_ENCRYPTION_KEY must be provided in production}"
     networks:
       - acttrident_internal
 
@@ -102,9 +102,9 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD}@redis:6379/0}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://:${REDIS_PASSWORD}@redis:6379/0}
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://:${REDIS_PASSWORD}@redis:6379/1}
-      SECRET_KEY: ${SECRET_KEY:?CRITICAL: SECRET_KEY must be provided in production}
-      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:?CRITICAL: CREDENTIAL_ENCRYPTION_KEY must be provided in production}
-      BACKEND_CORS_ORIGINS: ${BACKEND_CORS_ORIGINS:?CRITICAL: BACKEND_CORS_ORIGINS must be set in production}
+      SECRET_KEY: "${SECRET_KEY:?CRITICAL: SECRET_KEY must be provided in production}"
+      CREDENTIAL_ENCRYPTION_KEY: "${CREDENTIAL_ENCRYPTION_KEY:?CRITICAL: CREDENTIAL_ENCRYPTION_KEY must be provided in production}"
+      BACKEND_CORS_ORIGINS: "${BACKEND_CORS_ORIGINS:?CRITICAL: BACKEND_CORS_ORIGINS must be set in production}"
       AI_PROVIDER: ${AI_PROVIDER:-gemini}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       EMAIL_PROVIDER: ${EMAIL_PROVIDER:-gmail}
@@ -114,8 +114,8 @@ services:
       META_WA_ACCESS_TOKEN: ${META_WA_ACCESS_TOKEN:-}
       META_WA_PHONE_NUMBER_ID: ${META_WA_PHONE_NUMBER_ID:-}
       META_WA_BUSINESS_ACCOUNT_ID: ${META_WA_BUSINESS_ACCOUNT_ID:-}
-      META_WA_VERIFY_TOKEN: ${META_WA_VERIFY_TOKEN:?CRITICAL: Non-default verify token required}
-      META_APP_SECRET: ${META_APP_SECRET:?CRITICAL: META_APP_SECRET required for signature verification}
+      META_WA_VERIFY_TOKEN: "${META_WA_VERIFY_TOKEN:?CRITICAL: Non-default verify token required}"
+      META_APP_SECRET: "${META_APP_SECRET:?CRITICAL: META_APP_SECRET required for signature verification}"
       DEFAULT_DAILY_EMAIL_LIMIT: ${DEFAULT_DAILY_EMAIL_LIMIT:-50}
       DEFAULT_DAILY_WHATSAPP_LIMIT: ${DEFAULT_DAILY_WHATSAPP_LIMIT:-20}
     healthcheck:
@@ -153,8 +153,8 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD}@redis:6379/0}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://:${REDIS_PASSWORD}@redis:6379/0}
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://:${REDIS_PASSWORD}@redis:6379/1}
-      SECRET_KEY: ${SECRET_KEY:?CRITICAL: SECRET_KEY must be provided in production}
-      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:?CRITICAL: CREDENTIAL_ENCRYPTION_KEY must be provided in production}
+      SECRET_KEY: "${SECRET_KEY:?CRITICAL: SECRET_KEY must be provided in production}"
+      CREDENTIAL_ENCRYPTION_KEY: "${CREDENTIAL_ENCRYPTION_KEY:?CRITICAL: CREDENTIAL_ENCRYPTION_KEY must be provided in production}"
       AI_PROVIDER: ${AI_PROVIDER:-gemini}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       EMAIL_PROVIDER: ${EMAIL_PROVIDER:-gmail}
@@ -182,8 +182,8 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD}@redis:6379/0}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://:${REDIS_PASSWORD}@redis:6379/0}
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://:${REDIS_PASSWORD}@redis:6379/1}
-      SECRET_KEY: ${SECRET_KEY:?CRITICAL: SECRET_KEY must be provided in production}
-      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:?CRITICAL: CREDENTIAL_ENCRYPTION_KEY must be provided}
+      SECRET_KEY: "${SECRET_KEY:?CRITICAL: SECRET_KEY must be provided in production}"
+      CREDENTIAL_ENCRYPTION_KEY: "${CREDENTIAL_ENCRYPTION_KEY:?CRITICAL: CREDENTIAL_ENCRYPTION_KEY must be provided}"
     logging:
       driver: "json-file"
       options:

@@ -9,7 +9,7 @@ services:
     restart: always
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-acttrident_staging}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?CRITICAL: POSTGRES_PASSWORD must be provided}
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?CRITICAL: POSTGRES_PASSWORD must be provided}"
       POSTGRES_DB: ${POSTGRES_DB:-acttrident_staging_db}
     volumes:
       - pgdata_staging:/var/lib/postgresql/data
@@ -72,8 +72,8 @@ services:
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
-      SECRET_KEY: ${SECRET_KEY:?CRITICAL: SECRET_KEY of at least 32 characters must be provided}
-      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:?CRITICAL: CREDENTIAL_ENCRYPTION_KEY must be provided}
+      SECRET_KEY: "${SECRET_KEY:?CRITICAL: SECRET_KEY of at least 32 characters must be provided}"
+      CREDENTIAL_ENCRYPTION_KEY: "${CREDENTIAL_ENCRYPTION_KEY:?CRITICAL: CREDENTIAL_ENCRYPTION_KEY must be provided}"
       BACKEND_CORS_ORIGINS: ${BACKEND_CORS_ORIGINS:-http://localhost,http://localhost:5173}
       AI_PROVIDER: ${AI_PROVIDER:-mock}
       EMAIL_PROVIDER: ${EMAIL_PROVIDER:-mock}
@@ -108,8 +108,8 @@ services:
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
-      SECRET_KEY: ${SECRET_KEY:?CRITICAL: SECRET_KEY must be provided}
-      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:?CRITICAL: CREDENTIAL_ENCRYPTION_KEY must be provided}
+      SECRET_KEY: "${SECRET_KEY:?CRITICAL: SECRET_KEY must be provided}"
+      CREDENTIAL_ENCRYPTION_KEY: "${CREDENTIAL_ENCRYPTION_KEY:?CRITICAL: CREDENTIAL_ENCRYPTION_KEY must be provided}"
       AI_PROVIDER: ${AI_PROVIDER:-mock}
       EMAIL_PROVIDER: ${EMAIL_PROVIDER:-mock}
     networks:
@@ -131,8 +131,8 @@ services:
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
-      SECRET_KEY: ${SECRET_KEY:?CRITICAL: SECRET_KEY must be provided}
-      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:?CRITICAL: CREDENTIAL_ENCRYPTION_KEY must be provided}
+      SECRET_KEY: "${SECRET_KEY:?CRITICAL: SECRET_KEY must be provided}"
+      CREDENTIAL_ENCRYPTION_KEY: "${CREDENTIAL_ENCRYPTION_KEY:?CRITICAL: CREDENTIAL_ENCRYPTION_KEY must be provided}"
     networks:
       - acttrident_staging_net
 

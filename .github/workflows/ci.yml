@@ -120,6 +120,10 @@ jobs:
         run: docker compose -f docker-compose.dev.yml config
 
       - name: Validate Staging Compose Config
+        env:
+          POSTGRES_PASSWORD: test_staging_password_2026
+          SECRET_KEY: staging_ci_test_secret_key_at_least_32_characters_long
+          CREDENTIAL_ENCRYPTION_KEY: staging_ci_encryption_key_16
         run: docker compose -f docker-compose.staging.yml config
 
       - name: Validate Production Compose Config
