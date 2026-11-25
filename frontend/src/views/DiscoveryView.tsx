@@ -49,10 +49,20 @@ interface PipelineStep {
 }
 
 export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onCompanyImported }) => {
+  const savedPrefs = (() => {
+    try {
+      const parsed = JSON.parse(localStorage.getItem('acttrident_discovery_prefs') || '{}');
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  })();
+
   // Scope & Location States
-  const [scope, setScope] = useState<'country' | 'state' | 'city'>('city');
-  const [selectedState, setSelectedState] = useState<string>('West Bengal');
-  const [cityInput, setCityInput] = useState<string>('Siliguri');
+  const initialScope = ['country', 'state', 'city'].includes(savedPrefs.scope) ? savedPrefs.scope : 'city';
+  const [scope, setScope] = useState<'country' | 'state' | 'city'>(initialScope);
+  const [selectedState, setSelectedState] = useState<string>(savedPrefs.selectedState ?? 'West Bengal');
+  const [cityInput, setCityInput] = useState<string>(savedPrefs.cityInput ?? 'Siliguri');
   const [citySuggestions, setCitySuggestions] = useState<any[]>([]);
   const [showSuggestions, setShowSuggestions] = useState<boolean>(false);
   const [statesList, setStatesList] = useState<Array<{ name: string; code: string; region: string }>>([]);
@@ -60,17 +70,18 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onCompanyImported 
   const [activePreset, setActivePreset] = useState<string>('target_east_northeast');
 
   // Search & Filter Parameters
-  const [industry, setIndustry] = useState<string>('Software Development');
+  const [industry, setIndustry] = useState<string>(savedPrefs.industry ?? 'Software Development');
   const [customIndustry, setCustomIndustry] = useState<string>('');
-  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [searchQuery, setSearchQuery] = useState<string>(savedPrefs.searchQuery ?? '');
   const [companySize, setCompanySize] = useState<string>('all');
   const [minDevices, setMinDevices] = useState<number | undefined>(undefined);
   const [minScore, setMinScore] = useState<number>(40);
   const [maxLeads, setMaxLeads] = useState<number>(10);
   const [includeDemo, setIncludeDemo] = useState<boolean>(false);
   const [contactFilter, setContactFilter] = useState<'all' | 'has_email' | 'has_phone'>('all');
-  const [sortBy, setSortBy] = useState<string>('confidence');
+  const [sortBy, setSortBy] = useState<string>(savedPrefs.sortBy || 'confidence');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [importStats, setImportStats] = useState<{ found: number; saved: number; skipped: number; failed: number } | null>(null);
 
   // Lead Quality KPI Metrics State
   const [kpiMetrics, setKpiMetrics] = useState<{
@@ -175,14 +186,29 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onCompanyImported 
     }, 350);
   };
 
+  // Persist discovery search preferences across page refreshes
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        'acttrident_discovery_prefs',
+        JSON.stringify({ scope, selectedState, cityInput, industry, searchQuery, sortBy })
+      );
+    } catch {
+      // ignore storage errors
+    }
+  }, [scope, selectedState, cityInput, industry, searchQuery, sortBy]);
+
   // Main search execution function
-  const executeSearch = useCallback(async (opts: { newPage?: number; initial?: boolean } = {}) => {
+  const executeSearch = useCallback(async (opts: { newPage?: number; initial?: boolean; newSort?: string; overrideScope?: 'country' | 'state' | 'city'; overrideCity?: string } = {}) => {
     if (searchAbortRef.current) {
       searchAbortRef.current.abort();
     }
     searchAbortRef.current = new AbortController();
 
     const targetPage = opts.newPage !== undefined ? opts.newPage : (opts.initial ? 1 : page);
+    const activeScope = opts.overrideScope || scope;
+    const activeCityRaw = opts.overrideCity !== undefined ? opts.overrideCity : cityInput;
+    const activeSort = opts.newSort || sortBy;
     setSearching(true);
     setSearchError(null);
     setImportSuccess(null);
@@ -191,17 +217,17 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onCompanyImported 
       ? customIndustry.trim()
       : (industry === 'All' ? undefined : industry);
 
-    let effectiveCity = cityInput.trim();
-    if (scope === 'country') {
+    let effectiveCity = activeCityRaw.trim();
+    if (activeScope === 'country') {
       effectiveCity = 'All';
-    } else if (scope === 'state' && !effectiveCity) {
+    } else if (activeScope === 'state' && !effectiveCity) {
       effectiveCity = '';
     }
 
     const payload = {
       city: effectiveCity || undefined,
       state: selectedState || undefined,
-      scope,
+      scope: activeScope,
       industry: effectiveIndustry || undefined,
       query: searchQuery.trim() || undefined,
       company_size: companySize === 'all' ? undefined : companySize,
@@ -209,7 +235,7 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onCompanyImported 
       include_demo: includeDemo,
       page: targetPage,
       page_size: pageSize,
-      sort_by: sortBy,
+      sort_by: activeSort,
       sort_order: sortOrder,
     };
 
@@ -335,24 +361,41 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onCompanyImported 
     if (preset.id === 'all_india') {
       setScope('country');
       setCityInput('All');
+      setPage(1);
+      executeSearch({ newPage: 1, overrideScope: 'country', overrideCity: 'All' });
     } else {
       setScope('city');
       setCityInput(preset.cities[0]);
+      setPage(1);
+      executeSearch({ newPage: 1, overrideScope: 'city', overrideCity: preset.cities[0] });
     }
-    setPage(1);
-    setTimeout(() => {
-      executeSearch({ newPage: 1 });
-    }, 50);
   };
 
   const handleImportLead = async (item: any) => {
     setImportingId(item.name);
+    setSearchError(null);
     try {
-      await api.importDiscoveredLead(item);
-      setImportSuccess(`Successfully imported "${item.name}" into CRM with full source attribution!`);
+      const saved = await api.importDiscoveredLead(item);
+      setResults((prev) =>
+        prev.map((r) =>
+          r.name === item.name ? { ...r, crm_status: 'previously_known', crm_id: saved.id } : r
+        )
+      );
+      setImportStats({ found: results.length, saved: 1, skipped: 0, failed: 0 });
+      setImportSuccess(`Saved "${item.name}" to CRM (ID #${saved.id}) with source attribution and qualification.`);
       if (onCompanyImported) onCompanyImported();
     } catch (err: any) {
-      alert(`Import error: ${err.message}`);
+      const msg = err?.message || 'Import failed.';
+      if (msg.toLowerCase().includes('already exists')) {
+        setResults((prev) =>
+          prev.map((r) => (r.name === item.name ? { ...r, crm_status: 'previously_known' } : r))
+        );
+        setImportStats({ found: results.length, saved: 0, skipped: 1, failed: 0 });
+        setImportSuccess(`Skipped duplicate: "${item.name}" is already in CRM.`);
+      } else {
+        setImportStats({ found: results.length, saved: 0, skipped: 0, failed: 1 });
+        setSearchError(`Import error for "${item.name}": ${msg}`);
+      }
     } finally {
       setImportingId(null);
     }
@@ -360,12 +403,37 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onCompanyImported 
 
   const handleBatchImport = async () => {
     if (!results.length) return;
+    setSearchError(null);
     try {
-      const imported = await api.batchImportDiscoveredLeads(results);
-      setImportSuccess(`Batch imported ${imported.length} new qualified leads into CRM!`);
-      if (onCompanyImported) onCompanyImported();
+      const summary = await api.batchImportDiscoveredLeadsSummary(results);
+      const savedByName = new Map<string, number>();
+      (summary.saved_companies || []).forEach((c: any) => savedByName.set((c.name || '').toLowerCase(), c.id));
+      const skippedSet = new Set((summary.skipped_names || []).map((n: string) => n.toLowerCase()));
+
+      setResults((prev) =>
+        prev.map((r) => {
+          const low = (r.name || '').toLowerCase();
+          if (savedByName.has(low)) {
+            return { ...r, crm_status: 'previously_known', crm_id: savedByName.get(low) };
+          }
+          if (skippedSet.has(low)) {
+            return { ...r, crm_status: 'previously_known' };
+          }
+          return r;
+        })
+      );
+      setImportStats({
+        found: summary.total_submitted,
+        saved: summary.saved_count,
+        skipped: summary.duplicates_skipped,
+        failed: summary.failed_count,
+      });
+      setImportSuccess(
+        `Import summary — Found: ${summary.total_submitted}, Saved: ${summary.saved_count}, Duplicates skipped: ${summary.duplicates_skipped}, Failed: ${summary.failed_count}.`
+      );
+      if (summary.saved_count > 0 && onCompanyImported) onCompanyImported();
     } catch (e: any) {
-      alert(`Batch import failed: ${e.message}`);
+      setSearchError(`Batch import failed: ${e.message}`);
     }
   };
 
@@ -882,14 +950,26 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onCompanyImported 
 
       {/* Success Notification */}
       {importSuccess && (
-        <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded text-xs text-emerald-300 flex items-center justify-between">
+        <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded text-xs text-emerald-300 flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center space-x-2">
             <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
             <span>{importSuccess}</span>
           </div>
-          <button onClick={() => setImportSuccess(null)} className="text-slate-400 hover:text-slate-200">
-            <X className="w-4 h-4" />
-          </button>
+          <div className="flex items-center space-x-2">
+            {importStats && (
+              <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-mono">
+                <span className="px-1.5 py-0.5 rounded bg-cobalt-950 border border-cobalt-800 text-slate-200">Found: {importStats.found}</span>
+                <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 border border-emerald-500/30 text-emerald-300">Saved: {importStats.saved}</span>
+                <span className="px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/30 text-amber-300">Skipped: {importStats.skipped}</span>
+                {importStats.failed > 0 && (
+                  <span className="px-1.5 py-0.5 rounded bg-rose-500/20 border border-rose-500/30 text-rose-300">Failed: {importStats.failed}</span>
+                )}
+              </div>
+            )}
+            <button onClick={() => setImportSuccess(null)} className="text-slate-400 hover:text-slate-200">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       )}
 
@@ -906,12 +986,12 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onCompanyImported 
           <div className="text-[10px] text-emerald-400/80 font-mono mt-0.5">Active & Reachable</div>
         </div>
         <div className="bg-cobalt-900/80 border border-cobalt-800 rounded-lg p-2.5">
-          <div className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">Verified Emails</div>
+          <div className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">Public Emails Found</div>
           <div className="text-lg font-bold text-emerald-400 mt-0.5">{kpiMetrics.verifiedEmails}</div>
-          <div className="text-[10px] text-slate-400 font-mono mt-0.5">Non-demo, Provenance</div>
+          <div className="text-[10px] text-slate-400 font-mono mt-0.5">Non-demo, Source-attributed</div>
         </div>
         <div className="bg-cobalt-900/80 border border-cobalt-800 rounded-lg p-2.5">
-          <div className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">Verified Phones</div>
+          <div className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">Phones Found</div>
           <div className="text-lg font-bold text-emerald-400 mt-0.5">{kpiMetrics.verifiedPhones}</div>
           <div className="text-[10px] text-slate-400 font-mono mt-0.5">Direct & WhatsApp</div>
         </div>
@@ -953,10 +1033,12 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onCompanyImported 
 
           {/* Sort By Selector */}
           <select
+            aria-label="Sort discovered companies"
             value={sortBy}
             onChange={(e) => {
-              setSortBy(e.target.value);
-              setTimeout(() => executeSearch(), 20);
+              const nextSort = e.target.value;
+              setSortBy(nextSort);
+              executeSearch({ newPage: 1, newSort: nextSort });
             }}
             className="bg-cobalt-950 border border-cobalt-800 rounded px-2 py-1 text-[11px] text-slate-300"
           >
@@ -1011,12 +1093,20 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onCompanyImported 
             ))}
           </div>
         ) : filteredResults.length === 0 ? (
-          <div className="p-12 text-center text-xs text-slate-400">
+          <div className="p-12 text-center text-xs text-slate-400 space-y-2">
             <Building2 className="w-8 h-8 mx-auto text-cobalt-600 mb-2 opacity-60" />
             <p className="font-semibold text-slate-300">No matching business records found.</p>
             <p className="text-[11px] mt-1 text-slate-500">
               Run the Autonomous Pipeline or adjust the location and industry filters above.
             </p>
+            <button
+              type="button"
+              onClick={() => executeSearch({ newPage: 1 })}
+              className="mt-2 px-3 py-1.5 bg-cobalt-700 hover:bg-cobalt-600 text-white rounded text-[11px] font-medium inline-flex items-center space-x-1.5"
+            >
+              <RefreshCw className="w-3 h-3" />
+              <span>Retry Search</span>
+            </button>
           </div>
         ) : (
           <div className="overflow-x-auto">

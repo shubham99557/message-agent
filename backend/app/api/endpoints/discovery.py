@@ -184,21 +184,8 @@ async def crawl_website(
     return data
 
 
-@router.post("/import", response_model=CompanyResponse, status_code=status.HTTP_201_CREATED)
-def import_discovered_lead(
-    item: DiscoveredCompanyItem,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """Imports a single discovered company with full contact source attribution."""
-    existing = find_duplicate_company(db, name=item.name, website=item.website, email=item.public_email)
-    if existing:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Company '{item.name}' already exists in the database (ID: {existing.id})"
-        )
-
-    company_create = CompanyCreate(
+def _build_company_create_from_discovered(item: DiscoveredCompanyItem) -> CompanyCreate:
+    return CompanyCreate(
         name=item.name,
         website=item.website,
         city=item.city,
@@ -221,7 +208,44 @@ def import_discovered_lead(
         is_demo=item.is_demo,
     )
 
-    company = create_company(db, company_create)
+
+def _persist_and_qualify_discovered_company(db: Session, item: DiscoveredCompanyItem, user_id: int):
+    from app.models.company import ContactSource
+    from app.services.qualification_service import qualify_company
+
+    company = create_company(db, _build_company_create_from_discovered(item), user_id=user_id)
+    if item.source_url and not company.sources:
+        db.add(
+            ContactSource(
+                company_id=company.id,
+                field_name="website",
+                source_url=item.source_url,
+                source_type=item.source_type or "public_directory",
+                extracted_text=f"Discovered via {item.source_type}",
+            )
+        )
+        db.commit()
+        db.refresh(company)
+    qualify_company(db, company)
+    db.refresh(company)
+    return company
+
+
+@router.post("/import", response_model=CompanyResponse, status_code=status.HTTP_201_CREATED)
+def import_discovered_lead(
+    item: DiscoveredCompanyItem,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Imports a single discovered company with full contact source attribution and qualification."""
+    existing = find_duplicate_company(db, name=item.name, website=item.website, email=item.public_email, source_url=item.source_url)
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Company '{item.name}' already exists in the database (ID: {existing.id})"
+        )
+
+    company = _persist_and_qualify_discovered_company(db, item, current_user.id)
     record_audit_log(
         db=db,
         action="import_discovered_lead",
@@ -239,37 +263,49 @@ def batch_import_discovered_leads(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Imports multiple discovered leads with deduplication and source persistence."""
+    """Imports multiple discovered leads with deduplication, qualification, and source persistence."""
     imported = []
     for item in req.companies:
-        existing = find_duplicate_company(db, name=item.name, website=item.website, email=item.public_email)
+        existing = find_duplicate_company(db, name=item.name, website=item.website, email=item.public_email, source_url=item.source_url)
         if existing:
             continue
-        company_create = CompanyCreate(
-            name=item.name,
-            website=item.website,
-            city=item.city,
-            state=item.state,
-            industry=item.industry,
-            description=item.description,
-            public_email=item.public_email,
-            public_phone=item.public_phone,
-            public_whatsapp=item.public_whatsapp,
-            linkedin_url=item.linkedin_url,
-            decision_maker_name=item.decision_maker_name,
-            decision_maker_role=item.decision_maker_role,
-            employee_count_min=item.employee_count_min,
-            employee_count_max=item.employee_count_max,
-            employee_size_evidence=item.employee_size_evidence,
-            laptop_count_verified=item.laptop_count_verified,
-            laptop_count_evidence=item.laptop_count_evidence,
-            source_url=item.source_url,
-            source_notes=f"Discovered via {item.source_type}"
-        )
-        comp = create_company(db, company_create)
+        comp = _persist_and_qualify_discovered_company(db, item, current_user.id)
         imported.append(comp)
 
     return imported
+
+
+@router.post("/batch-import-summary")
+def batch_import_discovered_leads_summary(
+    req: BatchImportRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Imports discovered leads and returns explicit saved, duplicate-skipped, and failed counts."""
+    saved_companies = []
+    skipped_names = []
+    failed_items = []
+    for item in req.companies:
+        try:
+            existing = find_duplicate_company(db, name=item.name, website=item.website, email=item.public_email, source_url=item.source_url)
+            if existing:
+                skipped_names.append(item.name)
+                continue
+            comp = _persist_and_qualify_discovered_company(db, item, current_user.id)
+            saved_companies.append(CompanyResponse.model_validate(comp))
+        except Exception as exc:
+            db.rollback()
+            failed_items.append({"name": item.name, "error": str(exc)})
+
+    return {
+        "total_submitted": len(req.companies),
+        "saved_count": len(saved_companies),
+        "duplicates_skipped": len(skipped_names),
+        "failed_count": len(failed_items),
+        "saved_companies": saved_companies,
+        "skipped_names": skipped_names,
+        "failed_items": failed_items,
+    }
 
 
 @router.post("/upload-csv", response_model=List[DiscoveredCompanyItem])

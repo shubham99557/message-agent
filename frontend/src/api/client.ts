@@ -152,7 +152,7 @@ export const api = {
   },
 
   // Companies & Leads
-  getCompanies: (params: { city?: string; industry?: string; search?: string; skip?: number; limit?: number; is_demo?: boolean } = {}) => {
+  getCompanies: (params: { city?: string; industry?: string; search?: string; skip?: number; limit?: number; is_demo?: boolean; sort_by?: string } = {}) => {
     const query = new URLSearchParams();
     if (params.city) query.append('city', params.city);
     if (params.industry) query.append('industry', params.industry);
@@ -160,7 +160,8 @@ export const api = {
     if (params.is_demo !== undefined) query.append('is_demo', String(params.is_demo));
     if (params.skip !== undefined) query.append('skip', String(params.skip));
     if (params.limit !== undefined) query.append('limit', String(params.limit));
-    return request<{ items: any[]; total: number }>(`/companies?${query.toString()}`);
+    if (params.sort_by) query.append('sort_by', params.sort_by);
+    return request<{ items: any[]; total: number; sort_by?: string }>(`/companies?${query.toString()}`);
   },
   createCompany: (company: any) => request<any>('/companies', { method: 'POST', body: JSON.stringify(company) }),
   getCompany: (id: number) => request<any>(`/companies/${id}`),
@@ -326,6 +327,16 @@ export const api = {
   importDiscoveredLead: (lead: any) => request<any>('/discovery/import', { method: 'POST', body: JSON.stringify(lead) }),
   batchImportDiscoveredLeads: (companies: any[]) =>
     request<any[]>('/discovery/batch-import', { method: 'POST', body: JSON.stringify({ companies }) }),
+  batchImportDiscoveredLeadsSummary: (companies: any[]) =>
+    request<{
+      total_submitted: number;
+      saved_count: number;
+      duplicates_skipped: number;
+      failed_count: number;
+      saved_companies: any[];
+      skipped_names: string[];
+      failed_items: Array<{ name: string; error: string }>;
+    }>('/discovery/batch-import-summary', { method: 'POST', body: JSON.stringify({ companies }) }),
   crawlWebsite: (websiteUrl: string, companyName?: string, city?: string) =>
     request<any>('/discovery/crawl-website', { method: 'POST', body: JSON.stringify({ website_url: websiteUrl, company_name: companyName, city }) }),
   uploadDiscoveryCsv: async (file: File) => {
@@ -433,11 +444,12 @@ export const api = {
     request<any>(`/campaigns/${campaignId}/stop`, { method: 'POST' }),
 
   // CRM Pipeline
-  getLeads: (status?: string, city?: string) => {
+  getLeads: (status?: string, city?: string, sortBy?: string) => {
     const query = new URLSearchParams();
     if (status) query.append('pipeline_status', status);
     if (city) query.append('city', city);
-    return request<{ items: any[]; total: number; valid_statuses: string[] }>(`/crm/leads?${query.toString()}`);
+    if (sortBy) query.append('sort_by', sortBy);
+    return request<{ items: any[]; total: number; valid_statuses: string[]; sort_by?: string }>(`/crm/leads?${query.toString()}`);
   },
   updateLeadStatus: (leadId: number, status: string, notes?: string) =>
     request<any>(`/crm/leads/${leadId}/status`, { method: 'PATCH', body: JSON.stringify({ status, notes }) }),

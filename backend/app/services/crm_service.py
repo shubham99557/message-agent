@@ -22,7 +22,8 @@ def list_leads(
     status: Optional[str] = None,
     city: Optional[str] = None,
     skip: int = 0,
-    limit: int = 100
+    limit: int = 100,
+    sort_by: str = "newest_first",
 ) -> Tuple[List[Lead], int]:
     query = db.query(Lead)
 
@@ -34,7 +35,14 @@ def list_leads(
         query = query.join(Company).filter(Company.city.ilike(f"%{city}%"))
 
     total = query.count()
-    leads = query.order_by(Lead.updated_at.desc()).offset(skip).limit(limit).all()
+    sort_key = (sort_by or "newest_first").strip().lower()
+    if sort_key == "oldest_first":
+        order_clauses = (Lead.created_at.asc(), Lead.id.asc())
+    elif sort_key == "updated_desc":
+        order_clauses = (Lead.updated_at.desc(), Lead.id.desc())
+    else:
+        order_clauses = (Lead.created_at.desc(), Lead.id.desc())
+    leads = query.order_by(*order_clauses).offset(skip).limit(limit).all()
     return leads, total
 
 
