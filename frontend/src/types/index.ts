@@ -91,6 +91,40 @@ export interface Lead {
   trials: any[];
 }
 
+export interface EmailVariationItem {
+  variation_type: string;
+  label: string;
+  subject: string;
+  body_text: string;
+  body_html: string;
+  tone: string;
+  description: string;
+}
+
+export interface EmailVariationsResponse {
+  company_id: number;
+  company_name: string;
+  website?: string;
+  city: string;
+  industry?: string;
+  recipient_name?: string;
+  recipient_email?: string;
+  recipient_role?: string;
+  recipient_phone?: string;
+  matched_service_code?: string;
+  matched_service_name?: string;
+  service_match_reason?: string;
+  service_match_evidence?: string;
+  service_match_confidence: number;
+  unsupported_assumptions: string[];
+  missing_information: string[];
+  source_evidence: Record<string, any>[];
+  subject_suggestions: string[];
+  variations: EmailVariationItem[];
+  generation_model: string;
+  is_synthetic: boolean;
+}
+
 export interface EmailDraft {
   id: number;
   campaign_id?: number;
@@ -101,8 +135,21 @@ export interface EmailDraft {
   body_html: string;
   body_text: string;
   tone: string;
+  draft_type?: string;
+  variation_type?: string;
+  generation_model?: string;
+  matched_service_code?: string;
+  matched_service_name?: string;
+  subject_suggestions?: string[];
+  source_evidence?: string[];
+  missing_information?: string[];
   approval_status: string;
   rejection_reason?: string;
+  approval_hash?: string;
+  approved_by_id?: number;
+  approved_at?: string;
+  version?: number;
+  content_hash?: string;
   sent_at?: string;
   provider: string;
   company_name?: string;
@@ -110,6 +157,8 @@ export interface EmailDraft {
   contact_source_url?: string;
   consent_status?: string;
   campaign_name?: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface ReplyItem {

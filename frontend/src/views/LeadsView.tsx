@@ -27,6 +27,8 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onSelectCompany }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [total, setTotal] = useState(0);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [contactQuality, setContactQuality] = useState<any | null>(null);
+  const [enrichingId, setEnrichingId] = useState<number | null>(null);
 
   const availableCities = Array.from(
     new Set(['Siliguri', 'Gangtok', 'Patna', 'Bhagalpur', ...companies.map((c) => c.city).filter(Boolean)])
@@ -68,6 +70,10 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onSelectCompany }) => {
     loadCompanies();
   }, [cityFilter]);
 
+  useEffect(() => {
+    api.getContactQualitySummary().then(setContactQuality).catch(() => null);
+  }, []);
+
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     loadCompanies();
@@ -106,6 +112,61 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onSelectCompany }) => {
           </button>
         </div>
       </div>
+
+      {/* Phase 4D: CRM Contact Quality Dashboard */}
+      {contactQuality && (
+        <div data-testid="contact-quality-dashboard" className="bg-cobalt-900/70 border border-cobalt-800 rounded-xl p-4 space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <h3 className="text-xs font-semibold text-slate-200 uppercase tracking-wider">
+                CRM Contact Quality Summary (Genuine Prospects)
+              </h3>
+              <p className="text-[11px] text-slate-400">
+                Strict verification telemetry — statuses are never inflated or auto-upgraded.
+              </p>
+            </div>
+            <span className="text-[10px] px-2 py-0.5 rounded bg-cobalt-950 border border-cobalt-700 text-slate-300">
+              Total Genuine: <strong>{contactQuality.total_genuine_prospects}</strong>
+            </span>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 text-center">
+            {[
+              { label: 'Genuine', val: contactQuality.total_genuine_prospects, cls: 'text-slate-200' },
+              { label: 'No Email', val: contactQuality.without_public_email, cls: 'text-slate-400' },
+              { label: 'Publicly Found', val: contactQuality.publicly_discovered, cls: 'text-sky-300' },
+              { label: 'Syntax Valid', val: contactQuality.syntax_valid, cls: 'text-cobalt-300' },
+              { label: 'MX Checked', val: contactQuality.mx_checked, cls: 'text-emerald-300' },
+              { label: 'Indep. Verified', val: contactQuality.independently_verified, cls: 'text-emerald-400' },
+              { label: 'Invalid', val: contactQuality.invalid, cls: 'text-rose-300' },
+              { label: 'Needs Review', val: contactQuality.needs_review, cls: 'text-amber-300' },
+            ].map((m) => (
+              <div key={m.label} className="bg-cobalt-950/70 border border-cobalt-800/80 rounded-lg p-2">
+                <div className={`text-base font-bold ${m.cls}`}>{m.val}</div>
+                <div className="text-[10px] text-slate-400">{m.label}</div>
+              </div>
+            ))}
+          </div>
+          {Array.isArray(contactQuality.review_items) && contactQuality.review_items.length > 0 && (
+            <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-2.5 space-y-1">
+              <div className="text-[11px] font-semibold text-amber-300">
+                Contacts Requiring Manual Review ({contactQuality.review_items.length})
+              </div>
+              <div className="space-y-1 text-[11px] text-slate-300">
+                {contactQuality.review_items.map((item: any) => (
+                  <div key={item.company_id} className="flex flex-wrap items-center justify-between gap-2">
+                    <span>
+                      <strong>{item.company_name}</strong> — <code className="text-amber-200">{item.email}</code> ({item.email_verification_status})
+                    </span>
+                    {item.source_url && (
+                      <span className="text-[10px] text-slate-400 truncate max-w-xs">{item.source_url}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Filter and Search Bar */}
       <div className="bg-cobalt-900/90 border border-cobalt-800 rounded-lg p-3.5 flex flex-wrap items-center justify-between gap-3 text-xs">
@@ -258,6 +319,26 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onSelectCompany }) => {
                     </td>
                     <td className="py-3 px-3 text-right">
                       <div className="flex items-center justify-end space-x-1.5">
+                        {!c.public_email && c.website && !c.is_demo && (
+                          <button
+                            type="button"
+                            disabled={enrichingId === c.id}
+                            onClick={async () => {
+                              setEnrichingId(c.id);
+                              try {
+                                await api.browserEnrichCompany(c.id);
+                                await loadCompanies();
+                                api.getContactQualitySummary().then(setContactQuality).catch(() => null);
+                              } finally {
+                                setEnrichingId(null);
+                              }
+                            }}
+                            title="Operator-Triggered Browser Contact Discovery"
+                            className="px-2 py-1 rounded bg-emerald-700/80 hover:bg-emerald-600 disabled:opacity-50 text-white text-[10px] font-medium"
+                          >
+                            {enrichingId === c.id ? 'Enriching...' : 'Browser Enrich'}
+                          </button>
+                        )}
                         <button
                           onClick={() => onSelectCompany(c, 'research')}
                           title="Generate AI Research Report"

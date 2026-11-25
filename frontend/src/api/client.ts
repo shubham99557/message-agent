@@ -361,8 +361,16 @@ export const api = {
   getResearchReport: (companyId: number) => request<any>(`/research/company/${companyId}`),
 
   // Email Outreach & Approvals
-  generateEmail: (data: { company_id: number; tone?: string; custom_notes?: string; campaign_id?: number }) =>
+  generateEmail: (data: { company_id: number; tone?: string; custom_notes?: string; campaign_id?: number; service_id?: number; variation_type?: string }) =>
     request<any>('/emails/generate', { method: 'POST', body: JSON.stringify(data) }),
+  generateEmailVariations: (data: { company_id: number; contact_id?: number; tone?: string; service_id?: number; custom_notes?: string }) =>
+    request<any>('/emails/generate-variations', { method: 'POST', body: JSON.stringify(data) }),
+  listEmailDrafts: (companyId?: number, limit: number = 50) => {
+    const query = new URLSearchParams();
+    if (companyId) query.append('company_id', String(companyId));
+    query.append('limit', String(limit));
+    return request<any[]>(`/emails/drafts?${query.toString()}`);
+  },
   getApprovalQueue: (status: string = 'draft', campaignId?: number) => {
     const query = new URLSearchParams({ status });
     if (campaignId) query.append('campaign_id', String(campaignId));
@@ -378,6 +386,19 @@ export const api = {
     request<any>(`/approvals/schedule/${draftId}`, { method: 'POST', body: JSON.stringify({ scheduled_at: scheduledAt }) }),
   updateEmailDraft: (draftId: number, data: any) => request<any>(`/emails/drafts/${draftId}`, { method: 'PUT', body: JSON.stringify(data) }),
   sendApprovedEmail: (draftId: number) => request<any>(`/emails/send/${draftId}`, { method: 'POST' }),
+  checkDomainDnsAuth: (domain: string, selector?: string) => {
+    const query = new URLSearchParams({ domain });
+    if (selector) query.append('selector', selector);
+    return request<any>(`/emails/dns-check?${query.toString()}`);
+  },
+  getEmailTestModeStatus: () => request<any>('/emails/test-mode/status'),
+  sendTestModeEmail: (data: { recipient_email: string; subject: string; body_text: string; idempotency_key: string; provider_override?: string }) =>
+    request<any>('/emails/test-mode/send', { method: 'POST', body: JSON.stringify(data) }),
+  simulateResendEvent: (data: { event_type: string; event_id: string; recipient_email?: string; draft_id?: number; provider_message_id?: string }) =>
+    request<any>('/emails/test-mode/simulate-event', { method: 'POST', body: JSON.stringify(data) }),
+  getDraftTimeline: (draftId: number) => request<any>(`/emails/drafts/${draftId}/timeline`),
+  getContactQualitySummary: () => request<any>('/companies/contact-quality-summary'),
+  browserEnrichCompany: (companyId: number) => request<any>(`/companies/${companyId}/browser-enrich`, { method: 'POST' }),
   bulkApprovalAction: (draftIds: number[], action: string, reason?: string) =>
     request<any>('/approvals/bulk', { method: 'POST', body: JSON.stringify({ draft_ids: draftIds, action, reason }) }),
 
