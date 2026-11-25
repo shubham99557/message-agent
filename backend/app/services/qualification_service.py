@@ -1,9 +1,9 @@
 import json
 from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from sqlalchemy.orm import Session
 from app.models.company import Company
-from app.schemas.research import QualificationResult, QualificationFactorResult
+from app.schemas.research import DiscoveredCompanyItem, QualificationResult, QualificationFactorResult
 
 TECH_INDUSTRIES = [
     "software", "information technology", "it services", "digital marketing",

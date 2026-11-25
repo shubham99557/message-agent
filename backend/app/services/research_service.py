@@ -1,11 +1,12 @@
 import logging
 import re
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy.orm import Session
 import httpx
 
 from app.models.company import Company
 from app.models.research import ResearchReport
+from app.schemas.research import DiscoveredCompanyItem
 from app.core.security import is_safe_external_url, sanitize_untrusted_text, safe_fetch_untrusted_url
 from app.integrations.discovery_adapters import is_demo_domain
 

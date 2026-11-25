@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 from urllib.parse import urlparse
 import httpx
+from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.security import is_safe_external_url, sanitize_untrusted_text, safe_fetch_untrusted_url
@@ -1116,9 +1117,11 @@ async def run_real_lead_discovery_pipeline(
     # 4. Removing duplicates
     unique_candidates: List[DiscoveredCompanyItem] = []
     seen_stable_keys: Dict[str, int] = {}
+    excluded_facilities_count = 0
     for item in normalized:
         desc_l = f"{item.name} {item.description or ''} {item.business_address or ''}".lower()
         if any(pat in desc_l for pat in EXCLUDED_FACILITY_PATTERNS):
+            excluded_facilities_count += 1
             continue
         norm_name = _normalize_name_for_dedup(item.name)
         if len(norm_name) < 4 and not item.website and not any(k in (item.industry or "").lower() for k in ["soft", "tech", "it", "infotech"]):
@@ -1385,9 +1388,9 @@ async def run_real_lead_discovery_pipeline(
             country=request.country or "India",
             industry=request.industry,
             scope="city" if request.city else "country",
-            active_providers=["OpenStreetMap", "Tavily" if is_tavily_configured() else "None"],
-            failed_providers=[],
-            raw_candidates_count=len(raw_results),
+            active_providers=active_providers,
+            failed_providers=failed_providers,
+            raw_candidates_count=len(discovered_raw),
             unique_businesses_count=len(final_items),
             filtered_facilities_count=excluded_facilities_count,
             authentic_websites_count=websites_verified_count,
