@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, String, Text, DateTime, JSON
+from sqlalchemy import Column, Integer, String, Text, DateTime, JSON, ForeignKey
 from app.core.database import Base
 
 
@@ -18,6 +18,7 @@ class DiscoveryRun(Base):
     country = Column(String(100), default="India", nullable=False)
     industry = Column(String(255), nullable=True)
     scope = Column(String(50), default="city", nullable=False)
+    campaign_id = Column(Integer, ForeignKey("campaigns.id", ondelete="SET NULL"), nullable=True, index=True)
     
     # Provider transparency
     active_providers = Column(JSON, nullable=True)  # List of provider names actually queried

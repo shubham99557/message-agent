@@ -78,6 +78,15 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onCompanyImported 
   const [minScore, setMinScore] = useState<number>(40);
   const [maxLeads, setMaxLeads] = useState<number>(10);
   const [includeDemo, setIncludeDemo] = useState<boolean>(false);
+  const [campaignOptions, setCampaignOptions] = useState<Array<{ id: number; name: string; status: string }>>([]);
+  const [targetCampaignId, setTargetCampaignId] = useState<number | ''>(() => {
+    try {
+      const v = localStorage.getItem('acttrident_discovery_campaign_id');
+      return v ? Number(v) : '';
+    } catch {
+      return '';
+    }
+  });
   const [contactFilter, setContactFilter] = useState<'all' | 'has_email' | 'has_phone'>('all');
   const [sortBy, setSortBy] = useState<string>(savedPrefs.sortBy || 'confidence');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
@@ -151,8 +160,26 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onCompanyImported 
     api.getIndianStates().then(setStatesList).catch(() => {});
     api.getLocationPresets().then(setPresets).catch(() => {});
     api.getDiscoveryIndustries().then(setIndustriesList).catch(() => {});
+    api.getCampaigns()
+      .then((list: any[]) => {
+        const open = list.filter((c) => !['stopped', 'completed', 'failed'].includes(c.status));
+        setCampaignOptions(open.map((c) => ({ id: c.id, name: c.name, status: c.status })));
+        setTargetCampaignId((prev) => (prev && open.some((c) => c.id === prev) ? prev : ''));
+      })
+      .catch(() => {});
     executeSearch({ initial: true });
   }, []);
+
+  useEffect(() => {
+    try {
+      if (targetCampaignId) localStorage.setItem('acttrident_discovery_campaign_id', String(targetCampaignId));
+      else localStorage.removeItem('acttrident_discovery_campaign_id');
+    } catch {
+      /* storage unavailable */
+    }
+  }, [targetCampaignId]);
+
+  const targetCampaignName = campaignOptions.find((c) => c.id === targetCampaignId)?.name;
 
   // Debounced autocomplete for city suggestions
   const handleCityInputChange = (value: string) => {
@@ -320,6 +347,7 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onCompanyImported 
         auto_research: true,
         auto_qualify: true,
         auto_save_crm: true,
+        campaign_id: targetCampaignId || undefined,
       });
 
       setPipelineSteps(res.steps || []);
@@ -336,7 +364,7 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onCompanyImported 
           mediumPriority: res.medium_priority_count ?? res.items.filter((x: any) => (x.qualification_score || 0) >= 50 && (x.qualification_score || 0) < 70).length,
           lowPriority: res.low_priority_count ?? res.items.filter((x: any) => (x.qualification_score || 0) < 50).length,
         });
-        setImportSuccess(`Pipeline completed! Discovered ${res.total_discovered} real entities, verified ${res.websites_verified} websites, found ${res.public_emails_found} public business emails, and saved ${res.saved_to_crm} qualified leads into CRM.`);
+        setImportSuccess(`Pipeline completed! Discovered ${res.total_discovered} real entities, verified ${res.websites_verified} websites, found ${res.public_emails_found} public business emails, and saved ${res.saved_to_crm} qualified leads into CRM.${targetCampaignName ? ` Saved leads are tagged for campaign "${targetCampaignName}".` : ''}`);
         if (onCompanyImported) onCompanyImported();
       } else {
         setSearchError('Pipeline executed across active providers but zero entities matched your search parameters. No mock data was substituted.');
@@ -375,7 +403,7 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onCompanyImported 
     setImportingId(item.name);
     setSearchError(null);
     try {
-      const saved = await api.importDiscoveredLead(item);
+      const saved = await api.importDiscoveredLead(item, targetCampaignId || undefined);
       setResults((prev) =>
         prev.map((r) =>
           r.name === item.name ? { ...r, crm_status: 'previously_known', crm_id: saved.id } : r
@@ -405,7 +433,7 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onCompanyImported 
     if (!results.length) return;
     setSearchError(null);
     try {
-      const summary = await api.batchImportDiscoveredLeadsSummary(results);
+      const summary = await api.batchImportDiscoveredLeadsSummary(results, targetCampaignId || undefined);
       const savedByName = new Map<string, number>();
       (summary.saved_companies || []).forEach((c: any) => savedByName.set((c.name || '').toLowerCase(), c.id));
       const skippedSet = new Set((summary.skipped_names || []).map((n: string) => n.toLowerCase()));
@@ -725,6 +753,29 @@ export const DiscoveryView: React.FC<DiscoveryViewProps> = ({ onCompanyImported 
               <option value="custom">-- Custom Keyword --</option>
             </select>
           </div>
+        </div>
+
+        {/* Target campaign: leads saved by this discovery are tagged for the chosen campaign */}
+        <div className="flex flex-col md:flex-row md:items-center gap-2 rounded border border-cobalt-800 bg-cobalt-950/60 px-3 py-2">
+          <label htmlFor="discovery-target-campaign" className="text-[11px] font-medium text-slate-300 shrink-0">
+            Discover leads for campaign
+          </label>
+          <select
+            id="discovery-target-campaign"
+            value={targetCampaignId}
+            onChange={(e) => setTargetCampaignId(e.target.value ? Number(e.target.value) : '')}
+            className="flex-1 md:max-w-sm bg-cobalt-950 border border-cobalt-800 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-cobalt-600"
+          >
+            <option value="">No campaign (save to CRM only)</option>
+            {campaignOptions.map((c) => (
+              <option key={c.id} value={c.id}>{c.name} ({c.status})</option>
+            ))}
+          </select>
+          <span className="text-[10px] text-slate-400">
+            {targetCampaignId
+              ? 'Leads saved or imported now will appear in the "Add Leads" list of this campaign.'
+              : 'Pick a campaign so its "Add Leads" list shows only these discoveries.'}
+          </span>
         </div>
 
         {/* Row 2: Custom Keywords, Company Size, Max Leads, Min Score, Trigger Actions */}

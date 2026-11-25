@@ -3,6 +3,7 @@ from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+from app.services.campaign_eligibility_service import link_leads_to_campaign
 
 from app.api.deps import get_db, get_current_user
 from app.models.user import User
@@ -234,18 +235,22 @@ def _persist_and_qualify_discovered_company(db: Session, item: DiscoveredCompany
 @router.post("/import", response_model=CompanyResponse, status_code=status.HTTP_201_CREATED)
 def import_discovered_lead(
     item: DiscoveredCompanyItem,
+    campaign_id: Optional[int] = Query(None, description="Tag the lead as discovered for this campaign"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """Imports a single discovered company with full contact source attribution and qualification."""
     existing = find_duplicate_company(db, name=item.name, website=item.website, email=item.public_email, source_url=item.source_url)
     if existing:
+        link_leads_to_campaign(db, campaign_id, [existing.id], source="discovery_import")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Company '{item.name}' already exists in the database (ID: {existing.id})"
         )
 
     company = _persist_and_qualify_discovered_company(db, item, current_user.id)
+    link_leads_to_campaign(db, campaign_id, [company.id], source="discovery_import")
+    db.refresh(company)
     record_audit_log(
         db=db,
         action="import_discovered_lead",
@@ -265,13 +270,17 @@ def batch_import_discovered_leads(
 ):
     """Imports multiple discovered leads with deduplication, qualification, and source persistence."""
     imported = []
+    linked_ids = []
     for item in req.companies:
         existing = find_duplicate_company(db, name=item.name, website=item.website, email=item.public_email, source_url=item.source_url)
         if existing:
+            linked_ids.append(existing.id)
             continue
         comp = _persist_and_qualify_discovered_company(db, item, current_user.id)
         imported.append(comp)
+        linked_ids.append(comp.id)
 
+    link_leads_to_campaign(db, req.campaign_id, linked_ids, source="discovery_import")
     return imported
 
 
@@ -285,19 +294,24 @@ def batch_import_discovered_leads_summary(
     saved_companies = []
     skipped_names = []
     failed_items = []
+    linked_ids = []
     for item in req.companies:
         try:
             existing = find_duplicate_company(db, name=item.name, website=item.website, email=item.public_email, source_url=item.source_url)
             if existing:
                 skipped_names.append(item.name)
+                linked_ids.append(existing.id)
                 continue
             comp = _persist_and_qualify_discovered_company(db, item, current_user.id)
             saved_companies.append(CompanyResponse.model_validate(comp))
+            linked_ids.append(comp.id)
         except Exception as exc:
             db.rollback()
             failed_items.append({"name": item.name, "error": str(exc)})
 
+    linked_to_campaign = link_leads_to_campaign(db, req.campaign_id, linked_ids, source="discovery_import")
     return {
+        "linked_to_campaign": linked_to_campaign,
         "total_submitted": len(req.companies),
         "saved_count": len(saved_companies),
         "duplicates_skipped": len(skipped_names),
@@ -342,6 +356,7 @@ def get_discovery_runs(
             "country": r.country,
             "industry": r.industry,
             "scope": r.scope,
+            "campaign_id": r.campaign_id,
             "active_providers": r.active_providers,
             "raw_candidates_count": r.raw_candidates_count,
             "unique_businesses_count": r.unique_businesses_count,

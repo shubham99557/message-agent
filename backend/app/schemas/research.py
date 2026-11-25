@@ -146,6 +146,7 @@ class DiscoveryPipelineRequest(BaseModel):
     auto_research: bool = True
     auto_qualify: bool = True
     auto_save_crm: bool = True
+    campaign_id: Optional[int] = None  # Tag saved/matched leads as discovered for this campaign
 
 
 class DiscoveryPipelineResponse(BaseModel):
@@ -196,6 +197,7 @@ class WebsiteCrawlRequest(BaseModel):
 
 class BatchImportRequest(BaseModel):
     companies: List[DiscoveredCompanyItem]
+    campaign_id: Optional[int] = None
 
 
 class MultiCityDiscoveryQuery(BaseModel):

@@ -331,6 +331,12 @@ def process_outbox_batch(db: Session, user_id: int, limit: int = 20) -> Dict[str
                     item.result_summary = json.dumps({"status": res.status, "provider": res.provider})
                     item.processed_at = datetime.now(timezone.utc)
                     dispatched += 1
+                elif res.status in ("blocked_recent_contact", "blocked_suppression"):
+                    # Terminal policy blocks: the draft was rejected, retrying cannot succeed.
+                    item.status = "cancelled"
+                    item.last_error = (res.message or res.status)[:500]
+                    item.processed_at = datetime.now(timezone.utc)
+                    cancelled += 1
                 else:
                     raise RuntimeError(res.message or f"Email send returned status '{res.status}'")
             elif item.channel == "whatsapp":

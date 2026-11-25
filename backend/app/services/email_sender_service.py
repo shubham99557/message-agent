@@ -232,6 +232,20 @@ def send_approved_email(
             message=f"Recipient {draft.recipient_email} is on the global suppression list"
         )
 
+    # 4b. CROSS-CAMPAIGN DUPLICATE CONTACT GUARD (30-day cooldown across campaigns)
+    from app.services.campaign_eligibility_service import find_recent_contact_conflict
+    conflict = find_recent_contact_conflict(db, draft)
+    if conflict:
+        draft.approval_status = "rejected"
+        draft.rejection_reason = f"Blocked: {conflict}"
+        db.commit()
+        return EmailSendResult(
+            draft_id=draft_id,
+            status="blocked_recent_contact",
+            provider=draft.provider,
+            message=conflict,
+        )
+
     # 5. CONSERVATIVE DAILY LIMIT & PER-MINUTE RATE LIMIT CHECKS
     if not check_daily_sending_limit(db, draft.campaign_id):
         draft.approval_status = "queued"

@@ -73,3 +73,23 @@ class CampaignRecipient(Base):
     campaign = relationship("Campaign", back_populates="recipients")
     company = relationship("Company", back_populates="campaign_recipients")
     contact = relationship("CompanyContact")
+
+
+class CampaignLeadSource(Base):
+    """Links a company to the campaign whose discovery run (or import) found it.
+
+    A company can be linked to several campaigns if several discovery runs find it;
+    the cross-campaign contact guard (campaign_eligibility_service) prevents it from
+    being contacted by more than one active campaign.
+    """
+    __tablename__ = "campaign_lead_sources"
+    __table_args__ = (
+        UniqueConstraint("campaign_id", "company_id", name="uq_campaign_lead_source_company"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    campaign_id = Column(Integer, ForeignKey("campaigns.id", ondelete="CASCADE"), nullable=False, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    discovery_run_id = Column(Integer, ForeignKey("discovery_runs.id", ondelete="SET NULL"), nullable=True)
+    source = Column(String(50), default="discovery_pipeline", nullable=False)  # discovery_pipeline, discovery_import
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

@@ -1,11 +1,13 @@
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from sqlalchemy import or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
 from app.api.deps import get_db, get_current_user, require_role
 from app.models.user import User
-from app.models.campaign import Campaign, CampaignRecipient, CAMPAIGN_STATUSES
+from app.models.campaign import Campaign, CampaignRecipient, CampaignLeadSource, CAMPAIGN_STATUSES
 from app.models.email import EmailDraft
 from app.models.company import Company
 from app.schemas.campaign import CampaignCreate, CampaignUpdate, CampaignResponse, CampaignRecipientResponse
@@ -20,6 +22,7 @@ from app.services.orchestration_service import (
     enqueue_outbox_dispatch,
 )
 from app.core.audit import record_audit_log
+from app.services.campaign_eligibility_service import evaluate_lead_eligibility, company_email
 
 router = APIRouter()
 
@@ -166,6 +169,84 @@ def update_campaign(
     return enrich_campaign_response(db, camp)
 
 
+def _get_campaign_for_write(db: Session, campaign_id: int, current_user: User) -> Campaign:
+    camp = db.query(Campaign).filter(Campaign.id == campaign_id).first()
+    if not camp:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    if current_user.role not in ["admin", "manager"] and camp.created_by_id and camp.created_by_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Permission denied: You do not own this campaign.")
+    return camp
+
+
+@router.get("/{campaign_id}/candidates", response_model=dict)
+def list_campaign_candidates(
+    campaign_id: int,
+    scope: str = Query("campaign", pattern="^(campaign|all)$"),
+    search: Optional[str] = None,
+    include_ineligible: bool = True,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(200, ge=1, le=1000),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Lists companies for the "Add Companies" picker with per-company eligibility.
+
+    scope=campaign: only leads discovered/imported for this campaign.
+    scope=all:      every non-demo company in the CRM.
+    Each item carries `eligible` and `reasons` so the UI can hide or grey out blocked leads.
+    """
+    camp = db.query(Campaign).filter(Campaign.id == campaign_id).first()
+    if not camp:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+
+    q = db.query(Company).filter(Company.is_demo.is_(False), Company.verification_status != "demo_fixture")
+    if scope == "campaign":
+        q = q.join(CampaignLeadSource, CampaignLeadSource.company_id == Company.id).filter(
+            CampaignLeadSource.campaign_id == campaign_id
+        )
+    if search and search.strip():
+        like = f"%{search.strip()}%"
+        q = q.filter(or_(Company.name.ilike(like), Company.city.ilike(like), Company.public_email.ilike(like)))
+    companies = q.order_by(Company.qualification_score.desc(), Company.id.desc()).all()
+
+    verdicts = evaluate_lead_eligibility(db, camp, companies)
+    campaign_lead_ids = {
+        row.company_id
+        for row in db.query(CampaignLeadSource.company_id).filter(CampaignLeadSource.campaign_id == campaign_id).all()
+    }
+
+    items = []
+    for c in companies:
+        v = verdicts[c.id]
+        if not include_ineligible and not v.eligible:
+            continue
+        items.append({
+            "id": c.id,
+            "name": c.name,
+            "city": c.city,
+            "industry": c.industry,
+            "email": company_email(c),
+            "qualification_score": c.qualification_score,
+            "qualification_status": c.qualification_status,
+            "laptop_count_verified": c.laptop_count_verified,
+            "from_this_campaign": c.id in campaign_lead_ids,
+            "eligible": v.eligible,
+            "reasons": v.reasons,
+        })
+
+    total = len(items)
+    eligible_total = sum(1 for i in items if i["eligible"])
+    return {
+        "campaign_id": campaign_id,
+        "scope": scope,
+        "campaign_lead_count": len(campaign_lead_ids),
+        "total": total,
+        "eligible_total": eligible_total,
+        "items": items[skip: skip + limit],
+    }
+
+
 @router.post("/{campaign_id}/recipients", response_model=dict)
 def add_recipients_to_campaign(
     campaign_id: int,
@@ -173,46 +254,73 @@ def add_recipients_to_campaign(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(["admin", "manager", "sales_rep"]))
 ):
-    camp = db.query(Campaign).filter(Campaign.id == campaign_id).first()
-    if not camp:
-        raise HTTPException(status_code=404, detail="Campaign not found")
-    if current_user.role not in ["admin", "manager"] and camp.created_by_id and camp.created_by_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Permission denied: You do not own this campaign.")
+    """
+    Adds every eligible company and skips the rest (instead of failing the whole batch).
+    Returns which companies were skipped and why.
+    """
+    camp = _get_campaign_for_write(db, campaign_id, current_user)
 
-    added_count = 0
-    for comp_id in payload.company_ids:
-        comp = db.query(Company).filter(Company.id == comp_id).first()
+    ids = list(dict.fromkeys(payload.company_ids))
+    companies = db.query(Company).filter(Company.id.in_(ids)).all() if ids else []
+    found = {c.id: c for c in companies}
+    verdicts = evaluate_lead_eligibility(db, camp, companies)
+
+    added_ids: List[int] = []
+    skipped = []
+    for comp_id in ids:
+        comp = found.get(comp_id)
         if not comp:
-            raise HTTPException(status_code=404, detail=f"Company {comp_id} not found.")
-        if comp.is_demo or getattr(comp, "verification_status", None) == "demo_fixture":
-            raise HTTPException(
-                status_code=400,
-                detail=f"Demo fixture company '{comp.name}' cannot be added to campaigns.",
-            )
-        if camp.status in ("active", "running") and camp.min_devices and camp.min_devices >= 5:
-            if not comp.has_verified_5_plus_laptops or getattr(comp, "verification_status", None) != "verified":
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Cannot add company '{comp.name}' with unverified fleet status ({getattr(comp, 'verification_status', 'pending')}) to a live campaign requiring verified devices.",
-                )
-        exists = db.query(CampaignRecipient).filter(
-            CampaignRecipient.campaign_id == campaign_id,
-            CampaignRecipient.company_id == comp_id
-        ).first()
-        if not exists:
-            recip = CampaignRecipient(
-                campaign_id=campaign_id,
-                company_id=comp_id,
-                status="pending"
-            )
-            db.add(recip)
-            added_count += 1
-    db.commit()
+            skipped.append({"company_id": comp_id, "name": None, "reasons": [{"code": "not_found", "message": "Company not found."}]})
+            continue
+        v = verdicts[comp_id]
+        if not v.eligible:
+            skipped.append({"company_id": comp_id, "name": comp.name, "reasons": v.reasons})
+            continue
+        db.add(CampaignRecipient(campaign_id=campaign_id, company_id=comp_id, status="pending"))
+        added_ids.append(comp_id)
+
+    if not added_ids and skipped:
+        # Nothing could be added: report it as a client error, naming each blocked company.
+        if all(r["code"] == "not_found" for s_ in skipped for r in s_["reasons"]):
+            raise HTTPException(status_code=404, detail=f"Company {skipped[0]['company_id']} not found.")
+        detail = "No companies added. " + " | ".join(
+            f"{s_['name'] or s_['company_id']}: " + "; ".join(r["message"] for r in s_["reasons"])
+            for s_ in skipped
+        )
+        raise HTTPException(status_code=400, detail=detail)
+
+    try:
+        db.commit()
+    except IntegrityError:
+        # Concurrent add of the same company: fall back to one-by-one inserts.
+        db.rollback()
+        retry_ids, added_ids = added_ids, []
+        for comp_id in retry_ids:
+            try:
+                db.add(CampaignRecipient(campaign_id=campaign_id, company_id=comp_id, status="pending"))
+                db.commit()
+                added_ids.append(comp_id)
+            except IntegrityError:
+                db.rollback()
+                skipped.append({"company_id": comp_id, "name": found[comp_id].name,
+                                "reasons": [{"code": "already_in_campaign", "message": "Already in this campaign."}]})
+
+    if added_ids:
+        record_audit_log(
+            db=db,
+            action="add_campaign_recipients",
+            entity_type="campaign",
+            entity_id=str(campaign_id),
+            user_id=current_user.id,
+            details={"added": added_ids, "skipped": [s["company_id"] for s in skipped]},
+        )
     return {
-        "status": "success",
-        "added_count": added_count,
-        "added_recipients": added_count,
-        "campaign_id": campaign_id
+        "status": "success" if added_ids or not skipped else "nothing_added",
+        "added_count": len(added_ids),
+        "added_recipients": len(added_ids),
+        "skipped_count": len(skipped),
+        "skipped": skipped,
+        "campaign_id": campaign_id,
     }
 
 

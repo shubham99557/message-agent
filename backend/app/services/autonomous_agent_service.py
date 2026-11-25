@@ -617,12 +617,18 @@ async def run_autonomous_outreach_cycle(
             db.commit()
         _log("qualification", f"Qualified: {comp.name}", f"Score {qual.score}/100 (HIGH PRIORITY). Fleet verified: {comp.laptop_count_verified} laptops ({comp.laptop_count_evidence}).")
 
-        # Step 5: Campaign Enrollment (Idempotent)
+        # Step 5: Campaign Enrollment (Idempotent, cross-campaign duplicate guard)
         existing_rec = db.query(CampaignRecipient).filter(
             CampaignRecipient.campaign_id == campaign.id,
             CampaignRecipient.company_id == comp.id
         ).first()
         if not existing_rec:
+            from app.services.campaign_eligibility_service import evaluate_lead_eligibility
+            verdict = evaluate_lead_eligibility(db, campaign, [comp], ignore=("no_email",))[comp.id]
+            if not verdict.eligible:
+                why = "; ".join(r["message"] for r in verdict.reasons)
+                _log("campaign", f"Skipped enrollment: {comp.name}", f"Not added to '{campaign.name}': {why}", "warning")
+                continue
             existing_rec = CampaignRecipient(
                 campaign_id=campaign.id,
                 company_id=comp.id,

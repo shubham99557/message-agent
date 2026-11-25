@@ -301,6 +301,7 @@ export const api = {
     auto_research?: boolean;
     auto_qualify?: boolean;
     auto_save_crm?: boolean;
+    campaign_id?: number;
   }, signal?: AbortSignal) =>
     request<{
       query_summary: string;
@@ -324,11 +325,13 @@ export const api = {
       failed_providers: string[];
       duration_seconds: number;
     }>('/discovery/pipeline', { method: 'POST', body: JSON.stringify(params), signal }),
-  importDiscoveredLead: (lead: any) => request<any>('/discovery/import', { method: 'POST', body: JSON.stringify(lead) }),
+  importDiscoveredLead: (lead: any, campaignId?: number) =>
+    request<any>(`/discovery/import${campaignId ? `?campaign_id=${campaignId}` : ''}`, { method: 'POST', body: JSON.stringify(lead) }),
   batchImportDiscoveredLeads: (companies: any[]) =>
     request<any[]>('/discovery/batch-import', { method: 'POST', body: JSON.stringify({ companies }) }),
-  batchImportDiscoveredLeadsSummary: (companies: any[]) =>
+  batchImportDiscoveredLeadsSummary: (companies: any[], campaignId?: number) =>
     request<{
+      linked_to_campaign?: number;
       total_submitted: number;
       saved_count: number;
       duplicates_skipped: number;
@@ -336,7 +339,7 @@ export const api = {
       saved_companies: any[];
       skipped_names: string[];
       failed_items: Array<{ name: string; error: string }>;
-    }>('/discovery/batch-import-summary', { method: 'POST', body: JSON.stringify({ companies }) }),
+    }>('/discovery/batch-import-summary', { method: 'POST', body: JSON.stringify({ companies, campaign_id: campaignId }) }),
   crawlWebsite: (websiteUrl: string, companyName?: string, city?: string) =>
     request<any>('/discovery/crawl-website', { method: 'POST', body: JSON.stringify({ website_url: websiteUrl, company_name: companyName, city }) }),
   uploadDiscoveryCsv: async (file: File) => {
@@ -428,8 +431,37 @@ export const api = {
   getCampaigns: () => request<any[]>('/campaigns'),
   createCampaign: (data: any) => request<any>('/campaigns', { method: 'POST', body: JSON.stringify(data) }),
   getCampaign: (id: number) => request<any>(`/campaigns/${id}`),
+  getCampaignCandidates: (campaignId: number, params: { scope?: 'campaign' | 'all'; search?: string } = {}) => {
+    const q = new URLSearchParams({ scope: params.scope || 'campaign', limit: '1000' });
+    if (params.search) q.append('search', params.search);
+    return request<{
+      campaign_id: number;
+      scope: 'campaign' | 'all';
+      campaign_lead_count: number;
+      total: number;
+      eligible_total: number;
+      items: Array<{
+        id: number;
+        name: string;
+        city: string;
+        industry?: string;
+        email?: string | null;
+        qualification_score?: number;
+        qualification_status?: string;
+        laptop_count_verified?: number | null;
+        from_this_campaign: boolean;
+        eligible: boolean;
+        reasons: Array<{ code: string; message: string }>;
+      }>;
+    }>(`/campaigns/${campaignId}/candidates?${q.toString()}`);
+  },
   addCampaignRecipients: (campaignId: number, companyIds: number[]) =>
-    request<any>(`/campaigns/${campaignId}/recipients`, { method: 'POST', body: JSON.stringify({ company_ids: companyIds }) }),
+    request<{
+      status: string;
+      added_count: number;
+      skipped_count: number;
+      skipped: Array<{ company_id: number; name: string | null; reasons: Array<{ code: string; message: string }> }>;
+    }>(`/campaigns/${campaignId}/recipients`, { method: 'POST', body: JSON.stringify({ company_ids: companyIds }) }),
   generateCampaignDrafts: (campaignId: number, tone: string = 'Friendly professional') =>
     request<any>(`/campaigns/${campaignId}/batch-draft`, { method: 'POST', body: JSON.stringify({ tone }) }),
   sendApprovedCampaignEmails: (campaignId: number) =>

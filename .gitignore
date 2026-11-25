@@ -34,3 +34,6 @@ dist/
 
 # Scratch and Temporary Artifacts
 scratch/
+
+# Local Python virtualenv
+.venv/

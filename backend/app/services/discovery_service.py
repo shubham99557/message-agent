@@ -1388,6 +1388,7 @@ async def run_real_lead_discovery_pipeline(
             country=request.country or "India",
             industry=request.industry,
             scope="city" if request.city else "country",
+            campaign_id=getattr(request, "campaign_id", None),
             active_providers=active_providers,
             failed_providers=failed_providers,
             raw_candidates_count=len(discovered_raw),
@@ -1407,6 +1408,22 @@ async def run_real_lead_discovery_pipeline(
     except Exception as exc:
         logger.debug(f"Could not persist DiscoveryRun: {exc}")
         db.rollback()
+        d_run = None
+
+    # Tag every lead this run saved or matched as discovered for the selected campaign
+    if getattr(request, "campaign_id", None):
+        try:
+            from app.services.campaign_eligibility_service import link_leads_to_campaign
+            link_leads_to_campaign(
+                db,
+                request.campaign_id,
+                [itm.crm_id for itm in final_items if getattr(itm, "crm_id", None)],
+                source="discovery_pipeline",
+                discovery_run_id=d_run.id if d_run is not None else None,
+            )
+        except Exception as exc:
+            logger.warning(f"Could not link discovered leads to campaign {request.campaign_id}: {exc}")
+            db.rollback()
 
     return DiscoveryPipelineResponse(
         query_summary=query_summary,
