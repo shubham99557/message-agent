@@ -24,6 +24,7 @@ class Company(Base):
     # Managed Laptops / Devices (Strictly separated from employee count!)
     laptop_count_verified = Column(Integer, nullable=True)
     laptop_count_evidence = Column(Text, nullable=True)
+    laptop_fleet_status = Column(String(50), default="UNKNOWN", nullable=False)  # VERIFIED, CLAIMED, UNKNOWN
     has_verified_5_plus_laptops = Column(Boolean, default=False)
     
     # Primary public business channels
@@ -38,18 +39,37 @@ class Company(Base):
     decision_maker_email = Column(String(255), nullable=True)
     decision_maker_linkedin = Column(String(512), nullable=True)
     
-    # AI Qualification
+    # AI Qualification & Service Matching
     qualification_score = Column(Float, default=0.0)
     qualification_status = Column(String(50), default="Needs manual verification")  # High priority, Medium priority, Low priority, Not suitable, Needs manual verification
     qualification_reason = Column(Text, nullable=True)
     qualification_factors = Column(Text, nullable=True)  # JSON formatted factors
+    matched_service_id = Column(Integer, ForeignKey("service_catalogue.id", ondelete="SET NULL"), nullable=True)
+    matched_service_name = Column(String(255), nullable=True)
+    matched_service_rationale = Column(Text, nullable=True)
     
+    # Granular Verification & Authenticity Classifications
+    website_classification = Column(String(50), default="unverified", nullable=True)  # authentic, likely_authentic, suspicious, parked, unrelated, unavailable, unverified
+    email_verification_status = Column(String(50), default="unknown", nullable=True)  # discovered, syntax_valid, domain_checked, source_confirmed, independently_verified, invalid, unknown
+    phone_verification_status = Column(String(50), default="unknown", nullable=True)  # discovered, format_valid, source_confirmed, independently_verified, invalid, unknown
+    
+    # Follow-Up & Operations Tracking
+    followup_status = Column(String(50), default="not_contacted", nullable=True)  # not_contacted, draft_ready, awaiting_approval, approved, sent, replied, interested, not_interested, follow_up_due, converted, closed
+    internal_notes = Column(Text, nullable=True)
+    
+    # Demo vs Real Prospect Records Separation & Provenance
+    is_demo = Column(Boolean, default=False, nullable=False, index=True)
+    verification_status = Column(String(50), default="unverified", nullable=False, index=True)  # verified, unverified, inferred, unknown, demo_fixture
+    verification_method = Column(String(100), nullable=True)  # manual_review, official_website_crawl, csv_import, demo_fixture
+    created_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
     # Metadata
     date_last_verified = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     # Relationships
+    created_by = relationship("User")
     contacts = relationship("CompanyContact", back_populates="company", cascade="all, delete-orphan")
     sources = relationship("ContactSource", back_populates="company", cascade="all, delete-orphan")
     consents = relationship("ContactConsent", back_populates="company", cascade="all, delete-orphan")
@@ -66,17 +86,15 @@ class CompanyContact(Base):
     id = Column(Integer, primary_key=True, index=True)
     company_id = Column(Integer, ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
     name = Column(String(255), nullable=False)
-    title = Column(String(255), nullable=True)
+    role = Column(String(255), nullable=True)
     email = Column(String(255), nullable=True)
     phone = Column(String(100), nullable=True)
-    whatsapp = Column(String(100), nullable=True)
     linkedin_url = Column(String(512), nullable=True)
     is_primary = Column(Boolean, default=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     company = relationship("Company", back_populates="contacts")
-    sources = relationship("ContactSource", back_populates="contact")
-    consents = relationship("ContactConsent", back_populates="contact")
+    consents = relationship("ContactConsent", back_populates="contact", cascade="all, delete-orphan")
 
 
 class ContactSource(Base):
@@ -84,12 +102,14 @@ class ContactSource(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     company_id = Column(Integer, ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
-    contact_id = Column(Integer, ForeignKey("company_contacts.id", ondelete="SET NULL"), nullable=True)
-    field_name = Column(String(100), nullable=False)  # public_email, phone, whatsapp, website, employee_size, laptop_count, etc.
+    field_name = Column(String(100), nullable=False)  # public_email, public_phone, public_whatsapp, laptop_count, etc.
     source_url = Column(String(1024), nullable=False)
-    source_type = Column(String(100), default="official_website")  # official_website, public_directory, mca_portal, permitted_api
-    verified_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    source_type = Column(String(100), nullable=False)  # official_website, mca_registry, linkedin_public, directory
+    extracted_text = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
+    verification_status = Column(String(50), default="unverified", nullable=False)  # verified, unverified, inferred, unknown, demo_fixture
+    verification_method = Column(String(100), nullable=True)
+    confidence = Column(Float, default=1.0)
+    retrieved_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     company = relationship("Company", back_populates="sources")
-    contact = relationship("CompanyContact", back_populates="sources")

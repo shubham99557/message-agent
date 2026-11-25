@@ -7,9 +7,7 @@ Welcome to the **ActTrident AI Outreach Agent** platform. This manual guides bus
 ## 1. Initial Login & Executive Dashboard
 
 1. Navigate to the web application at `http://localhost:5173`.
-2. Sign in with your corporate credentials:
-   - Default Administrator: `admin@acttrident.ai` / `AdminPassword2026!`
-   - Default Sales Rep: `sales@acttrident.ai` / `SalesPassword2026!`
+2. Sign in with your corporate credentials provisioned by your system administrator (or via `backend/scripts/provision_admin.py` during deployment). Default credentials are intentionally removed from documentation to uphold enterprise security.
 3. The **Executive Dashboard** displays:
    - Researched accounts, qualified leads, approved drafts, dispatched emails, inbound replies, and active 90-day evaluations.
    - Target markets overview: **Siliguri**, **Gangtok**, **Patna**, and **Bhagalpur**.

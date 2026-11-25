@@ -14,8 +14,26 @@ def classify_reply_text(message_text: str) -> tuple[str, float, str, str, bool]:
     """Classifies inbound response into 10 categories, generates suggested reply and checks negotiation."""
     text_lower = message_text.lower().strip()
 
-    # 1. Unsubscribe / Opt-out
-    if any(k in text_lower for k in ["unsubscribe", "stop", "remove me", "don't email", "do not contact", "opt out"]):
+    # 0. Mailer-Daemon / Delivery Failure Bounce
+    if any(k in text_lower for k in [
+        "mailer-daemon", "failure notice", "undeliverable", "delivery status notification",
+        "550", "5.1.1", "554", "user unknown", "mailbox unavailable", "postmaster"
+    ]):
+        classification = "bounce"
+        confidence = 0.99
+        reason = "Automated email delivery bounce / failure notification detected."
+        suggested = ""
+        is_negotiation = False
+
+    # 1. Hostile / Legal Threat / Unsubscribe / Opt-out
+    elif any(k in text_lower for k in ["sue", "lawyer", "attorney", "harassment", "illegal", "police", "court", "cease and desist", "spam report"]):
+        classification = "unsubscribe"
+        confidence = 0.99
+        reason = "Legal threat or hostile objection detected. Automated responses strictly suppressed."
+        suggested = ""  # NEVER send automated response to anger or legal threat
+        is_negotiation = False
+
+    elif any(k in text_lower for k in ["unsubscribe", "stop", "remove me", "don't email", "do not contact", "opt out"]):
         classification = "unsubscribe"
         confidence = 0.99
         reason = "Explicit request to unsubscribe or stop communication."
@@ -78,20 +96,31 @@ def classify_reply_text(message_text: str) -> tuple[str, float, str, str, bool]:
         suggested = "Thank you for reaching out regarding partnership opportunities with ActTrident. Our strategic alliance team would be glad to discuss synergy."
         is_negotiation = True
 
-    # 9. Interested
-    elif any(k in text_lower for k in ["interested", "sounds good", "let's connect", "share more", "tell me more", "details"]):
+    # 9. Wants more information (Explicit inquiry)
+    elif any(k in text_lower for k in [
+        "more info", "more details", "send details", "information", "what do you do",
+        "overview", "deck", "brochure", "what is this", "clarify", "tell me what", "pitch"
+    ]):
+        classification = "wants_more_information"
+        confidence = 0.85
+        reason = "Prospect asked for clarification, documentation, or general details."
+        suggested = "Thank you for your message. ActTrident provides non-intrusive workspace and browser protection for teams managing 5+ laptops. Would you prefer a brief technical overview or an interactive demo?"
+        is_negotiation = False
+
+    # 10. Interested
+    elif any(k in text_lower for k in ["interested", "sounds good", "let's connect", "share more", "tell me more"]):
         classification = "interested"
         confidence = 0.93
         reason = "Prospect displayed explicit interest in ActTrident or the 90-day evaluation."
         suggested = "We are thrilled to connect! We would love to share how ActTrident protects developer workstations. Would a 15-minute call on Thursday morning suit your calendar?"
         is_negotiation = True
 
-    # 10. Wants more information (Default)
+    # 11. Unknown / Unclassified text (Safe fail-closed default — never fabricate assumptions)
     else:
-        classification = "wants_more_information"
-        confidence = 0.85
-        reason = "Prospect asked for clarification or general details."
-        suggested = "Thank you for your message. ActTrident provides non-intrusive workspace and browser protection for teams managing 5+ laptops. Would you prefer a brief technical brief or an interactive demo?"
+        classification = "unknown"
+        confidence = 0.0
+        reason = "Ambiguous or unrecognized response text. Human operator review recommended."
+        suggested = ""
         is_negotiation = False
 
     return classification, confidence, reason, suggested, is_negotiation
@@ -168,16 +197,25 @@ def ingest_inbound_reply(
     )
     db.add(reply)
 
-    # 4. Update CRM Pipeline based on reply
+    # 4. Global Opt-Out & Bounce Enforcement (MUST run even if no Lead record exists yet!)
+    if classification in ["unsubscribe", "not_interested"]:
+        handle_opt_out(db, identifier=sender_identifier, channel=channel, reason=classification)
+    elif classification == "bounce":
+        handle_opt_out(db, identifier=sender_identifier, channel=channel, reason="email_bounce")
+
+    # 5. Update CRM Pipeline based on reply
     if company.lead:
         company.lead.last_contact_date = datetime.now(timezone.utc)
         if classification in ["unsubscribe", "not_interested"]:
-            # Opt-out immediately halts promotional follow-ups!
-            handle_opt_out(db, identifier=sender_identifier, channel=channel, reason=classification)
+            company.lead.pipeline_status = "do_not_contact"
+        elif classification == "bounce":
+            company.lead.pipeline_status = "bounced"
         elif classification in ["interested", "requests_demonstration", "requests_pricing"]:
             company.lead.pipeline_status = "interested"
         elif classification == "out_of_office":
             pass  # Keep current status
+        elif classification == "unknown":
+            company.lead.pipeline_status = "replied"
         else:
             company.lead.pipeline_status = "replied"
 

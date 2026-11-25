@@ -1,0 +1,221 @@
+version: '3.8'
+
+# Production Compose Configuration (Hardened)
+# Features:
+# - Migration runner as an explicit deployment step before backend boot
+# - Strict network isolation (database and Redis on internal network with no external routing)
+# - Container log rotation (max-size 20m, max-file 5) to prevent disk exhaustion
+# - Healthcheck-driven boot sequence
+# - Secrets injected strictly via host environment (.env.production)
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: acttrident_prod_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-acttrident}
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?CRITICAL: POSTGRES_PASSWORD must be provided}"
+      POSTGRES_DB: ${POSTGRES_DB:-acttrident_db}
+    volumes:
+      - pgdata_prod:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-acttrident} -d ${POSTGRES_DB:-acttrident_db}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
+    networks:
+      - acttrident_internal
+
+  redis:
+    image: redis:7-alpine
+    container_name: acttrident_prod_redis
+    restart: always
+    command: >
+      sh -c 'if [ -n "$$REDIS_PASSWORD" ]; then
+        redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD";
+      else
+        redis-server --appendonly yes;
+      fi'
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+    healthcheck:
+      test: >
+        sh -c 'if [ -n "$$REDIS_PASSWORD" ]; then
+          redis-cli -a "$$REDIS_PASSWORD" ping | grep -q PONG;
+        else
+          redis-cli ping | grep -q PONG;
+        fi'
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    volumes:
+      - redisdata_prod:/data
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
+    networks:
+      - acttrident_internal
+
+  migration:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    container_name: acttrident_prod_migration
+    restart: "no"
+    command: alembic upgrade head
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ENVIRONMENT: production
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-acttrident}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-acttrident_db}
+      SECRET_KEY: "${SECRET_KEY:?CRITICAL: SECRET_KEY must be provided in production}"
+      CREDENTIAL_ENCRYPTION_KEY: "${CREDENTIAL_ENCRYPTION_KEY:?CRITICAL: CREDENTIAL_ENCRYPTION_KEY must be provided in production}"
+    networks:
+      - acttrident_internal
+
+  backend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    container_name: acttrident_prod_backend
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migration:
+        condition: service_completed_successfully
+    environment:
+      ENVIRONMENT: production
+      TIMEZONE: ${TIMEZONE:-Asia/Kolkata}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-acttrident}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-acttrident_db}
+      REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD}@redis:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://:${REDIS_PASSWORD}@redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://:${REDIS_PASSWORD}@redis:6379/1}
+      SECRET_KEY: "${SECRET_KEY:?CRITICAL: SECRET_KEY must be provided in production}"
+      CREDENTIAL_ENCRYPTION_KEY: "${CREDENTIAL_ENCRYPTION_KEY:?CRITICAL: CREDENTIAL_ENCRYPTION_KEY must be provided in production}"
+      BACKEND_CORS_ORIGINS: "${BACKEND_CORS_ORIGINS:?CRITICAL: BACKEND_CORS_ORIGINS must be set in production}"
+      AI_PROVIDER: ${AI_PROVIDER:-gemini}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      EMAIL_PROVIDER: ${EMAIL_PROVIDER:-gmail}
+      GMAIL_CLIENT_ID: ${GMAIL_CLIENT_ID:-}
+      GMAIL_CLIENT_SECRET: ${GMAIL_CLIENT_SECRET:-}
+      GMAIL_REDIRECT_URI: ${GMAIL_REDIRECT_URI:-}
+      META_WA_ACCESS_TOKEN: ${META_WA_ACCESS_TOKEN:-}
+      META_WA_PHONE_NUMBER_ID: ${META_WA_PHONE_NUMBER_ID:-}
+      META_WA_BUSINESS_ACCOUNT_ID: ${META_WA_BUSINESS_ACCOUNT_ID:-}
+      META_WA_VERIFY_TOKEN: "${META_WA_VERIFY_TOKEN:?CRITICAL: Non-default verify token required}"
+      META_APP_SECRET: "${META_APP_SECRET:?CRITICAL: META_APP_SECRET required for signature verification}"
+      DEFAULT_DAILY_EMAIL_LIMIT: ${DEFAULT_DAILY_EMAIL_LIMIT:-50}
+      DEFAULT_DAILY_WHATSAPP_LIMIT: ${DEFAULT_DAILY_WHATSAPP_LIMIT:-20}
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
+    networks:
+      - acttrident_internal
+      - acttrident_public
+
+  celery_worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    container_name: acttrident_prod_celery_worker
+    restart: always
+    command: celery -A app.worker.celery_app.celery_app worker --loglevel=info -Q research,outreach,high_priority,default -c 4
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    environment:
+      ENVIRONMENT: production
+      TIMEZONE: ${TIMEZONE:-Asia/Kolkata}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-acttrident}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-acttrident_db}
+      REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD}@redis:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://:${REDIS_PASSWORD}@redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://:${REDIS_PASSWORD}@redis:6379/1}
+      SECRET_KEY: "${SECRET_KEY:?CRITICAL: SECRET_KEY must be provided in production}"
+      CREDENTIAL_ENCRYPTION_KEY: "${CREDENTIAL_ENCRYPTION_KEY:?CRITICAL: CREDENTIAL_ENCRYPTION_KEY must be provided in production}"
+      AI_PROVIDER: ${AI_PROVIDER:-gemini}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      EMAIL_PROVIDER: ${EMAIL_PROVIDER:-gmail}
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
+    networks:
+      - acttrident_internal
+
+  celery_beat:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    container_name: acttrident_prod_celery_beat
+    restart: always
+    command: celery -A app.worker.celery_app.celery_app beat --loglevel=info
+    depends_on:
+      - celery_worker
+    environment:
+      ENVIRONMENT: production
+      TIMEZONE: ${TIMEZONE:-Asia/Kolkata}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-acttrident}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-acttrident_db}
+      REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD}@redis:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://:${REDIS_PASSWORD}@redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://:${REDIS_PASSWORD}@redis:6379/1}
+      SECRET_KEY: "${SECRET_KEY:?CRITICAL: SECRET_KEY must be provided in production}"
+      CREDENTIAL_ENCRYPTION_KEY: "${CREDENTIAL_ENCRYPTION_KEY:?CRITICAL: CREDENTIAL_ENCRYPTION_KEY must be provided}"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
+    networks:
+      - acttrident_internal
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend
+    container_name: acttrident_prod_frontend
+    restart: always
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
+    networks:
+      - acttrident_public
+
+volumes:
+  pgdata_prod:
+  redisdata_prod:
+
+networks:
+  acttrident_internal:
+    internal: true
+  acttrident_public:
+    driver: bridge

@@ -65,18 +65,13 @@ export const InboxView: React.FC = () => {
   const handleSimulateInbound = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await fetch('/api/v1/replies/inbound', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          channel: 'email',
-          sender_identifier: simSender,
-          recipient_identifier: 'outreach@acttrident.ai',
-          subject: 'Re: ActTrident Evaluation',
-          message_body: simText
-        })
+      const data = await api.ingestInboundReply({
+        channel: 'email',
+        sender_identifier: simSender,
+        recipient_identifier: 'outreach@acttrident.ai',
+        subject: 'Re: ActTrident Evaluation',
+        message_body: simText
       });
-      const data = await res.json();
       setShowSimulateModal(false);
       loadInbox();
       setSelectedReply(data);

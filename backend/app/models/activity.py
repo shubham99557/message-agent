@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Boolean
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Boolean, Index
 from app.core.database import Base
 
 
@@ -18,6 +18,9 @@ class AuditLog(Base):
 
 class SuppressionList(Base):
     __tablename__ = "suppression_list"
+    __table_args__ = (
+        Index("ix_suppression_identifier_channel", "identifier", "channel"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     identifier = Column(String(255), unique=True, index=True, nullable=False)  # email address or phone number
@@ -36,3 +39,4 @@ class IntegrationCredential(Base):
     encrypted_value = Column(Text, nullable=True)
     is_active = Column(Boolean, default=True)
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+

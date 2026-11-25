@@ -18,7 +18,16 @@ class AIService:
         self.model_name = settings.AI_MODEL_NAME
 
     async def generate_text(self, system_prompt: str, user_prompt: str) -> str:
-        # Check if real API key is configured
+        # 1. Primary Default: Local Ollama AI Brain
+        if self.provider == "ollama":
+            from app.ai.local_ai_gateway import local_ai_gateway
+            try:
+                return await local_ai_gateway.generate_text(prompt=user_prompt, system_prompt=system_prompt)
+            except Exception as e:
+                logger.warning(f"Local Ollama inference failed ({e}); falling back to deterministic engine.")
+                return self._generate_deterministic(system_prompt, user_prompt)
+
+        # 2. Optional external providers (only if explicitly enabled with user-supplied key)
         if self.provider == "gemini" and self.gemini_key:
             try:
                 return await self._call_gemini(system_prompt, user_prompt)

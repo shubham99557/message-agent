@@ -2,12 +2,16 @@ from fastapi import APIRouter
 from app.api.endpoints import (
     auth, companies, crm, discovery, qualification,
     research, emails, approvals, campaigns, whatsapp, replies,
-    analytics, settings
+    analytics, settings, jobs, integrations, linkedin, agent, local_ai, automation,
+    service_catalogue, unsubscribe
 )
 
 api_router = APIRouter()
 
 api_router.include_router(auth.router, prefix="/auth", tags=["Authentication"])
+api_router.include_router(agent.router, prefix="/agent", tags=["Autonomous Outreach Agent Brain"])
+api_router.include_router(local_ai.router, prefix="/ai", tags=["Local AI Brain & Desktop Storage"])
+api_router.include_router(automation.router, prefix="/automation", tags=["Persistent Automation Scheduler"])
 api_router.include_router(companies.router, prefix="/companies", tags=["Companies & Leads"])
 api_router.include_router(crm.router, prefix="/crm", tags=["CRM Pipeline"])
 api_router.include_router(discovery.router, prefix="/discovery", tags=["Discovery"])
@@ -17,6 +21,11 @@ api_router.include_router(emails.router, prefix="/emails", tags=["AI Email Outre
 api_router.include_router(approvals.router, prefix="/approvals", tags=["Human Approval Queue"])
 api_router.include_router(campaigns.router, prefix="/campaigns", tags=["Campaigns"])
 api_router.include_router(whatsapp.router, prefix="/whatsapp", tags=["WhatsApp Cloud API"])
+api_router.include_router(linkedin.router, prefix="/linkedin", tags=["LinkedIn Authorized Outreach"])
 api_router.include_router(replies.router, prefix="/replies", tags=["Inbox & AI Reply Classification"])
 api_router.include_router(analytics.router, prefix="/analytics", tags=["Analytics & Reporting"])
 api_router.include_router(settings.router, prefix="/settings", tags=["Settings & Audit Logs"])
+api_router.include_router(jobs.router, prefix="/jobs", tags=["Background Jobs & Queue Engine"])
+api_router.include_router(integrations.router, prefix="/integrations", tags=["Channel OAuth & Provider Integrations"])
+api_router.include_router(service_catalogue.router, prefix="/services", tags=["Service Catalogue & Offerings"])
+api_router.include_router(unsubscribe.router, prefix="/unsubscribe", tags=["Unsubscribe & Opt-Out"])

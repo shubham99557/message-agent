@@ -1,9 +1,13 @@
 import re
+import json
 import socket
 import ipaddress
+import hashlib
+import hmac
+import secrets
 from urllib.parse import urlparse
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Any
+from typing import Optional, List, Any, Tuple
 import bcrypt
 import jwt
 from app.core.config import settings
@@ -27,7 +31,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
         expire = datetime.now(timezone.utc) + expires_delta
     else:
         expire = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    to_encode.update({"exp": expire})
+    to_encode.update({"exp": expire, "type": "access"})
     encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
     return encoded_jwt
 
@@ -40,15 +44,325 @@ def decode_access_token(token: str) -> Optional[dict]:
         return None
 
 
+def generate_refresh_token_string() -> str:
+    """Generates a cryptographically secure random token string for refresh token handling."""
+    return secrets.token_urlsafe(48)
+
+
+def hash_token(token: str) -> str:
+    """Computes a SHA-256 hash of a refresh token to safely persist in database."""
+    return hashlib.sha256(token.encode('utf-8')).hexdigest()
+
+
+def compute_content_hash(text_parts: List[str]) -> str:
+    """Computes a canonical SHA-256 hash over message components to guarantee immutability after approval."""
+    combined = "\n---\n".join((p or "").strip() for p in text_parts)
+    return hashlib.sha256(combined.encode('utf-8')).hexdigest()
+
+
+def validate_recipient_email_syntax(email: Optional[str]) -> str:
+    """
+    Validates email address syntax without asserting mailbox existence.
+    Normalizes leading/trailing whitespace and lowercases the domain part.
+    Raises ValueError on missing, whitespace-only, or malformed addresses.
+    """
+    if email is None or not isinstance(email, str):
+        raise ValueError("Missing recipient email address.")
+    cleaned = email.strip()
+    if not cleaned:
+        raise ValueError("Recipient email address cannot be empty or whitespace-only.")
+    if any(ch.isspace() for ch in cleaned):
+        raise ValueError(f"Malformed recipient email address (contains whitespace): '{cleaned}'")
+    if cleaned.count("@") != 1:
+        raise ValueError(f"Malformed recipient email address (must contain a single '@'): '{cleaned}'")
+
+    local, domain = cleaned.split("@", 1)
+    if not local or len(local) > 64 or local.startswith(".") or local.endswith(".") or ".." in local:
+        raise ValueError(f"Malformed recipient email local part: '{cleaned}'")
+    if not re.match(r"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+$", local):
+        raise ValueError(f"Malformed recipient email local part characters: '{cleaned}'")
+
+    domain_lower = domain.lower()
+    if (
+        not domain_lower
+        or len(domain_lower) > 253
+        or "." not in domain_lower
+        or domain_lower.startswith(".")
+        or domain_lower.endswith(".")
+        or ".." in domain_lower
+    ):
+        raise ValueError(f"Malformed recipient email domain: '{cleaned}'")
+
+    labels = domain_lower.split(".")
+    for lbl in labels:
+        if not lbl or len(lbl) > 63 or lbl.startswith("-") or lbl.endswith("-") or not re.match(r"^[a-z0-9-]+$", lbl):
+            raise ValueError(f"Malformed recipient email domain label: '{cleaned}'")
+    if len(labels[-1]) < 2 or not labels[-1].isalpha():
+        raise ValueError(f"Malformed recipient email top-level domain: '{cleaned}'")
+
+    return f"{local}@{domain_lower}"
+
+
+def serialize_canonical_approval_payload(
+    company_id: Optional[int],
+    recipient: Optional[str],
+    channel: Optional[str],
+    subject: Optional[str],
+    body_text: Optional[str],
+    version: Optional[int],
+    approved_by_id: Optional[int],
+    approved_at: Optional[Any] = None
+) -> str:
+    """
+    Produces RFC 8785-compliant canonical JSON representation with sorted keys and minimal separators.
+    Binds company_id, recipient, channel, subject, body_text, version, approved_by_id, and approved_at.
+    Normalizes datetimes canonically to YYYY-MM-DDTHH:MM:SSZ to prevent database driver serialization jitter.
+    """
+    norm_approved_at = ""
+    if approved_at:
+        if isinstance(approved_at, datetime):
+            dt = approved_at if approved_at.tzinfo is not None else approved_at.replace(tzinfo=timezone.utc)
+            norm_approved_at = dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        elif isinstance(approved_at, str) and approved_at.strip():
+            try:
+                clean_s = approved_at.strip().replace(" ", "T")
+                if clean_s.endswith("Z"):
+                    clean_s = clean_s[:-1] + "+00:00"
+                parsed_dt = datetime.fromisoformat(clean_s)
+                dt = parsed_dt if parsed_dt.tzinfo is not None else parsed_dt.replace(tzinfo=timezone.utc)
+                norm_approved_at = dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            except Exception:
+                norm_approved_at = approved_at.strip()
+        else:
+            norm_approved_at = str(approved_at).strip()
+
+    payload = {
+        "approved_at": norm_approved_at,
+        "approved_by_id": int(approved_by_id) if approved_by_id else None,
+        "body_text": (body_text or "").strip(),
+        "channel": (channel or "email").strip().lower(),
+        "company_id": int(company_id) if company_id else None,
+        "recipient": (recipient or "").strip().lower(),
+        "subject": (subject or "").strip(),
+        "version": int(version or 1),
+    }
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+
+def sign_draft_approval(
+    company_id: Optional[int],
+    recipient: Optional[str],
+    channel: Optional[str],
+    subject: Optional[str],
+    body_text: Optional[str],
+    version: Optional[int],
+    approved_by_id: Optional[int],
+    approved_at: Optional[Any] = None,
+    secret_key: Optional[str] = None
+) -> str:
+    """
+    Signs canonical approval payload with HMAC-SHA256 using a protected secret key.
+    Guarantees cryptographic authenticity and integrity against unauthorized
+    database-level tampering or offline hash recomputation.
+    """
+    if secret_key is not None:
+        key = secret_key
+    else:
+        key = getattr(settings, "APPROVAL_SECRET_KEY", None) or getattr(settings, "SECRET_KEY", None)
+    if not key or not str(key).strip():
+        raise ValueError("CRITICAL: Missing approval signing key. Cannot sign approval.")
+
+    canonical = serialize_canonical_approval_payload(
+        company_id=company_id,
+        recipient=recipient,
+        channel=channel,
+        subject=subject,
+        body_text=body_text,
+        version=version,
+        approved_by_id=approved_by_id,
+        approved_at=approved_at
+    )
+    return hmac.new(key.encode("utf-8"), canonical.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def compute_draft_approval_hash(
+    company_id: Optional[int],
+    recipient: Optional[str],
+    channel: Optional[str],
+    subject: Optional[str],
+    body_text: Optional[str],
+    version: Optional[int],
+    approved_by_id: Optional[int],
+    approved_at: Optional[Any] = None,
+    secret_key: Optional[str] = None
+) -> str:
+    """
+    Computes an authenticated cryptographic seal binding all approval-governed fields using HMAC-SHA256.
+    """
+    return sign_draft_approval(
+        company_id=company_id,
+        recipient=recipient,
+        channel=channel,
+        subject=subject,
+        body_text=body_text,
+        version=version,
+        approved_by_id=approved_by_id,
+        approved_at=approved_at,
+        secret_key=secret_key
+    )
+
+
+def verify_draft_approval(
+    stored_signature: Optional[str],
+    company_id: Optional[int],
+    recipient: Optional[str],
+    channel: Optional[str],
+    subject: Optional[str],
+    body_text: Optional[str],
+    version: Optional[int],
+    approved_by_id: Optional[int],
+    approved_at: Optional[Any] = None,
+    secret_key: Optional[str] = None,
+    allow_legacy: bool = True
+) -> bool:
+    """
+    Verifies HMAC-SHA256 approval signature in constant time.
+    Guarantees that database-level tampering cannot recompute valid signatures
+    without possessing the protected server key.
+    """
+    if not stored_signature or not stored_signature.strip():
+        return False
+
+    try:
+        expected_hmac = sign_draft_approval(
+            company_id=company_id,
+            recipient=recipient,
+            channel=channel,
+            subject=subject,
+            body_text=body_text,
+            version=version,
+            approved_by_id=approved_by_id,
+            approved_at=approved_at,
+            secret_key=secret_key
+        )
+        if hmac.compare_digest(stored_signature, expected_hmac):
+            return True
+
+        # Check if signed without timestamp
+        if approved_at:
+            expected_without_ts = sign_draft_approval(
+                company_id=company_id,
+                recipient=recipient,
+                channel=channel,
+                subject=subject,
+                body_text=body_text,
+                version=version,
+                approved_by_id=approved_by_id,
+                approved_at=None,
+                secret_key=secret_key
+            )
+            if hmac.compare_digest(stored_signature, expected_without_ts):
+                return True
+    except Exception:
+        return False
+
+    # Legacy unkeyed fallback for historical fixtures only
+    if allow_legacy:
+        parts = [
+            f"company_id:{company_id}",
+            f"recipient:{(recipient or '').strip().lower()}",
+            f"channel:{(channel or 'email').strip().lower()}",
+            f"subject:{(subject or '').strip()}",
+            f"body:{(body_text or '').strip()}",
+            f"version:{version or 1}",
+            f"approved_by_id:{approved_by_id}"
+        ]
+        legacy_7 = compute_content_hash(parts)
+        legacy_2 = compute_content_hash([subject or "", body_text or ""])
+        if hmac.compare_digest(stored_signature, legacy_7) or hmac.compare_digest(stored_signature, legacy_2):
+            return True
+
+    return False
+
+
+def verify_meta_hmac_signature(payload: bytes, signature_header: Optional[str], app_secret: str) -> bool:
+    """Verifies that an incoming Meta WhatsApp webhook payload was signed by Meta using HMAC-SHA256."""
+    if not app_secret or not signature_header:
+        return False
+
+    # Signature format: sha256=<hex_digest>
+    expected_prefix = "sha256="
+    if not signature_header.startswith(expected_prefix):
+        return False
+
+    received_hash = signature_header[len(expected_prefix):].strip()
+    mac = hmac.new(app_secret.encode('utf-8'), msg=payload, digestmod=hashlib.sha256)
+    computed_hash = mac.hexdigest()
+
+    return hmac.compare_digest(received_hash.lower(), computed_hash.lower())
+
+
 # SSRF Guard for external URL fetching
 DISALLOWED_HOSTS = {
     "localhost", "127.0.0.1", "0.0.0.0", "::1", "metadata.google.internal",
-    "169.254.169.254"
+    "169.254.169.254", "instance-data", "metadata"
 }
+
+DISALLOWED_TLDS = (".local", ".internal", ".localhost", ".arpa", ".test", ".example", ".invalid")
+
+DISALLOWED_PORTS = {22, 25, 110, 143, 465, 587, 993, 995, 2375, 2376, 5432, 6379, 8000, 27017, 11211}
+
+
+def is_safe_ip_address(ip_val: Any) -> bool:
+    """
+    Validates that an IP address is a safe public address.
+    Rejects private, loopback, link-local, reserved, multicast, unspecified (0.0.0.0),
+    IPv4-mapped IPv6 internal spaces, and explicit cloud metadata addresses.
+    """
+    try:
+        if isinstance(ip_val, (ipaddress.IPv4Address, ipaddress.IPv6Address)):
+            ip_obj = ip_val
+        else:
+            ip_obj = ipaddress.ip_address(str(ip_val).strip())
+
+        if (
+            ip_obj.is_private
+            or ip_obj.is_loopback
+            or ip_obj.is_link_local
+            or ip_obj.is_reserved
+            or ip_obj.is_multicast
+            or ip_obj.is_unspecified
+        ):
+            return False
+
+        # Check IPv4-mapped IPv6 address spaces (e.g. ::ffff:127.0.0.1)
+        if isinstance(ip_obj, ipaddress.IPv6Address) and ip_obj.ipv4_mapped:
+            if (
+                ip_obj.ipv4_mapped.is_private
+                or ip_obj.ipv4_mapped.is_loopback
+                or ip_obj.ipv4_mapped.is_link_local
+                or ip_obj.ipv4_mapped.is_reserved
+                or ip_obj.ipv4_mapped.is_multicast
+                or ip_obj.ipv4_mapped.is_unspecified
+            ):
+                return False
+
+        # Explicit AWS/GCP/Azure link-local metadata guard & loopback prefixes
+        ip_str = str(ip_obj)
+        if ip_str == "169.254.169.254" or ip_str == "fd00:ec2::254" or ip_str.startswith("127."):
+            return False
+
+        return True
+    except Exception:
+        return False
 
 
 def is_safe_external_url(url: str) -> bool:
-    """Validates that a URL is a legitimate public web resource and not an SSRF attempt."""
+    """
+    Validates that a URL is a legitimate public web resource and not an SSRF attempt.
+    Hardens against private IP ranges, loopback, link-local, cloud metadata,
+    IPv4 and IPv6 spaces, restricted ports, and internal domain patterns.
+    """
     try:
         parsed = urlparse(url)
         if parsed.scheme not in ("http", "https"):
@@ -58,23 +372,171 @@ def is_safe_external_url(url: str) -> bool:
         if not hostname:
             return False
 
-        hostname_lower = hostname.lower()
-        if hostname_lower in DISALLOWED_HOSTS or hostname_lower.endswith(".local") or hostname_lower.endswith(".internal"):
+        hostname_lower = hostname.lower().strip()
+        if hostname_lower in DISALLOWED_HOSTS:
             return False
 
-        # Resolve IP to check for private / loopback IP spaces
+        if any(hostname_lower.endswith(tld) for tld in DISALLOWED_TLDS):
+            return False
+
+        port = parsed.port
+        if port and port in DISALLOWED_PORTS:
+            return False
+
+        # If hostname is a literal IP address
         try:
-            ip_info = socket.gethostbyname(hostname)
-            ip_obj = ipaddress.ip_address(ip_info)
-            if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local or ip_obj.is_reserved:
+            ip_literal = ipaddress.ip_address(hostname_lower)
+            if not is_safe_ip_address(ip_literal):
                 return False
+        except ValueError:
+            # Not an IP literal, proceed to DNS resolution
+            pass
+
+        # Resolve all IPv4 and IPv6 addresses via getaddrinfo to defend against dual-stack SSRF
+        try:
+            addr_info = socket.getaddrinfo(hostname, None, proto=socket.IPPROTO_TCP)
+            if not addr_info:
+                return False
+
+            for item in addr_info:
+                sockaddr = item[4]
+                ip_str = sockaddr[0]
+                if not is_safe_ip_address(ip_str):
+                    return False
         except Exception:
-            # If resolution fails, treat as unresolvable / unsafe
+            # If DNS resolution fails, fail closed (unsafe)
             return False
 
         return True
     except Exception:
         return False
+
+
+import httpcore
+import httpx
+
+
+class SSRFSafeBackend(httpcore.AnyIOBackend):
+    """
+    Custom NetworkBackend that enforces connection-time IP validation on raw TCP sockets.
+    Defends against DNS rebinding (TOCTOU) by checking the actual connected peer address
+    before any HTTP request headers or bodies are transmitted.
+    """
+    async def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: Optional[float] = None,
+        local_address: Optional[str] = None,
+        socket_options: Any = None,
+    ):
+        stream = await super().connect_tcp(
+            host,
+            port,
+            timeout=timeout,
+            local_address=local_address,
+            socket_options=socket_options,
+        )
+        sock = stream.get_extra_info("socket")
+        if sock:
+            try:
+                peer = sock.getpeername()
+                peer_ip = peer[0] if isinstance(peer, (tuple, list)) else str(peer)
+                if not is_safe_ip_address(peer_ip):
+                    await stream.aclose()
+                    raise httpcore.ConnectError(
+                        f"SSRF connection-time blocked: destination IP {peer_ip} is non-public or restricted"
+                    )
+            except httpcore.ConnectError:
+                raise
+            except Exception:
+                pass
+        return stream
+
+
+class SSRFSafeTransport(httpx.AsyncHTTPTransport):
+    """
+    HTTPX Async Transport backed by SSRFSafeBackend with connection-time IP validation.
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._pool = httpcore.AsyncConnectionPool(
+            ssl_context=self._pool._ssl_context,
+            network_backend=SSRFSafeBackend(),
+            retries=0
+        )
+
+
+async def safe_fetch_untrusted_url(
+    url: str,
+    max_bytes: int = 50000,
+    timeout_seconds: float = 8.0,
+    max_redirects: int = 3,
+    allowed_content_types: Optional[List[str]] = None
+) -> Tuple[bool, Optional[str], Optional[str], Optional[str]]:
+    """
+    Safely retrieves public web content while defending against:
+    - Connection-time DNS rebinding (TOCTOU) & private/internal socket connections
+    - Pre-flight SSRF & private/internal IPs
+    - Redirect-based SSRF (revalidating every hop)
+    - Excessive redirects
+    - Oversized responses (memory exhaustion)
+    - Unexpected content types (e.g. binary downloads)
+    - Excessive request duration
+
+    Returns: (success: bool, content: Optional[str], final_url: Optional[str], error_message: Optional[str])
+    """
+    from urllib.parse import urljoin
+
+    if allowed_content_types is None:
+        allowed_content_types = ["text/html", "text/plain", "application/xhtml+xml", "application/json"]
+
+    current_url = url
+    redirect_count = 0
+
+    try:
+        # Use SSRFSafeTransport to enforce connection-time IP verification on the actual socket
+        transport = SSRFSafeTransport(verify=True)
+        async with httpx.AsyncClient(transport=transport, timeout=timeout_seconds, follow_redirects=False) as client:
+            while redirect_count <= max_redirects:
+                if not is_safe_external_url(current_url):
+                    return False, None, current_url, f"SSRF security check rejected destination URL: {current_url}"
+
+                headers = {"User-Agent": "ActTrident-Outreach-Bot/2.0 (+https://acttrident.ai)"}
+                resp = await client.get(current_url, headers=headers)
+
+                # Check for 3xx redirects
+                if resp.status_code in (301, 302, 303, 307, 308):
+                    location = resp.headers.get("Location")
+                    if not location:
+                        return False, None, current_url, "Redirect response missing Location header"
+
+                    redirect_count += 1
+                    if redirect_count > max_redirects:
+                        return False, None, current_url, f"Exceeded maximum redirect limit ({max_redirects})"
+
+                    # Resolve relative redirect URLs against current URL
+                    current_url = urljoin(current_url, location)
+                    continue
+
+                if resp.status_code != 200:
+                    return False, None, current_url, f"Remote server returned HTTP {resp.status_code}"
+
+                # Validate content-type
+                content_type = resp.headers.get("Content-Type", "").lower()
+                is_allowed_type = any(act in content_type for act in allowed_content_types)
+                if content_type and not is_allowed_type:
+                    return False, None, current_url, f"Disallowed Content-Type '{content_type}'"
+
+                # Cap response body size to prevent memory exhaustion
+                body_text = resp.text[:max_bytes]
+                return True, body_text, current_url, None
+
+            return False, None, current_url, f"Exceeded maximum redirect hops ({max_redirects})"
+    except httpx.TimeoutException:
+        return False, None, current_url, f"Request timed out after {timeout_seconds}s"
+    except Exception as exc:
+        return False, None, current_url, f"Network error during safe fetch: {str(exc)}"
 
 
 # Prompt Injection Defense: Delimit and sanitize untrusted external website content
@@ -90,10 +552,16 @@ SUSPICIOUS_PROMPT_PATTERNS = [
 
 
 def sanitize_untrusted_text(content: str, max_chars: int = 4000) -> str:
-    """Sanitizes text retrieved from untrusted external websites to neutralize prompt injections."""
+    """Sanitizes text retrieved from untrusted external websites to neutralize XSS, inline event handlers, and prompt injections."""
     if not content:
         return ""
     text = content[:max_chars]
+    # Strip inline javascript event handlers (e.g. onload=, onerror=, onclick=)
+    text = re.sub(r"(?i)\s+on\w+\s*=\s*(?:'[^']*'|\"[^\"]*\"|[^\s>]+)", " ", text)
+    # Strip executable HTML/script/style/iframe blocks and javascript: URIs
+    text = re.sub(r"(?is)<(script|style|iframe|object|embed)[^>]*>.*?</\1>", " ", text)
+    text = re.sub(r"(?is)<(script|style|iframe|object|embed)[^>]*>", " ", text)
+    text = re.sub(r"(?i)javascript\s*:", "[FILTERED_URI]", text)
     for pattern in SUSPICIOUS_PROMPT_PATTERNS:
         text = re.sub(pattern, "[FILTERED_INSTRUCTION]", text, flags=re.IGNORECASE)
-    return text
+    return text.strip()

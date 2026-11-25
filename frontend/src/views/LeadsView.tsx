@@ -12,7 +12,8 @@ import {
   BrainCircuit,
   Mail,
   ChevronRight,
-  ExternalLink
+  ExternalLink,
+  Plus
 } from 'lucide-react';
 
 interface LeadsViewProps {
@@ -25,6 +26,28 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onSelectCompany }) => {
   const [cityFilter, setCityFilter] = useState('All');
   const [searchTerm, setSearchTerm] = useState('');
   const [total, setTotal] = useState(0);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [contactQuality, setContactQuality] = useState<any | null>(null);
+  const [enrichingId, setEnrichingId] = useState<number | null>(null);
+
+  const availableCities = Array.from(
+    new Set(['Siliguri', 'Gangtok', 'Patna', 'Bhagalpur', ...companies.map((c) => c.city).filter(Boolean)])
+  );
+  const [newCompany, setNewCompany] = useState({
+    name: '',
+    website: '',
+    city: 'Siliguri',
+    state: 'West Bengal',
+    industry: 'Software Development',
+    public_email: '',
+    public_phone: '',
+    decision_maker_name: '',
+    decision_maker_role: '',
+    laptop_count_verified: '',
+    laptop_count_evidence: '',
+    source_url: ''
+  });
+  const [creating, setCreating] = useState(false);
 
   const loadCompanies = async () => {
     setLoading(true);
@@ -47,6 +70,10 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onSelectCompany }) => {
     loadCompanies();
   }, [cityFilter]);
 
+  useEffect(() => {
+    api.getContactQualitySummary().then(setContactQuality).catch(() => null);
+  }, []);
+
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     loadCompanies();
@@ -63,16 +90,83 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onSelectCompany }) => {
           </p>
         </div>
         <div className="flex items-center space-x-2">
-          <a
-            href="/api/v1/companies/export/csv"
-            download
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="px-3 py-1.5 bg-cobalt-600 hover:bg-cobalt-500 text-white rounded text-xs font-medium transition-colors flex items-center space-x-1.5"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>Add Company</span>
+          </button>
+          <button
+            onClick={async () => {
+              try {
+                await api.exportCompaniesCsv();
+              } catch (err: any) {
+                alert(`Export error: ${err.message}`);
+              }
+            }}
             className="px-3 py-1.5 bg-cobalt-900 hover:bg-cobalt-850 border border-cobalt-700 text-slate-200 rounded text-xs font-medium transition-colors flex items-center space-x-1.5"
           >
             <Download className="w-3.5 h-3.5 text-cobalt-400" />
             <span>Export CSV</span>
-          </a>
+          </button>
         </div>
       </div>
+
+      {/* Phase 4D: CRM Contact Quality Dashboard */}
+      {contactQuality && (
+        <div data-testid="contact-quality-dashboard" className="bg-cobalt-900/70 border border-cobalt-800 rounded-xl p-4 space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <h3 className="text-xs font-semibold text-slate-200 uppercase tracking-wider">
+                CRM Contact Quality Summary (Genuine Prospects)
+              </h3>
+              <p className="text-[11px] text-slate-400">
+                Strict verification telemetry — statuses are never inflated or auto-upgraded.
+              </p>
+            </div>
+            <span className="text-[10px] px-2 py-0.5 rounded bg-cobalt-950 border border-cobalt-700 text-slate-300">
+              Total Genuine: <strong>{contactQuality.total_genuine_prospects}</strong>
+            </span>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 text-center">
+            {[
+              { label: 'Genuine', val: contactQuality.total_genuine_prospects, cls: 'text-slate-200' },
+              { label: 'No Email', val: contactQuality.without_public_email, cls: 'text-slate-400' },
+              { label: 'Publicly Found', val: contactQuality.publicly_discovered, cls: 'text-sky-300' },
+              { label: 'Syntax Valid', val: contactQuality.syntax_valid, cls: 'text-cobalt-300' },
+              { label: 'MX Checked', val: contactQuality.mx_checked, cls: 'text-emerald-300' },
+              { label: 'Indep. Verified', val: contactQuality.independently_verified, cls: 'text-emerald-400' },
+              { label: 'Invalid', val: contactQuality.invalid, cls: 'text-rose-300' },
+              { label: 'Needs Review', val: contactQuality.needs_review, cls: 'text-amber-300' },
+            ].map((m) => (
+              <div key={m.label} className="bg-cobalt-950/70 border border-cobalt-800/80 rounded-lg p-2">
+                <div className={`text-base font-bold ${m.cls}`}>{m.val}</div>
+                <div className="text-[10px] text-slate-400">{m.label}</div>
+              </div>
+            ))}
+          </div>
+          {Array.isArray(contactQuality.review_items) && contactQuality.review_items.length > 0 && (
+            <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-2.5 space-y-1">
+              <div className="text-[11px] font-semibold text-amber-300">
+                Contacts Requiring Manual Review ({contactQuality.review_items.length})
+              </div>
+              <div className="space-y-1 text-[11px] text-slate-300">
+                {contactQuality.review_items.map((item: any) => (
+                  <div key={item.company_id} className="flex flex-wrap items-center justify-between gap-2">
+                    <span>
+                      <strong>{item.company_name}</strong> — <code className="text-amber-200">{item.email}</code> ({item.email_verification_status})
+                    </span>
+                    {item.source_url && (
+                      <span className="text-[10px] text-slate-400 truncate max-w-xs">{item.source_url}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Filter and Search Bar */}
       <div className="bg-cobalt-900/90 border border-cobalt-800 rounded-lg p-3.5 flex flex-wrap items-center justify-between gap-3 text-xs">
@@ -102,11 +196,10 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onSelectCompany }) => {
             onChange={(e) => setCityFilter(e.target.value)}
             className="bg-cobalt-950 border border-cobalt-800 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-cobalt-600"
           >
-            <option value="All">All Cities</option>
-            <option value="Siliguri">Siliguri</option>
-            <option value="Gangtok">Gangtok</option>
-            <option value="Patna">Patna</option>
-            <option value="Bhagalpur">Bhagalpur</option>
+            <option value="All">All Cities ({total})</option>
+            {availableCities.map((c) => (
+              <option key={c} value={c}>{c}</option>
+            ))}
           </select>
         </div>
       </div>
@@ -143,16 +236,43 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onSelectCompany }) => {
                 {companies.map((c) => (
                   <tr key={c.id} className="hover:bg-cobalt-850/50 transition-colors">
                     <td className="py-3 px-3">
-                      <div className="font-semibold text-slate-100">{c.name}</div>
+                      <div className="flex items-center space-x-1.5 flex-wrap">
+                        <span className="font-semibold text-slate-100">{c.name}</span>
+                        {(c.is_demo || c.verification_status === 'demo_fixture') ? (
+                          <span className="px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[9px] font-mono uppercase">
+                            DEMO FIXTURE
+                          </span>
+                        ) : (
+                          <span
+                            className={`px-1.5 py-0.5 rounded text-[9px] font-mono border ${
+                              c.verification_status === 'verified'
+                                ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                                : 'bg-cobalt-950 text-slate-400 border-cobalt-800'
+                            }`}
+                          >
+                            {c.verification_status || 'unverified'}
+                          </span>
+                        )}
+                      </div>
                       {c.public_email && <div className="text-[11px] text-slate-400 font-mono">{c.public_email}</div>}
+                      {c.matched_service_name && (
+                        <div className="text-[10px] text-indigo-300 font-mono mt-0.5 truncate max-w-[200px]" title={c.matched_service_rationale || ''}>
+                          🎯 {c.matched_service_name}
+                        </div>
+                      )}
+                      {c.followup_status && c.followup_status !== 'not_contacted' && (
+                        <span className="text-[9px] px-1 py-0.2 bg-amber-500/20 text-amber-300 rounded font-mono border border-amber-500/30 inline-block mt-0.5">
+                          Status: {c.followup_status}
+                        </span>
+                      )}
                     </td>
                     <td className="py-3 px-3">
                       <div>{c.city}, {c.state || c.country}</div>
-                      <div className="text-[11px] text-slate-400">{c.industry || 'Tech'}</div>
+                      <div className="text-[11px] text-slate-400">{c.industry || 'Unspecified'}</div>
                     </td>
                     <td className="py-3 px-3">
-                      <div className="font-medium text-slate-200">{c.decision_maker_name || 'IT Director'}</div>
-                      <div className="text-[11px] text-slate-400">{c.decision_maker_role || 'Leadership'}</div>
+                      <div className="font-medium text-slate-200">{c.decision_maker_name || 'Unverified'}</div>
+                      <div className="text-[11px] text-slate-400">{c.decision_maker_role || 'Role not verified'}</div>
                     </td>
                     <td className="py-3 px-3">
                       {c.has_verified_5_plus_laptops ? (
@@ -199,6 +319,26 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onSelectCompany }) => {
                     </td>
                     <td className="py-3 px-3 text-right">
                       <div className="flex items-center justify-end space-x-1.5">
+                        {!c.public_email && c.website && !c.is_demo && (
+                          <button
+                            type="button"
+                            disabled={enrichingId === c.id}
+                            onClick={async () => {
+                              setEnrichingId(c.id);
+                              try {
+                                await api.browserEnrichCompany(c.id);
+                                await loadCompanies();
+                                api.getContactQualitySummary().then(setContactQuality).catch(() => null);
+                              } finally {
+                                setEnrichingId(null);
+                              }
+                            }}
+                            title="Operator-Triggered Browser Contact Discovery"
+                            className="px-2 py-1 rounded bg-emerald-700/80 hover:bg-emerald-600 disabled:opacity-50 text-white text-[10px] font-medium"
+                          >
+                            {enrichingId === c.id ? 'Enriching...' : 'Browser Enrich'}
+                          </button>
+                        )}
                         <button
                           onClick={() => onSelectCompany(c, 'research')}
                           title="Generate AI Research Report"
@@ -222,6 +362,95 @@ export const LeadsView: React.FC<LeadsViewProps> = ({ onSelectCompany }) => {
           </div>
         )}
       </div>
+
+      {/* Add Company Modal */}
+      {showAddModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-cobalt-900 border border-cobalt-700 rounded-lg p-5 w-full max-w-lg space-y-4 text-xs">
+            <div className="flex items-center justify-between border-b border-cobalt-800 pb-3">
+              <h3 className="font-bold text-slate-100 text-sm">Add Verified B2B Prospect</h3>
+              <button onClick={() => setShowAddModal(false)} className="text-slate-400 hover:text-white">✕</button>
+            </div>
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                setCreating(true);
+                try {
+                  await api.createCompany({
+                    name: newCompany.name,
+                    website: newCompany.website || undefined,
+                    city: newCompany.city,
+                    state: newCompany.state || undefined,
+                    industry: newCompany.industry || undefined,
+                    public_email: newCompany.public_email || undefined,
+                    public_phone: newCompany.public_phone || undefined,
+                    decision_maker_name: newCompany.decision_maker_name || undefined,
+                    decision_maker_role: newCompany.decision_maker_role || undefined,
+                    laptop_count_verified: newCompany.laptop_count_verified ? Number(newCompany.laptop_count_verified) : undefined,
+                    laptop_count_evidence: newCompany.laptop_count_evidence || undefined,
+                    source_url: newCompany.source_url || newCompany.website || 'Manual Entry',
+                    is_demo: false
+                  });
+                  setShowAddModal(false);
+                  setNewCompany({
+                    name: '', website: '', city: 'Siliguri', state: 'West Bengal',
+                    industry: 'Software Development', public_email: '', public_phone: '',
+                    decision_maker_name: '', decision_maker_role: '',
+                    laptop_count_verified: '', laptop_count_evidence: '', source_url: ''
+                  });
+                  loadCompanies();
+                } catch (err: any) {
+                  alert(`Create error: ${err.message}`);
+                } finally {
+                  setCreating(false);
+                }
+              }}
+              className="space-y-3"
+            >
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] text-slate-400 mb-1">Company Name *</label>
+                  <input required type="text" value={newCompany.name} onChange={(e) => setNewCompany({ ...newCompany, name: e.target.value })} className="w-full bg-cobalt-950 border border-cobalt-800 rounded px-2.5 py-1.5 text-slate-200" />
+                </div>
+                <div>
+                  <label className="block text-[11px] text-slate-400 mb-1">Official Website</label>
+                  <input type="url" placeholder="https://..." value={newCompany.website} onChange={(e) => setNewCompany({ ...newCompany, website: e.target.value })} className="w-full bg-cobalt-950 border border-cobalt-800 rounded px-2.5 py-1.5 text-slate-200" />
+                </div>
+                <div>
+                  <label className="block text-[11px] text-slate-400 mb-1">City *</label>
+                  <input required type="text" value={newCompany.city} onChange={(e) => setNewCompany({ ...newCompany, city: e.target.value })} className="w-full bg-cobalt-950 border border-cobalt-800 rounded px-2.5 py-1.5 text-slate-200" />
+                </div>
+                <div>
+                  <label className="block text-[11px] text-slate-400 mb-1">Industry</label>
+                  <input type="text" value={newCompany.industry} onChange={(e) => setNewCompany({ ...newCompany, industry: e.target.value })} className="w-full bg-cobalt-950 border border-cobalt-800 rounded px-2.5 py-1.5 text-slate-200" />
+                </div>
+                <div>
+                  <label className="block text-[11px] text-slate-400 mb-1">Public Business Email</label>
+                  <input type="email" value={newCompany.public_email} onChange={(e) => setNewCompany({ ...newCompany, public_email: e.target.value })} className="w-full bg-cobalt-950 border border-cobalt-800 rounded px-2.5 py-1.5 text-slate-200" />
+                </div>
+                <div>
+                  <label className="block text-[11px] text-slate-400 mb-1">Public Phone</label>
+                  <input type="text" value={newCompany.public_phone} onChange={(e) => setNewCompany({ ...newCompany, public_phone: e.target.value })} className="w-full bg-cobalt-950 border border-cobalt-800 rounded px-2.5 py-1.5 text-slate-200" />
+                </div>
+                <div>
+                  <label className="block text-[11px] text-slate-400 mb-1">Verified Laptop Count</label>
+                  <input type="number" min="0" value={newCompany.laptop_count_verified} onChange={(e) => setNewCompany({ ...newCompany, laptop_count_verified: e.target.value })} className="w-full bg-cobalt-950 border border-cobalt-800 rounded px-2.5 py-1.5 text-slate-200" />
+                </div>
+                <div>
+                  <label className="block text-[11px] text-slate-400 mb-1">Laptop Evidence Source</label>
+                  <input type="text" placeholder="e.g. Careers page / MCA filing" value={newCompany.laptop_count_evidence} onChange={(e) => setNewCompany({ ...newCompany, laptop_count_evidence: e.target.value })} className="w-full bg-cobalt-950 border border-cobalt-800 rounded px-2.5 py-1.5 text-slate-200" />
+                </div>
+              </div>
+              <div className="flex justify-end space-x-2 pt-2">
+                <button type="button" onClick={() => setShowAddModal(false)} className="px-3 py-1.5 bg-cobalt-950 text-slate-300 rounded">Cancel</button>
+                <button type="submit" disabled={creating} className="px-4 py-1.5 bg-cobalt-600 hover:bg-cobalt-500 text-white rounded font-medium">
+                  {creating ? 'Saving...' : 'Save Company'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

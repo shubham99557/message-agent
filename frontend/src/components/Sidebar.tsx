@@ -4,9 +4,12 @@ import {
   LayoutDashboard,
   Search,
   Database,
+  CalendarCheck,
+  ShieldCheck,
   BrainCircuit,
   Mail,
   MessageSquare,
+  Linkedin,
   Megaphone,
   CheckSquare,
   Inbox,
@@ -15,6 +18,7 @@ import {
   Layers,
   Settings,
   Shield,
+  Clock,
   LogOut
 } from 'lucide-react';
 
@@ -37,9 +41,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'dashboard' as ViewType, label: 'Dashboard', icon: LayoutDashboard },
     { id: 'discovery' as ViewType, label: 'Discover Companies', icon: Search },
     { id: 'leads' as ViewType, label: 'Lead Database', icon: Database },
+    { id: 'followups' as ViewType, label: 'Follow-Ups', icon: CalendarCheck },
+    { id: 'services' as ViewType, label: 'Service Catalogue', icon: ShieldCheck },
     { id: 'research' as ViewType, label: 'AI Research', icon: BrainCircuit },
     { id: 'email' as ViewType, label: 'Email Outreach', icon: Mail },
     { id: 'whatsapp' as ViewType, label: 'WhatsApp Outreach', icon: MessageSquare },
+    { id: 'linkedin' as ViewType, label: 'LinkedIn Outreach', icon: Linkedin },
     { id: 'campaigns' as ViewType, label: 'Campaigns', icon: Megaphone },
     {
       id: 'approvals' as ViewType,
@@ -58,28 +65,35 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'crm' as ViewType, label: 'CRM Pipeline', icon: GitBranch },
     { id: 'analytics' as ViewType, label: 'Analytics', icon: BarChart3 },
     { id: 'integrations' as ViewType, label: 'Integrations', icon: Layers },
+    { id: 'automation' as ViewType, label: 'Automation Center', icon: Clock },
     { id: 'settings' as ViewType, label: 'Settings', icon: Settings },
   ];
 
   return (
     <aside className="w-64 bg-cobalt-950 border-r border-cobalt-800/80 flex flex-col h-screen select-none shrink-0">
       {/* Brand Header */}
-      <div className="p-5 border-b border-cobalt-800/80 flex items-center justify-between">
+      <div className="p-4 border-b border-cobalt-800/80 flex items-center justify-between bg-cobalt-950/70">
         <div className="flex items-center space-x-3">
-          <div className="w-9 h-9 rounded-lg bg-cobalt-600 flex items-center justify-center shadow-lg shadow-cobalt-600/30 border border-cobalt-500/40">
-            <Shield className="w-5 h-5 text-white" />
+          <div className="w-10 h-10 rounded-xl bg-cobalt-900 border border-cobalt-700/60 p-1 flex items-center justify-center shadow-lg shadow-cobalt-950/80">
+            <img src="/acttrident-logo.png" alt="ActTrident Logo" className="w-full h-full object-contain" />
           </div>
           <div>
-            <div className="font-bold text-slate-100 tracking-tight leading-none text-base">ActTrident</div>
+            <div className="font-bold text-slate-100 tracking-tight leading-none text-base flex items-center space-x-1.5">
+              <span>ActTrident</span>
+              <span className="text-[10px] font-mono font-semibold px-1 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">AI</span>
+            </div>
             <div className="text-[11px] font-mono text-cobalt-400 font-medium tracking-wide mt-1 uppercase">Outreach Agent</div>
           </div>
         </div>
       </div>
 
       {/* Target Market Indicator */}
-      <div className="px-5 py-2.5 bg-cobalt-900/60 border-b border-cobalt-800/50 flex items-center justify-between text-[11px] text-slate-400">
-        <span>Active Markets:</span>
-        <span className="font-mono text-slate-300 font-medium">WB • SK • BR</span>
+      <div className="px-4 py-2 bg-cobalt-900/60 border-b border-cobalt-800/50 flex items-center justify-between text-[11px] text-slate-400">
+        <span className="flex items-center space-x-1.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span>Coverage:</span>
+        </span>
+        <span className="font-mono text-slate-300 font-medium">Nationwide • Any City</span>
       </div>
 
       {/* Navigation Links */}

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../api/client';
 import { ViewType } from '../types';
+import { AutonomousAgentModal } from '../components/AutonomousAgentModal';
 import {
   Building2,
   CheckCircle2,
@@ -12,7 +13,15 @@ import {
   MapPin,
   Clock,
   Layers,
-  ArrowRight
+  ArrowRight,
+  Activity,
+  Cpu,
+  RefreshCw,
+  AlertTriangle,
+  BrainCircuit,
+  Sparkles,
+  Play,
+  BookOpen
 } from 'lucide-react';
 
 interface DashboardViewProps {
@@ -22,39 +31,70 @@ interface DashboardViewProps {
 export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
   const [metrics, setMetrics] = useState<any>(null);
   const [cityStats, setCityStats] = useState<any[]>([]);
+  const [queueHealth, setQueueHealth] = useState<any>(null);
+  const [recentJobs, setRecentJobs] = useState<any[]>([]);
+  const [runningJob, setRunningJob] = useState<string | null>(null);
+  const [showAgentModal, setShowAgentModal] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    async function loadData() {
-      try {
-        const [dashMetrics, cities] = await Promise.all([
-          api.getDashboardAnalytics(),
-          api.getCityAnalytics()
-        ]);
-        setMetrics(dashMetrics);
-        setCityStats(cities);
-      } catch (err) {
-        console.error('Failed to load dashboard data', err);
-      } finally {
-        setLoading(false);
-      }
+  const loadData = async () => {
+    try {
+      const [dashMetrics, cities, queue, history] = await Promise.all([
+        api.getDashboardAnalytics(),
+        api.getCityAnalytics(),
+        api.getQueueHealth().catch(() => null),
+        api.getTaskHistory().catch(() => [])
+      ]);
+      setMetrics(dashMetrics);
+      setCityStats(cities);
+      setQueueHealth(queue);
+      setRecentJobs(Array.isArray(history) ? history.slice(0, 6) : []);
+    } catch (err) {
+      console.error('Failed to load dashboard data', err);
+    } finally {
+      setLoading(false);
     }
+  };
+
+  useEffect(() => {
     loadData();
   }, []);
+
+  const handleRunJob = async (category: string, payload: any = {}) => {
+    setRunningJob(category);
+    try {
+      const res = await api.triggerBackgroundTask({
+        category,
+        payload,
+        execute_sync: true
+      });
+      await loadData();
+      alert(`Job '${category}' finished with status: ${res.status}`);
+    } catch (err: any) {
+      alert(`Job error: ${err.message}`);
+    } finally {
+      setRunningJob(null);
+    }
+  };
 
   return (
     <div className="p-6 space-y-6">
       {/* Executive Welcome & Primary Offer Banner */}
-      <div className="bg-gradient-to-r from-cobalt-900 to-cobalt-950 border border-cobalt-800 rounded-lg p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center space-x-2 text-xs font-mono text-cobalt-400 font-medium">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            <span>SYSTEM ACTIVE • PRODUCTION B2B AUTOMATION</span>
+      <div className="bg-gradient-to-r from-cobalt-900 to-cobalt-950 border border-cobalt-800 rounded-lg p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-md">
+        <div className="flex items-center space-x-3.5">
+          <div className="w-12 h-12 rounded-lg bg-cobalt-800/80 border border-cobalt-700 p-1 flex items-center justify-center shrink-0 shadow-inner">
+            <img src="/acttrident-mark.png" alt="ActTrident" className="w-full h-full object-contain" />
           </div>
-          <h2 className="text-xl font-bold text-slate-100 tracking-tight mt-1">ActTrident B2B Sales Automation</h2>
-          <p className="text-xs text-slate-400 mt-1 max-w-2xl leading-relaxed">
-            Targeting SMBs and technology enterprises managing 5+ laptops across <strong className="text-slate-300">Siliguri</strong>, <strong className="text-slate-300">Gangtok</strong>, <strong className="text-slate-300">Patna</strong>, and <strong className="text-slate-300">Bhagalpur</strong> with the proposed <strong className="text-cobalt-300">90-Day Free Product Evaluation</strong>.
-          </p>
+          <div>
+            <div className="flex items-center space-x-2 text-xs font-mono text-cobalt-400 font-medium">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span>SYSTEM ACTIVE • PRODUCTION B2B AUTOMATION</span>
+            </div>
+            <h2 className="text-xl font-bold text-slate-100 tracking-tight mt-0.5">ActTrident B2B Sales Automation</h2>
+            <p className="text-xs text-slate-400 mt-0.5 max-w-2xl leading-relaxed">
+              Targeting SMBs and technology enterprises managing 5+ laptops across <strong className="text-slate-300">any target city</strong> or nationwide technology corridors with the proposed <strong className="text-cobalt-300">90-Day Free Product Evaluation</strong>.
+            </p>
+          </div>
         </div>
         <div className="flex items-center space-x-2 shrink-0">
           <button
@@ -70,6 +110,58 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
           >
             Approval Queue
           </button>
+        </div>
+      </div>
+
+      {/* Autonomous Outreach Agent (Brain) Hero Banner */}
+      <div className="bg-gradient-to-r from-indigo-950/70 via-cobalt-900/90 to-cobalt-950 border border-indigo-500/30 rounded-xl p-5 shadow-lg relative overflow-hidden">
+        <div className="absolute right-0 top-0 w-96 h-full bg-gradient-to-l from-indigo-500/10 to-transparent pointer-events-none" />
+        
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5 relative z-10">
+          <div className="flex items-start space-x-4">
+            <div className="w-14 h-14 rounded-xl bg-indigo-950/90 border border-indigo-500/40 p-2 flex items-center justify-center shrink-0 shadow-lg relative group">
+              <img src="/acttrident-logo.png" alt="ActTrident AI" className="w-full h-full object-contain filter drop-shadow-md group-hover:scale-105 transition-transform" />
+              <div className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-emerald-500 border-2 border-cobalt-950 flex items-center justify-center" title="Autonomous Outreach Brain Active">
+                <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <div className="flex items-center space-x-2">
+                <h3 className="text-base font-bold text-slate-100 tracking-tight">ActTrident Autonomous Sales Outreach Agent (Brain)</h3>
+                <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                  END-TO-END PIPELINE READY
+                </span>
+              </div>
+              <p className="text-xs text-slate-300 max-w-3xl leading-relaxed">
+                Single-click autonomous orchestration across all 8 phases: Multi-Region Discovery ➔ Deep AI Tech Profiling ➔ 7-Factor Qualification (5+ Laptops) ➔ Campaign Enrollment ➔ Personalized 90-Day Evaluation Copywriting ➔ Staging & Dispatch ➔ CRM Pipeline.
+              </p>
+              <div className="flex flex-wrap items-center gap-3 pt-1 text-[11px] text-slate-400 font-mono">
+                <span className="flex items-center space-x-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                  <span>Target Coverage: Nationwide • Any Location or City</span>
+                </span>
+                <span>•</span>
+                <span className="text-indigo-300">Channels: Email (SMTP/Gmail) • WhatsApp (Meta v22.0) • LinkedIn</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center space-x-3 shrink-0">
+            <button
+              onClick={() => onNavigate('integrations')}
+              className="px-3.5 py-2.5 bg-cobalt-950 hover:bg-cobalt-900 border border-cobalt-700 text-slate-300 rounded-lg text-xs font-medium transition-colors flex items-center space-x-1.5"
+            >
+              <BookOpen className="w-3.5 h-3.5 text-cobalt-400" />
+              <span>Channel Guide</span>
+            </button>
+            <button
+              onClick={() => setShowAgentModal(true)}
+              className="px-5 py-2.5 bg-gradient-to-r from-indigo-600 to-cobalt-600 hover:from-indigo-500 hover:to-cobalt-500 text-white font-bold rounded-lg text-xs transition-all flex items-center space-x-2 shadow-lg shadow-indigo-900/40"
+            >
+              <Play className="w-4 h-4 fill-white" />
+              <span>🚀 Launch Outreach Agent</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -292,6 +384,128 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
           </div>
         </div>
       </div>
+
+      {/* Autonomous Background Job Engine & Queue Status */}
+      <div className="bg-cobalt-900/80 border border-cobalt-800 rounded-lg p-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-cobalt-800">
+          <div className="flex items-center space-x-3">
+            <div className={`p-2 rounded-lg ${queueHealth?.status === 'healthy' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'}`}>
+              <Activity className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="flex items-center space-x-2">
+                <h3 className="text-sm font-semibold text-slate-100">Background Job Engine & Queue Status</h3>
+                <span className={`text-[10px] font-mono px-2 py-0.5 rounded uppercase tracking-wider font-semibold ${
+                  queueHealth?.status === 'healthy' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                }`}>
+                  {queueHealth?.status || 'Active'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Autonomous 13-stage background pipeline running in <strong className="text-slate-300">Asia/Kolkata (IST)</strong>
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center space-x-2 text-xs font-mono">
+            <span className="text-slate-400">Workers:</span>
+            <span className="bg-cobalt-950 px-2 py-1 rounded border border-cobalt-800 text-cobalt-300 font-semibold">
+              {queueHealth?.celery?.worker_count ?? 1} Online
+            </span>
+            <span className="text-slate-400 ml-2">Redis:</span>
+            <span className={`px-2 py-1 rounded border font-semibold ${
+              queueHealth?.redis?.connected ? 'bg-emerald-950/60 border-emerald-800 text-emerald-400' : 'bg-slate-800 border-slate-700 text-slate-400'
+            }`}>
+              {queueHealth?.redis?.connected ? `${queueHealth.redis.ping_ms || 1.2}ms` : 'Local Fallback'}
+            </span>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3 mt-4 text-xs">
+          <div className="bg-cobalt-950/60 p-3 rounded border border-cobalt-800">
+            <span className="text-slate-400 block text-[11px]">Pending Jobs</span>
+            <span className="text-lg font-mono font-bold text-amber-400">{queueHealth?.tasks?.pending ?? 0}</span>
+          </div>
+          <div className="bg-cobalt-950/60 p-3 rounded border border-cobalt-800">
+            <span className="text-slate-400 block text-[11px]">Running Now</span>
+            <span className="text-lg font-mono font-bold text-cobalt-400">{queueHealth?.tasks?.running ?? 0}</span>
+          </div>
+          <div className="bg-cobalt-950/60 p-3 rounded border border-cobalt-800">
+            <span className="text-slate-400 block text-[11px]">Completed</span>
+            <span className="text-lg font-mono font-bold text-emerald-400">{queueHealth?.tasks?.completed ?? 0}</span>
+          </div>
+          <div className="bg-cobalt-950/60 p-3 rounded border border-cobalt-800">
+            <span className="text-slate-400 block text-[11px]">Failed</span>
+            <span className="text-lg font-mono font-bold text-rose-400">{queueHealth?.tasks?.failed ?? 0}</span>
+          </div>
+          <div className="bg-cobalt-950/60 p-3 rounded border border-cobalt-800">
+            <span className="text-slate-400 block text-[11px]">Dead Letter Queue</span>
+            <span className="text-lg font-mono font-bold text-amber-300">{queueHealth?.tasks?.dead_letter_unresolved ?? 0}</span>
+          </div>
+          <div className="bg-cobalt-950/60 p-3 rounded border border-cobalt-800">
+            <span className="text-slate-400 block text-[11px]">24h Error Rate</span>
+            <span className="text-lg font-mono font-bold text-slate-200">{queueHealth?.tasks?.failure_rate_24h_percent ?? 0}%</span>
+          </div>
+        </div>
+
+        {/* Interactive Automation Job Controls */}
+        <div className="mt-4 pt-4 border-t border-cobalt-800 flex flex-wrap items-center justify-between gap-2 text-xs">
+          <span className="text-slate-400 font-medium">Run Autonomous Pipelines On-Demand:</span>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => handleRunJob('company_discovery', { cities: ['Siliguri', 'Gangtok', 'Patna', 'Bhagalpur', 'Bengaluru', 'Delhi', 'Mumbai'] })}
+              disabled={runningJob !== null}
+              className="px-2.5 py-1.5 bg-cobalt-950 hover:bg-cobalt-850 border border-cobalt-700 text-slate-200 rounded disabled:opacity-50"
+            >
+              {runningJob === 'company_discovery' ? 'Running...' : 'Run Nationwide Discovery'}
+            </button>
+            <button
+              onClick={() => handleRunJob('lead_qualification', { recheck_stale_only: false })}
+              disabled={runningJob !== null}
+              className="px-2.5 py-1.5 bg-cobalt-950 hover:bg-cobalt-850 border border-cobalt-700 text-slate-200 rounded disabled:opacity-50"
+            >
+              {runningJob === 'lead_qualification' ? 'Running...' : 'Qualify All Prospects'}
+            </button>
+            <button
+              onClick={() => handleRunJob('followup_scheduling', {})}
+              disabled={runningJob !== null}
+              className="px-2.5 py-1.5 bg-cobalt-950 hover:bg-cobalt-850 border border-cobalt-700 text-slate-200 rounded disabled:opacity-50"
+            >
+              {runningJob === 'followup_scheduling' ? 'Running...' : 'Run Follow-Up Engine'}
+            </button>
+            <button
+              onClick={() => handleRunJob('daily_reporting', {})}
+              disabled={runningJob !== null}
+              className="px-2.5 py-1.5 bg-cobalt-600 hover:bg-cobalt-500 text-white rounded disabled:opacity-50"
+            >
+              {runningJob === 'daily_reporting' ? 'Generating...' : 'Generate Daily Digest'}
+            </button>
+          </div>
+        </div>
+
+        {recentJobs.length > 0 && (
+          <div className="mt-4 pt-3 border-t border-cobalt-800/80">
+            <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2">Recent Background Executions</div>
+            <div className="space-y-1.5 text-[11px] font-mono">
+              {recentJobs.map((job) => (
+                <div key={job.id} className="flex items-center justify-between bg-cobalt-950/60 px-3 py-1.5 rounded border border-cobalt-800/70">
+                  <span className="text-cobalt-300">{job.category}</span>
+                  <span className={job.status === 'completed' ? 'text-emerald-400' : job.status === 'failed' ? 'text-rose-400' : 'text-amber-400'}>
+                    {job.status}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Autonomous Outreach Agent Modal Runner */}
+      <AutonomousAgentModal
+        isOpen={showAgentModal}
+        onClose={() => setShowAgentModal(false)}
+        onNavigate={onNavigate}
+        onCycleComplete={loadData}
+      />
     </div>
   );
 };

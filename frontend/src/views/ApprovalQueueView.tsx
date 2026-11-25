@@ -13,7 +13,11 @@ import {
   ShieldCheck,
   Clock,
   Layers,
-  Save
+  Save,
+  RefreshCw,
+  Calendar,
+  Copy,
+  CheckCircle2
 } from 'lucide-react';
 
 export const ApprovalQueueView: React.FC = () => {
@@ -24,12 +28,19 @@ export const ApprovalQueueView: React.FC = () => {
   const [editingDraft, setEditingDraft] = useState<EmailDraft | null>(null);
   const [editSubject, setEditSubject] = useState('');
   const [editBody, setEditBody] = useState('');
+  const [emailMode, setEmailMode] = useState<any>(null);
+  const [manualSendDraft, setManualSendDraft] = useState<EmailDraft | null>(null);
+  const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
 
   const loadQueue = async () => {
     setLoading(true);
     try {
-      const data = await api.getApprovalQueue(statusFilter);
+      const [data, mode] = await Promise.all([
+        api.getApprovalQueue(statusFilter),
+        api.getGmailStatus().catch(() => null),
+      ]);
       setDrafts(data.items);
+      setEmailMode(mode);
       setSelectedIds([]);
     } catch (err) {
       console.error(err);
@@ -71,6 +82,32 @@ export const ApprovalQueueView: React.FC = () => {
     }
   };
 
+  const handleRegenerate = async (id: number) => {
+    const tone = prompt('Select tone: Friendly professional, Formal, Technical, Short introductory, Follow-up', 'Friendly professional');
+    if (!tone) return;
+    try {
+      await api.regenerateEmailDraft(id, tone);
+      alert('Draft regenerated successfully and reset to draft status for human review.');
+      loadQueue();
+    } catch (err: any) {
+      alert(`Regeneration error: ${err.message}`);
+    }
+  };
+
+  const handleSchedule = async (id: number) => {
+    const defaultTime = new Date(Date.now() + 3600 * 1000 * 24).toISOString().slice(0, 16);
+    const timeStr = prompt('Enter scheduled dispatch time (YYYY-MM-DDTHH:MM):', defaultTime);
+    if (!timeStr) return;
+    try {
+      const scheduledIso = new Date(timeStr).toISOString();
+      await api.scheduleEmailDraft(id, scheduledIso);
+      alert(`Draft scheduled for ${timeStr} IST.`);
+      loadQueue();
+    } catch (err: any) {
+      alert(`Schedule error: ${err.message}`);
+    }
+  };
+
   const handleBulkApprove = async () => {
     if (selectedIds.length === 0) return;
     try {
@@ -93,9 +130,9 @@ export const ApprovalQueueView: React.FC = () => {
     try {
       await api.updateEmailDraft(editingDraft.id, {
         subject: editSubject,
-        body_text: editBody,
-        approval_status: 'approved'
+        body_text: editBody
       });
+      await api.approveEmail(editingDraft.id);
       setEditingDraft(null);
       loadQueue();
     } catch (err: any) {
@@ -147,12 +184,33 @@ export const ApprovalQueueView: React.FC = () => {
             <option value="draft">Pending Approval (Drafts)</option>
             <option value="approved">Approved</option>
             <option value="sent">Dispatched (Sent)</option>
+            <option value="simulated">Simulated (Mock)</option>
             <option value="rejected">Rejected</option>
             <option value="skipped">Skipped</option>
             <option value="All">All Records</option>
           </select>
         </div>
       </div>
+
+      {/* Honest Simulation / Provider Mode Banner */}
+      {emailMode && (
+        <div
+          className={`p-3 rounded-lg border text-xs flex items-center justify-between ${
+            emailMode.is_simulation
+              ? 'bg-amber-500/10 border-amber-500/30 text-amber-200'
+              : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200'
+          }`}
+        >
+          <span>
+            {emailMode.is_simulation
+              ? 'SIMULATION MODE ACTIVE: Emails sent from this queue are recorded as simulated locally and will NOT be transmitted externally.'
+              : `LIVE EMAIL PROVIDER CONNECTED: Dispatching via ${emailMode.active_mode.toUpperCase()}${emailMode.gmail?.account_email ? ` (${emailMode.gmail.account_email})` : ''}.`}
+          </span>
+          <span className="font-mono text-[10px] uppercase px-2 py-0.5 rounded bg-black/30">
+            {emailMode.active_mode}
+          </span>
+        </div>
+      )}
 
       {/* Drafts List / Cards */}
       {loading ? (
@@ -246,6 +304,24 @@ export const ApprovalQueueView: React.FC = () => {
                     <span>Edit</span>
                   </button>
 
+                  <button
+                    onClick={() => handleRegenerate(draft.id)}
+                    className="px-2.5 py-1 bg-cobalt-950 hover:bg-cobalt-850 border border-cobalt-700 text-slate-200 rounded text-xs font-medium flex items-center space-x-1"
+                    title="Request AI regeneration with different tone or notes"
+                  >
+                    <RefreshCw className="w-3 h-3 text-amber-400" />
+                    <span>Regenerate</span>
+                  </button>
+
+                  <button
+                    onClick={() => handleSchedule(draft.id)}
+                    className="px-2.5 py-1 bg-cobalt-950 hover:bg-cobalt-850 border border-cobalt-700 text-slate-200 rounded text-xs font-medium flex items-center space-x-1"
+                    title="Set target scheduled dispatch timestamp"
+                  >
+                    <Calendar className="w-3 h-3 text-cobalt-400" />
+                    <span>Schedule</span>
+                  </button>
+
                   {draft.approval_status === 'draft' && (
                     <>
                       <button
@@ -273,21 +349,31 @@ export const ApprovalQueueView: React.FC = () => {
                   )}
 
                   {draft.approval_status === 'approved' && (
-                    <button
-                      onClick={async () => {
-                        try {
-                          await api.sendApprovedEmail(draft.id);
-                          alert('Email dispatched!');
-                          loadQueue();
-                        } catch (err: any) {
-                          alert(`Error: ${err.message}`);
-                        }
-                      }}
-                      className="px-3 py-1 bg-cobalt-600 hover:bg-cobalt-500 text-white rounded text-xs font-medium flex items-center space-x-1 shadow-sm"
-                    >
-                      <Send className="w-3.5 h-3.5" />
-                      <span>Send Now</span>
-                    </button>
+                    <div className="flex items-center space-x-2">
+                      <button
+                        onClick={() => setManualSendDraft(draft)}
+                        className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-xs font-medium flex items-center space-x-1 shadow-sm"
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                        <span>Manual Send / Copy</span>
+                      </button>
+                      <button
+                        onClick={async () => {
+                          try {
+                            const res = await api.sendApprovedEmail(draft.id);
+                            alert(res.message || `Email status: ${res.status}`);
+                            loadQueue();
+                          } catch (err: any) {
+                            alert(`Notice: ${err.message}`);
+                          }
+                        }}
+                        className="px-3 py-1 bg-cobalt-800 hover:bg-cobalt-700 text-slate-200 rounded text-xs font-medium flex items-center space-x-1 border border-cobalt-700"
+                        title="Attempts provider dispatch if live sending is enabled"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                        <span>Dispatch Engine</span>
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>
@@ -339,6 +425,129 @@ export const ApprovalQueueView: React.FC = () => {
                   <Save className="w-3.5 h-3.5" />
                   <span>Save & Mark Approved</span>
                 </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Manual Send & Copy Modal */}
+      {manualSendDraft && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-cobalt-900 border border-cobalt-700 rounded-xl p-6 w-full max-w-2xl space-y-4 text-xs shadow-2xl">
+            <div className="flex items-center justify-between border-b border-cobalt-800 pb-3">
+              <div>
+                <h3 className="font-bold text-slate-100 text-sm flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                  Manual Outbound Send & Clipboard Verification
+                </h3>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Fail-closed protocol: copy vetted content into your corporate email or communication client.
+                </p>
+              </div>
+              <button
+                onClick={() => { setManualSendDraft(null); setCopyFeedback(null); }}
+                className="text-slate-400 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              {/* Recipient */}
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="text-[11px] font-semibold text-slate-300">Recipient</label>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(manualSendDraft.recipient_email || '');
+                      setCopyFeedback('recipient');
+                      setTimeout(() => setCopyFeedback(null), 2000);
+                    }}
+                    className="text-[10px] text-indigo-400 hover:text-indigo-300 flex items-center gap-1 font-mono"
+                  >
+                    <Copy className="w-3 h-3" />
+                    {copyFeedback === 'recipient' ? 'Copied!' : 'Copy Email'}
+                  </button>
+                </div>
+                <div className="p-2 bg-cobalt-950 border border-cobalt-800 rounded font-mono text-slate-200">
+                  {manualSendDraft.recipient_name ? `${manualSendDraft.recipient_name} <${manualSendDraft.recipient_email}>` : manualSendDraft.recipient_email}
+                </div>
+              </div>
+
+              {/* Subject */}
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="text-[11px] font-semibold text-slate-300">Subject Line</label>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(manualSendDraft.subject);
+                      setCopyFeedback('subject');
+                      setTimeout(() => setCopyFeedback(null), 2000);
+                    }}
+                    className="text-[10px] text-indigo-400 hover:text-indigo-300 flex items-center gap-1 font-mono"
+                  >
+                    <Copy className="w-3 h-3" />
+                    {copyFeedback === 'subject' ? 'Copied!' : 'Copy Subject'}
+                  </button>
+                </div>
+                <div className="p-2 bg-cobalt-950 border border-cobalt-800 rounded text-slate-200 font-medium">
+                  {manualSendDraft.subject}
+                </div>
+              </div>
+
+              {/* Body */}
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="text-[11px] font-semibold text-slate-300">Outreach Body</label>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(manualSendDraft.body_text);
+                      setCopyFeedback('body');
+                      setTimeout(() => setCopyFeedback(null), 2000);
+                    }}
+                    className="text-[10px] text-indigo-400 hover:text-indigo-300 flex items-center gap-1 font-mono"
+                  >
+                    <Copy className="w-3 h-3" />
+                    {copyFeedback === 'body' ? 'Copied!' : 'Copy Body'}
+                  </button>
+                </div>
+                <pre className="p-3 bg-cobalt-950 border border-cobalt-800 rounded text-slate-300 font-sans text-xs whitespace-pre-wrap max-h-60 overflow-y-auto leading-relaxed">
+                  {manualSendDraft.body_text}
+                </pre>
+              </div>
+
+              {/* Actions */}
+              <div className="flex justify-between items-center pt-3 border-t border-cobalt-800">
+                <span className="text-[10px] text-slate-500 font-mono">
+                  Channel: {manualSendDraft.provider || 'Corporate Email'} • Status: Approved
+                </span>
+                <div className="flex space-x-2">
+                  <button
+                    onClick={() => { setManualSendDraft(null); setCopyFeedback(null); }}
+                    className="px-3 py-1.5 bg-cobalt-950 text-slate-400 hover:text-slate-200 rounded text-xs"
+                  >
+                    Close
+                  </button>
+                  <button
+                    onClick={async () => {
+                      try {
+                        await api.updateEmailDraft(manualSendDraft.id, {
+                          approval_status: 'sent'
+                        });
+                        alert('Marked as sent manually. Record transitioned to sent state.');
+                        setManualSendDraft(null);
+                        loadQueue();
+                      } catch (err: any) {
+                        alert(`Error: ${err.message}`);
+                      }
+                    }}
+                    className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-medium flex items-center space-x-1.5 shadow-sm"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Confirm Sent Manually</span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>

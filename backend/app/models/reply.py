@@ -14,7 +14,9 @@ REPLY_CATEGORIES = [
     "wrong_contact",
     "out_of_office",
     "unsubscribe",
-    "potential_partnership"
+    "potential_partnership",
+    "bounce",
+    "unknown"
 ]
 
 
@@ -40,8 +42,11 @@ class Reply(Base):
     conversation_id = Column(Integer, ForeignKey("conversations.id", ondelete="CASCADE"), nullable=True)
     company_id = Column(Integer, ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
     contact_id = Column(Integer, ForeignKey("company_contacts.id", ondelete="SET NULL"), nullable=True)
+    campaign_id = Column(Integer, ForeignKey("campaigns.id", ondelete="SET NULL"), nullable=True, index=True)
     
     channel = Column(String(50), default="email")  # email, whatsapp
+    provider_message_id = Column(String(255), unique=True, nullable=True, index=True)
+    provider_thread_id = Column(String(255), nullable=True, index=True)
     sender_identifier = Column(String(255), nullable=False)  # email address or phone number
     recipient_identifier = Column(String(255), nullable=False)
     subject = Column(String(512), nullable=True)

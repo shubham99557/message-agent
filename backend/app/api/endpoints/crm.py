@@ -1,15 +1,20 @@
+import csv
+import io
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
-from app.api.deps import get_db, get_current_user
+from app.api.deps import get_db, get_current_user, require_role
 from app.models.user import User
 from app.models.lead import PIPELINE_STATUSES
+from app.models.company import Company
 from app.schemas.lead import (
     LeadResponse,
     LeadUpdate,
     FollowupCreate,
+    FollowupUpdate,
     FollowupResponse,
     MeetingCreate,
     MeetingResponse,
@@ -22,9 +27,13 @@ from app.services.crm_service import (
     update_lead,
     change_lead_status,
     add_followup,
+    list_followups,
+    update_followup,
+    delete_followup,
     add_meeting,
     create_trial,
-    handle_opt_out
+    handle_opt_out,
+    execute_dpdp_erasure
 )
 from app.core.audit import record_audit_log
 
@@ -40,6 +49,52 @@ class OptOutPayload(BaseModel):
     identifier: str
     channel: str = "all"
     reason: str = "user_opt_out"
+
+
+@router.get("/export/csv")
+def export_leads_csv(
+    pipeline_status: Optional[str] = None,
+    city: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Exports CRM pipeline leads with complete contact details, device evidence, and evaluation status."""
+    leads, _ = list_leads(db, status=pipeline_status, city=city, skip=0, limit=2000)
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "Lead ID", "Company Name", "City", "Industry", "Website",
+        "Public Email", "Public Phone", "Decision Maker", "Decision Maker Role",
+        "Pipeline Status", "Verified Laptops", "Device Evidence", "Qualification Score",
+        "Evaluation Status", "Evaluation Devices", "Next Followup Date", "Updated At"
+    ])
+    for l in leads:
+        comp = l.company
+        writer.writerow([
+            l.id,
+            comp.name if comp else "",
+            comp.city if comp else "",
+            comp.industry or "" if comp else "",
+            comp.website or "" if comp else "",
+            comp.public_email or "" if comp else "",
+            comp.public_phone or "" if comp else "",
+            comp.decision_maker_name or "" if comp else "",
+            comp.decision_maker_role or "" if comp else "",
+            l.pipeline_status,
+            comp.laptop_count_verified or "" if comp else "",
+            comp.laptop_count_evidence or "" if comp else "",
+            comp.qualification_score if comp else 0.0,
+            l.trial_status or "none",
+            l.trial_device_count or "",
+            l.next_followup_date.strftime("%Y-%m-%d %H:%M") if l.next_followup_date else "",
+            l.updated_at.strftime("%Y-%m-%d %H:%M") if l.updated_at else ""
+        ])
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=acttrident_crm_leads.csv"}
+    )
 
 
 @router.get("/leads", response_model=dict)
@@ -76,7 +131,7 @@ def update_pipeline_status(
     lead_id: int,
     payload: StatusUpdatePayload,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role(["admin", "manager", "sales_rep"]))
 ):
     if payload.status not in PIPELINE_STATUSES:
         raise HTTPException(status_code=400, detail=f"Invalid pipeline status. Must be one of: {PIPELINE_STATUSES}")
@@ -101,7 +156,7 @@ def schedule_lead_followup(
     lead_id: int,
     followup_in: FollowupCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role(["admin", "manager", "sales_rep"]))
 ):
     lead = get_lead(db, lead_id)
     if not lead:
@@ -109,12 +164,61 @@ def schedule_lead_followup(
     return add_followup(db, lead_id, followup_in)
 
 
+@router.get("/followups", response_model=dict)
+def get_all_followups(
+    status: Optional[str] = None,
+    due_only: bool = False,
+    lead_id: Optional[int] = None,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Lists operational follow-up tasks across leads, with due-date and status filtering."""
+    items, total = list_followups(
+        db, status=status, due_only=due_only, lead_id=lead_id, skip=skip, limit=limit
+    )
+    results = []
+    for f in items:
+        resp = FollowupResponse.model_validate(f).model_dump()
+        resp["company_name"] = f.company.name if f.company else (f.lead.company.name if (f.lead and f.lead.company) else None)
+        results.append(resp)
+    return {"items": results, "total": total}
+
+
+@router.patch("/followups/{followup_id}", response_model=FollowupResponse)
+def update_existing_followup(
+    followup_id: int,
+    followup_in: FollowupUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["admin", "manager", "sales_rep"]))
+):
+    """Updates follow-up task details, status transition, or completion timestamp."""
+    fu = update_followup(db, followup_id, followup_in)
+    if not fu:
+        raise HTTPException(status_code=404, detail=f"Followup with ID {followup_id} not found")
+    return fu
+
+
+@router.delete("/followups/{followup_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_followup(
+    followup_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["admin", "manager"]))
+):
+    """Deletes a follow-up task."""
+    success = delete_followup(db, followup_id)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Followup with ID {followup_id} not found")
+    return None
+
+
 @router.post("/leads/{lead_id}/meetings", response_model=MeetingResponse, status_code=status.HTTP_201_CREATED)
 def schedule_lead_meeting(
     lead_id: int,
     meeting_in: MeetingCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role(["admin", "manager", "sales_rep"]))
 ):
     lead = get_lead(db, lead_id)
     if not lead:
@@ -127,7 +231,7 @@ def activate_lead_trial(
     lead_id: int,
     trial_in: TrialCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role(["admin", "manager", "sales_rep"]))
 ):
     lead = get_lead(db, lead_id)
     if not lead:
@@ -149,7 +253,7 @@ def activate_lead_trial(
 def record_prospect_opt_out(
     payload: OptOutPayload,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role(["admin", "manager", "sales_rep"]))
 ):
     handle_opt_out(db, identifier=payload.identifier, channel=payload.channel, reason=payload.reason)
     record_audit_log(
@@ -161,3 +265,82 @@ def record_prospect_opt_out(
         details={"channel": payload.channel, "reason": payload.reason}
     )
     return {"status": "success", "message": f"{payload.identifier} added to global suppression list"}
+
+
+@router.get("/public/opt-out")
+def public_opt_out_get(
+    email: Optional[str] = Query(None),
+    identifier: Optional[str] = Query(None),
+    db: Session = Depends(get_db)
+):
+    """Public one-click unsubscribe endpoint complying with RFC 8058 and India DPDP Act 2023."""
+    target = (email or identifier or "").strip()
+    if not target:
+        raise HTTPException(status_code=400, detail="Missing email or identifier parameter")
+
+    handle_opt_out(db, identifier=target, channel="all", reason="public_one_click_unsubscribe")
+    record_audit_log(
+        db=db,
+        action="public_one_click_opt_out",
+        entity_type="suppression",
+        entity_id=target,
+        details={"source": "public_web_link"}
+    )
+    return {
+        "status": "success",
+        "message": f"Successfully unsubscribed {target}. You will not receive further outreach communications from ActTrident.",
+        "identifier": target
+    }
+
+
+@router.post("/public/opt-out")
+def public_opt_out_post(
+    payload: OptOutPayload,
+    db: Session = Depends(get_db)
+):
+    """Public RFC 8058 List-Unsubscribe POST endpoint (automated mail client unsubscribe)."""
+    target = (payload.identifier or "").strip()
+    if not target:
+        raise HTTPException(status_code=400, detail="Missing identifier in request payload")
+
+    handle_opt_out(db, identifier=target, channel=payload.channel or "all", reason="rfc8058_automated_unsubscribe")
+    record_audit_log(
+        db=db,
+        action="rfc8058_client_opt_out",
+        entity_type="suppression",
+        entity_id=target,
+        details={"source": "rfc8058_header_action"}
+    )
+    return {
+        "status": "success",
+        "message": f"Unsubscribed {target}",
+        "identifier": target
+    }
+
+
+class ErasurePayload(BaseModel):
+    identifier: str
+    reason: Optional[str] = "dpdp_right_to_erasure"
+
+
+@router.post("/erasure")
+def request_dpdp_erasure(
+    payload: ErasurePayload,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["admin", "manager"]))
+):
+    """Executes India DPDP Act 2023 Section 12 Right to Erasure / Right to be Forgotten."""
+    target = (payload.identifier or "").strip()
+    if not target:
+        raise HTTPException(status_code=400, detail="Missing identifier for data erasure")
+
+    result = execute_dpdp_erasure(db, identifier=target, reason=payload.reason or "dpdp_right_to_erasure")
+    record_audit_log(
+        db=db,
+        action="dpdp_erasure_executed",
+        entity_type="company_contact",
+        entity_id=target,
+        user_id=current_user.id,
+        details=result
+    )
+    return result

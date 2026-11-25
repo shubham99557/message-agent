@@ -11,13 +11,17 @@ import { LeadsView } from './views/LeadsView';
 import { ResearchView } from './views/ResearchView';
 import { EmailOutreachView } from './views/EmailOutreachView';
 import { WhatsAppView } from './views/WhatsAppView';
+import { LinkedInView } from './views/LinkedInView';
 import { CampaignsView } from './views/CampaignsView';
 import { ApprovalQueueView } from './views/ApprovalQueueView';
 import { InboxView } from './views/InboxView';
 import { CrmPipelineView } from './views/CrmPipelineView';
 import { AnalyticsView } from './views/AnalyticsView';
 import { IntegrationsView } from './views/IntegrationsView';
+import { AutomationCenterView } from './views/AutomationCenterView';
 import { SettingsView } from './views/SettingsView';
+import { ServiceCatalogueView } from './views/ServiceCatalogueView';
+import { FollowUpManagerView } from './views/FollowUpManagerView';
 
 import { Shield, Lock } from 'lucide-react';
 
@@ -28,9 +32,9 @@ export const App: React.FC = () => {
   const [pendingApprovalsCount, setPendingApprovalsCount] = useState(0);
   const [inboxCount, setInboxCount] = useState(0);
 
-  // Login Form State
-  const [email, setEmail] = useState('admin@acttrident.ai');
-  const [password, setPassword] = useState('AdminPassword2026!');
+  // Login Form State (never embed default administrator credentials in client code)
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState<string | null>(null);
   const [loggingIn, setLoggingIn] = useState(false);
 
@@ -68,7 +72,8 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await api.logout();
     clearAuthToken();
     setIsAuthenticated(false);
   };
@@ -81,13 +86,20 @@ export const App: React.FC = () => {
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen bg-cobalt-950 flex items-center justify-center p-4">
-        <div className="w-full max-w-sm bg-cobalt-900 border border-cobalt-800 rounded-xl p-8 space-y-6 shadow-2xl">
-          <div className="text-center space-y-2">
-            <div className="w-12 h-12 rounded-xl bg-cobalt-600 flex items-center justify-center mx-auto shadow-lg shadow-cobalt-600/30 border border-cobalt-500/40">
-              <Shield className="w-6 h-6 text-white" />
+        <div className="w-full max-w-sm bg-cobalt-900 border border-cobalt-800 rounded-xl p-8 space-y-6 shadow-2xl relative overflow-hidden">
+          <div className="absolute -top-12 -right-12 w-32 h-32 bg-cobalt-600/10 rounded-full blur-2xl pointer-events-none" />
+          <div className="text-center space-y-3">
+            <div className="w-16 h-16 rounded-2xl bg-cobalt-950 border border-cobalt-700/80 p-2.5 flex items-center justify-center mx-auto shadow-xl shadow-cobalt-950/80">
+              <img src="/acttrident-logo.png" alt="ActTrident Official Logo" className="w-full h-full object-contain" />
             </div>
-            <h1 className="text-lg font-bold text-slate-100 tracking-tight">ActTrident AI Outreach Agent</h1>
-            <p className="text-xs text-slate-400">Enterprise B2B Sales Automation Platform</p>
+            <div>
+              <h1 className="text-lg font-bold text-slate-100 tracking-tight flex items-center justify-center space-x-1.5">
+                <span>ActTrident</span>
+                <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">AI</span>
+              </h1>
+              <p className="text-xs text-slate-400 mt-0.5">The Human Action Security Broker™</p>
+              <p className="text-[11px] font-mono text-cobalt-400 mt-1">Autonomous B2B Sales Outreach Agent</p>
+            </div>
           </div>
 
           {loginError && (
@@ -101,6 +113,7 @@ export const App: React.FC = () => {
               <label className="block text-[11px] font-medium text-slate-400 mb-1">Corporate Email</label>
               <input
                 type="email"
+                placeholder="name@acttrident.ai"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full bg-cobalt-950 border border-cobalt-800 rounded px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-cobalt-600"
@@ -111,6 +124,7 @@ export const App: React.FC = () => {
               <label className="block text-[11px] font-medium text-slate-400 mb-1">Password</label>
               <input
                 type="password"
+                placeholder="Enter your password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full bg-cobalt-950 border border-cobalt-800 rounded px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-cobalt-600"
@@ -127,7 +141,7 @@ export const App: React.FC = () => {
           </form>
 
           <div className="pt-2 border-t border-cobalt-800/80 text-[11px] text-slate-400 text-center">
-            Targeting Siliguri, Gangtok, Patna & Bhagalpur
+            Nationwide B2B Outreach • Any City, State or Technology Hub
           </div>
         </div>
       </div>
@@ -139,15 +153,19 @@ export const App: React.FC = () => {
       case 'dashboard': return { title: 'Executive Overview', sub: 'Active sales campaigns and performance telemetry' };
       case 'discovery': return { title: 'Company Lead Discovery', sub: 'Public directory intelligence across initial target cities' };
       case 'leads': return { title: 'Lead Database', sub: 'Verified corporate records with source attribution' };
+      case 'followups': return { title: 'Follow-Up & Operations Manager', sub: 'Multi-touch cadence scheduling, reminders, and suppression enforcement' };
+      case 'services': return { title: 'ActTrident Service Catalogue', sub: 'Approved capabilities, qualification heuristics, and legal claims boundaries' };
       case 'research': return { title: 'AI Research Agent', sub: '7-factor qualification & truthful company dossiers' };
       case 'email': return { title: 'Email Outreach', sub: 'Personalized AI email generation across 5 tones' };
       case 'whatsapp': return { title: 'WhatsApp Outreach', sub: 'Meta Cloud API messaging with strict consent verification' };
+      case 'linkedin': return { title: 'LinkedIn Outreach', sub: 'Official OAuth 2.0 & compliant human-assisted outreach workflow' };
       case 'campaigns': return { title: 'Campaign Management', sub: 'Multi-account sequences with daily rate limits' };
       case 'approvals': return { title: 'Human Approval Queue', sub: 'Mandatory human signoff before any outbound dispatch' };
       case 'inbox': return { title: 'Inbound Inbox & AI Replies', sub: '10-class response categorization and suggested replies' };
       case 'crm': return { title: 'CRM Sales Pipeline', sub: '16-stage opportunity and 90-day evaluation tracking' };
       case 'analytics': return { title: 'Campaign Analytics', sub: 'Genuine conversion metrics with authentic denominators' };
       case 'integrations': return { title: 'Integrations & Credentials', sub: 'Configure AI, Gmail/SMTP and Meta WhatsApp Cloud API' };
+      case 'automation': return { title: 'Automation Center', sub: 'Persistent background scheduler, IST business hours guards, and execution telemetry' };
       case 'settings': return { title: 'Settings & Audit Logs', sub: 'Security audit trail and global suppression registry' };
       default: return { title: 'ActTrident Agent', sub: '' };
     }
@@ -172,6 +190,8 @@ export const App: React.FC = () => {
           {currentView === 'dashboard' && <DashboardView onNavigate={setCurrentView} />}
           {currentView === 'discovery' && <DiscoveryView onCompanyImported={() => {}} />}
           {currentView === 'leads' && <LeadsView onSelectCompany={handleSelectCompany} />}
+          {currentView === 'followups' && <FollowUpManagerView />}
+          {currentView === 'services' && <ServiceCatalogueView />}
           {currentView === 'research' && (
             <ResearchView selectedCompany={selectedCompany} onNavigate={setCurrentView} />
           )}
@@ -181,12 +201,16 @@ export const App: React.FC = () => {
           {currentView === 'whatsapp' && (
             <WhatsAppView selectedCompany={selectedCompany} onNavigate={setCurrentView} />
           )}
+          {currentView === 'linkedin' && (
+            <LinkedInView selectedCompany={selectedCompany} />
+          )}
           {currentView === 'campaigns' && <CampaignsView onNavigate={setCurrentView} />}
           {currentView === 'approvals' && <ApprovalQueueView />}
           {currentView === 'inbox' && <InboxView />}
           {currentView === 'crm' && <CrmPipelineView />}
           {currentView === 'analytics' && <AnalyticsView />}
           {currentView === 'integrations' && <IntegrationsView />}
+          {currentView === 'automation' && <AutomationCenterView />}
           {currentView === 'settings' && <SettingsView />}
         </main>
       </div>

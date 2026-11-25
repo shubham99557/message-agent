@@ -4,18 +4,64 @@ export function getAuthToken(): string | null {
   return localStorage.getItem('acttrident_token');
 }
 
-export function setAuthToken(token: string) {
-  localStorage.setItem('acttrident_token', token);
+export function getRefreshToken(): string | null {
+  return localStorage.getItem('acttrident_refresh_token');
 }
 
-export function clearAuthToken() {
+export function setAuthTokens(accessToken: string, refreshToken?: string) {
+  localStorage.setItem('acttrident_token', accessToken);
+  if (refreshToken) {
+    localStorage.setItem('acttrident_refresh_token', refreshToken);
+  }
+}
+
+export function clearAuthTokens() {
   localStorage.removeItem('acttrident_token');
+  localStorage.removeItem('acttrident_refresh_token');
+}
+
+export const clearAuthToken = clearAuthTokens;
+
+let isRefreshing = false;
+let refreshSubscribers: ((token: string) => void)[] = [];
+
+function subscribeTokenRefresh(cb: (token: string) => void) {
+  refreshSubscribers.push(cb);
+}
+
+function onRefreshed(token: string) {
+  refreshSubscribers.forEach((cb) => cb(token));
+  refreshSubscribers = [];
+}
+
+async function refreshAccessToken(): Promise<string | null> {
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) return null;
+
+  try {
+    const res = await fetch(`${API_BASE}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      setAuthTokens(data.access_token, data.refresh_token);
+      return data.access_token;
+    }
+  } catch {
+    // refresh failed
+  }
+
+  clearAuthTokens();
+  return null;
 }
 
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-  const token = getAuthToken();
+  let token = getAuthToken();
   const headers = new Headers(options.headers || {});
-  
+
   if (token && !headers.has('Authorization')) {
     headers.set('Authorization', `Bearer ${token}`);
   }
@@ -23,10 +69,38 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     headers.set('Content-Type', 'application/json');
   }
 
-  const response = await fetch(`${API_BASE}${endpoint}`, {
+  let response = await fetch(`${API_BASE}${endpoint}`, {
     ...options,
     headers,
   });
+
+  // Handle 401 with Token Rotation / Refresh
+  if (response.status === 401 && !endpoint.startsWith('/auth/login') && !endpoint.startsWith('/auth/refresh')) {
+    if (!isRefreshing) {
+      isRefreshing = true;
+      const newToken = await refreshAccessToken();
+      isRefreshing = false;
+
+      if (newToken) {
+        onRefreshed(newToken);
+        headers.set('Authorization', `Bearer ${newToken}`);
+        response = await fetch(`${API_BASE}${endpoint}`, {
+          ...options,
+          headers,
+        });
+      }
+    } else {
+      // Wait for existing refresh promise
+      const retryToken = await new Promise<string>((resolve) => {
+        subscribeTokenRefresh((token) => resolve(token));
+      });
+      headers.set('Authorization', `Bearer ${retryToken}`);
+      response = await fetch(`${API_BASE}${endpoint}`, {
+        ...options,
+        headers,
+      });
+    }
+  }
 
   if (!response.ok) {
     let errorDetail = 'An error occurred';
@@ -52,25 +126,38 @@ export const api = {
     const formData = new URLSearchParams();
     formData.append('username', username);
     formData.append('password', password);
-    const res = await request<{ access_token: string; token_type: string; user: any }>('/auth/login', {
+    const res = await request<{ access_token: string; refresh_token?: string; token_type: string; user: any }>('/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: formData.toString(),
     });
-    setAuthToken(res.access_token);
+    setAuthTokens(res.access_token, res.refresh_token);
     return res;
   },
   getMe: () => request<any>('/auth/me'),
-  logout: () => {
-    clearAuthToken();
+  getUsers: () => request<any[]>('/auth/users'),
+  adminCreateUser: (data: { email: string; full_name: string; password: string; role: string }) =>
+    request<any>('/auth/users', { method: 'POST', body: JSON.stringify(data) }),
+  updateUserStatus: (userId: number, isActive: boolean) =>
+    request<any>(`/auth/users/${userId}/status`, { method: 'PATCH', body: JSON.stringify({ is_active: isActive }) }),
+  updateUserRole: (userId: number, role: string) =>
+    request<any>(`/auth/users/${userId}/role`, { method: 'PATCH', body: JSON.stringify({ role }) }),
+  logout: async () => {
+    try {
+      await request<any>('/auth/logout', { method: 'POST' });
+    } catch {
+      // Ignore network errors on logout
+    }
+    clearAuthTokens();
   },
 
   // Companies & Leads
-  getCompanies: (params: { city?: string; industry?: string; search?: string; skip?: number; limit?: number } = {}) => {
+  getCompanies: (params: { city?: string; industry?: string; search?: string; skip?: number; limit?: number; is_demo?: boolean } = {}) => {
     const query = new URLSearchParams();
     if (params.city) query.append('city', params.city);
     if (params.industry) query.append('industry', params.industry);
     if (params.search) query.append('search', params.search);
+    if (params.is_demo !== undefined) query.append('is_demo', String(params.is_demo));
     if (params.skip !== undefined) query.append('skip', String(params.skip));
     if (params.limit !== undefined) query.append('limit', String(params.limit));
     return request<{ items: any[]; total: number }>(`/companies?${query.toString()}`);
@@ -78,27 +165,212 @@ export const api = {
   createCompany: (company: any) => request<any>('/companies', { method: 'POST', body: JSON.stringify(company) }),
   getCompany: (id: number) => request<any>(`/companies/${id}`),
   updateCompany: (id: number, updates: any) => request<any>(`/companies/${id}`, { method: 'PUT', body: JSON.stringify(updates) }),
+  verifyCompany: (
+    id: number,
+    data: {
+      verification_status: string;
+      verification_method: string;
+      laptop_count_verified?: number;
+      laptop_count_evidence?: string;
+      employee_size_evidence?: string;
+      source_url?: string;
+      notes?: string;
+    }
+  ) => request<any>(`/companies/${id}/verify`, { method: 'POST', body: JSON.stringify(data) }),
   uploadCSV: async (file: File) => {
     const formData = new FormData();
     formData.append('file', file);
     return request<any>('/companies/import-csv', { method: 'POST', body: formData });
   },
+  exportCompaniesCsv: async () => {
+    const token = getAuthToken();
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const res = await fetch(`${API_BASE}/companies/export/csv`, { headers });
+    if (!res.ok) throw new Error('Failed to export CSV');
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'acttrident_companies.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  },
 
   // Discovery
-  searchDiscovery: (params: { city: string; industry?: string; query?: string; min_devices?: number }) =>
-    request<any[]>('/discovery/search', { method: 'POST', body: JSON.stringify(params) }),
+  getDiscoverySources: async () => {
+    const res = await request<{ sources?: any[] } | any[]>('/discovery/sources');
+    return Array.isArray(res) ? res : (res.sources || []);
+  },
+  getIndianStates: async () => {
+    const res = await request<{ states: Array<{ name: string; code: string; region: string }> }>('/discovery/locations/states');
+    return res.states || [];
+  },
+  getIndianRegions: async () => {
+    const res = await request<{ regions: Array<{ name: string; description: string }> }>('/discovery/locations/regions');
+    return res.regions || [];
+  },
+  getLocationPresets: async () => {
+    const res = await request<{ presets: any[] }>('/discovery/locations/presets');
+    return res.presets || [];
+  },
+  getDiscoveryIndustries: async () => {
+    const res = await request<{ industries: any[] }>('/discovery/industries');
+    return res.industries || [];
+  },
+  suggestLocations: async (params: { q?: string; state?: string; region?: string; pincode?: string; limit?: number } = {}, signal?: AbortSignal) => {
+    const query = new URLSearchParams();
+    if (params.q) query.append('q', params.q);
+    if (params.state) query.append('state', params.state);
+    if (params.region) query.append('region', params.region);
+    if (params.pincode) query.append('pincode', params.pincode);
+    if (params.limit) query.append('limit', String(params.limit));
+    const res = await request<{ suggestions: any[] }>(`/discovery/locations/suggest?${query.toString()}`, { signal });
+    return res.suggestions || [];
+  },
+  searchDiscovery: (params: {
+    city?: string;
+    state?: string;
+    country?: string;
+    scope?: string;
+    industry?: string;
+    query?: string;
+    min_devices?: number;
+    include_demo?: boolean;
+    page?: number;
+    page_size?: number;
+    sort_by?: string;
+    sort_order?: string;
+  }, signal?: AbortSignal) =>
+    request<any[]>('/discovery/search', { method: 'POST', body: JSON.stringify(params), signal }),
+  searchDiscoveryPaginated: (params: {
+    city?: string;
+    state?: string;
+    country?: string;
+    scope?: string;
+    industry?: string;
+    query?: string;
+    company_size?: string;
+    min_devices?: number;
+    min_employees?: number;
+    max_employees?: number;
+    include_demo?: boolean;
+    page?: number;
+    page_size?: number;
+    sort_by?: string;
+    sort_order?: string;
+  }, signal?: AbortSignal) =>
+    request<{
+      items: any[];
+      total: number;
+      page: number;
+      page_size: number;
+      total_pages: number;
+      commercial_relevant?: number;
+      verified_websites?: number;
+      verified_emails?: number;
+      verified_phones?: number;
+      high_priority_count?: number;
+      medium_priority_count?: number;
+      low_priority_count?: number;
+      scope: string;
+      search_strategy: string;
+      coverage_note: string;
+      active_providers: string[];
+      failed_providers: string[];
+    }>('/discovery/search-paginated', { method: 'POST', body: JSON.stringify(params), signal }),
+  runDiscoveryPipeline: (params: {
+    industry?: string;
+    city: string;
+    state?: string;
+    country?: string;
+    scope?: string;
+    query?: string;
+    company_size?: string;
+    target_category?: string;
+    max_leads?: number;
+    min_score?: number;
+    min_devices?: number;
+    min_employees?: number;
+    max_employees?: number;
+    include_demo?: boolean;
+    auto_verify?: boolean;
+    auto_research?: boolean;
+    auto_qualify?: boolean;
+    auto_save_crm?: boolean;
+  }, signal?: AbortSignal) =>
+    request<{
+      query_summary: string;
+      steps: Array<{ step_number: number; step_name: string; status: string; detail: string; timestamp: string }>;
+      total_discovered: number;
+      commercial_relevant?: number;
+      websites_verified: number;
+      public_emails_found: number;
+      contacts_verified: number;
+      verified_websites?: number;
+      verified_emails?: number;
+      verified_phones?: number;
+      high_priority_count?: number;
+      medium_priority_count?: number;
+      low_priority_count?: number;
+      companies_researched: number;
+      companies_qualified: number;
+      saved_to_crm: number;
+      items: any[];
+      active_providers: string[];
+      failed_providers: string[];
+      duration_seconds: number;
+    }>('/discovery/pipeline', { method: 'POST', body: JSON.stringify(params), signal }),
   importDiscoveredLead: (lead: any) => request<any>('/discovery/import', { method: 'POST', body: JSON.stringify(lead) }),
+  batchImportDiscoveredLeads: (companies: any[]) =>
+    request<any[]>('/discovery/batch-import', { method: 'POST', body: JSON.stringify({ companies }) }),
+  crawlWebsite: (websiteUrl: string, companyName?: string, city?: string) =>
+    request<any>('/discovery/crawl-website', { method: 'POST', body: JSON.stringify({ website_url: websiteUrl, company_name: companyName, city }) }),
+  uploadDiscoveryCsv: async (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return request<any[]>('/discovery/upload-csv', { method: 'POST', body: formData });
+  },
+  exportDiscoveryCsv: async (params: any) => {
+    const token = getAuthToken();
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const res = await fetch(`${API_BASE}/discovery/export/csv`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(params),
+    });
+    if (!res.ok) throw new Error('Failed to export Discovery CSV');
+    return res.blob();
+  },
+  getDiscoveryHistory: async () => {
+    return request<any[]>('/discovery/history');
+  },
 
   // Qualification
   qualifyCompany: (companyId: number) => request<any>(`/qualification/company/${companyId}`, { method: 'POST' }),
+  batchQualifyCompanies: (companyIds: number[]) =>
+    request<any[]>('/qualification/batch', { method: 'POST', body: JSON.stringify(companyIds) }),
+  reverifyStaleQualifications: (maxAgeDays: number = 30) =>
+    request<any[]>(`/qualification/reverify-stale?max_age_days=${maxAgeDays}`, { method: 'POST' }),
 
   // Research Report
   generateResearchReport: (companyId: number) => request<any>(`/research/company/${companyId}`, { method: 'POST' }),
   getResearchReport: (companyId: number) => request<any>(`/research/company/${companyId}`),
 
   // Email Outreach & Approvals
-  generateEmail: (data: { company_id: number; tone?: string; custom_notes?: string; campaign_id?: number }) =>
+  generateEmail: (data: { company_id: number; tone?: string; custom_notes?: string; campaign_id?: number; service_id?: number; variation_type?: string }) =>
     request<any>('/emails/generate', { method: 'POST', body: JSON.stringify(data) }),
+  generateEmailVariations: (data: { company_id: number; contact_id?: number; tone?: string; service_id?: number; custom_notes?: string }) =>
+    request<any>('/emails/generate-variations', { method: 'POST', body: JSON.stringify(data) }),
+  listEmailDrafts: (companyId?: number, limit: number = 50) => {
+    const query = new URLSearchParams();
+    if (companyId) query.append('company_id', String(companyId));
+    query.append('limit', String(limit));
+    return request<any[]>(`/emails/drafts?${query.toString()}`);
+  },
   getApprovalQueue: (status: string = 'draft', campaignId?: number) => {
     const query = new URLSearchParams({ status });
     if (campaignId) query.append('campaign_id', String(campaignId));
@@ -108,13 +380,33 @@ export const api = {
   rejectEmail: (draftId: number, reason: string) =>
     request<any>(`/approvals/reject/${draftId}`, { method: 'POST', body: JSON.stringify({ reason }) }),
   skipEmail: (draftId: number) => request<any>(`/approvals/skip/${draftId}`, { method: 'POST' }),
+  regenerateEmailDraft: (draftId: number, tone: string = 'Friendly professional', customNotes?: string) =>
+    request<any>(`/approvals/regenerate/${draftId}`, { method: 'POST', body: JSON.stringify({ tone, custom_notes: customNotes }) }),
+  scheduleEmailDraft: (draftId: number, scheduledAt: string) =>
+    request<any>(`/approvals/schedule/${draftId}`, { method: 'POST', body: JSON.stringify({ scheduled_at: scheduledAt }) }),
   updateEmailDraft: (draftId: number, data: any) => request<any>(`/emails/drafts/${draftId}`, { method: 'PUT', body: JSON.stringify(data) }),
   sendApprovedEmail: (draftId: number) => request<any>(`/emails/send/${draftId}`, { method: 'POST' }),
+  checkDomainDnsAuth: (domain: string, selector?: string) => {
+    const query = new URLSearchParams({ domain });
+    if (selector) query.append('selector', selector);
+    return request<any>(`/emails/dns-check?${query.toString()}`);
+  },
+  getEmailTestModeStatus: () => request<any>('/emails/test-mode/status'),
+  sendTestModeEmail: (data: { recipient_email: string; subject: string; body_text: string; idempotency_key: string; provider_override?: string }) =>
+    request<any>('/emails/test-mode/send', { method: 'POST', body: JSON.stringify(data) }),
+  simulateResendEvent: (data: { event_type: string; event_id: string; recipient_email?: string; draft_id?: number; provider_message_id?: string }) =>
+    request<any>('/emails/test-mode/simulate-event', { method: 'POST', body: JSON.stringify(data) }),
+  getDraftTimeline: (draftId: number) => request<any>(`/emails/drafts/${draftId}/timeline`),
+  getContactQualitySummary: () => request<any>('/companies/contact-quality-summary'),
+  browserEnrichCompany: (companyId: number) => request<any>(`/companies/${companyId}/browser-enrich`, { method: 'POST' }),
   bulkApprovalAction: (draftIds: number[], action: string, reason?: string) =>
     request<any>('/approvals/bulk', { method: 'POST', body: JSON.stringify({ draft_ids: draftIds, action, reason }) }),
 
   // WhatsApp
-  getWhatsAppTemplates: () => request<any[]>('/whatsapp/templates'),
+  getWhatsAppStatus: () => request<any>('/whatsapp/status'),
+  checkWhatsAppHealth: () => request<any>('/whatsapp/health-check', { method: 'POST' }),
+  syncWhatsAppTemplates: () => request<any>('/whatsapp/templates/sync', { method: 'POST' }),
+  getWhatsAppTemplates: (includeAll: boolean = true) => request<any[]>(`/whatsapp/templates?include_all=${includeAll}`),
   recordWhatsAppConsent: (consent: any) => request<any>('/whatsapp/consent', { method: 'POST', body: JSON.stringify(consent) }),
   draftWhatsApp: (data: any) => request<any>('/whatsapp/draft', { method: 'POST', body: JSON.stringify(data) }),
   approveWhatsApp: (id: number) => request<any>(`/whatsapp/approve/${id}`, { method: 'POST' }),
@@ -128,9 +420,17 @@ export const api = {
   addCampaignRecipients: (campaignId: number, companyIds: number[]) =>
     request<any>(`/campaigns/${campaignId}/recipients`, { method: 'POST', body: JSON.stringify({ company_ids: companyIds }) }),
   generateCampaignDrafts: (campaignId: number, tone: string = 'Friendly professional') =>
-    request<any>(`/campaigns/${campaignId}/generate-drafts`, { method: 'POST', body: JSON.stringify({ tone }) }),
+    request<any>(`/campaigns/${campaignId}/batch-draft`, { method: 'POST', body: JSON.stringify({ tone }) }),
   sendApprovedCampaignEmails: (campaignId: number) =>
-    request<any>(`/campaigns/${campaignId}/send-approved`, { method: 'POST' }),
+    request<any>(`/campaigns/${campaignId}/dispatch-approved`, { method: 'POST' }),
+  enqueueApprovedCampaignEmails: (campaignId: number) =>
+    request<any>(`/campaigns/${campaignId}/enqueue-approved`, { method: 'POST' }),
+  pauseCampaign: (campaignId: number) =>
+    request<any>(`/campaigns/${campaignId}/pause`, { method: 'POST' }),
+  resumeCampaign: (campaignId: number) =>
+    request<any>(`/campaigns/${campaignId}/resume`, { method: 'POST' }),
+  stopCampaign: (campaignId: number) =>
+    request<any>(`/campaigns/${campaignId}/stop`, { method: 'POST' }),
 
   // CRM Pipeline
   getLeads: (status?: string, city?: string) => {
@@ -147,15 +447,52 @@ export const api = {
     request<any>(`/crm/leads/${leadId}/trials`, { method: 'POST', body: JSON.stringify(trial) }),
   recordOptOut: (identifier: string, channel: string = 'all', reason: string = 'user_opt_out') =>
     request<any>('/crm/opt-out', { method: 'POST', body: JSON.stringify({ identifier, channel, reason }) }),
+  exportCrmLeadsCsv: async (status?: string, city?: string) => {
+    const token = getAuthToken();
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const query = new URLSearchParams();
+    if (status && status !== 'All') query.append('pipeline_status', status);
+    if (city && city !== 'All') query.append('city', city);
+    const res = await fetch(`${API_BASE}/crm/export/csv?${query.toString()}`, { headers });
+    if (!res.ok) throw new Error('Failed to export CRM CSV');
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'acttrident_crm_leads.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  },
 
   // Inbox & Replies
-  getInbox: (classification?: string) => {
+  getInbox: async (classification?: string) => {
     const query = new URLSearchParams();
     if (classification) query.append('classification', classification);
-    return request<{ items: any[]; total: number; available_categories: string[] }>(`/replies/inbox?${query.toString()}`);
+    const res = await request<{ items: any[]; total: number; categories: string[] }>(`/replies/inbox?${query.toString()}`);
+    return {
+      ...res,
+      available_categories: res.categories || [],
+    };
   },
-  approveReplyResponse: (replyId: number, approvedText: string) =>
-    request<any>(`/replies/${replyId}/approve-response`, { method: 'POST', body: JSON.stringify({ approved_text: approvedText }) }),
+  approveReplyResponse: (replyId: number, approvedOrText: boolean | string = true, editedResponse?: string) => {
+    const isBool = typeof approvedOrText === 'boolean';
+    const approved = isBool ? approvedOrText : true;
+    const text = isBool ? editedResponse : approvedOrText;
+    return request<any>('/replies/approve-response', {
+      method: 'POST',
+      body: JSON.stringify({ reply_id: replyId, approved, edited_response: text, approved_text: text })
+    });
+  },
+  ingestInboundReply: (data: {
+    channel: string;
+    sender_identifier: string;
+    recipient_identifier: string;
+    subject?: string;
+    message_body: string;
+  }) => request<any>('/replies/inbound', { method: 'POST', body: JSON.stringify(data) }),
 
   // Analytics
   getDashboardAnalytics: (campaignId?: number) => {
@@ -164,10 +501,140 @@ export const api = {
   },
   getCityAnalytics: () => request<any[]>('/analytics/cities'),
   getCampaignAnalytics: () => request<any[]>('/analytics/campaigns'),
+  getDailyDigest: () => request<any>('/analytics/daily-digest'),
 
   // Settings & Integrations
   getIntegrations: () => request<any[]>('/settings/integrations'),
   saveIntegration: (config: any) => request<any>('/settings/integrations', { method: 'POST', body: JSON.stringify(config) }),
   getAuditLogs: () => request<any[]>('/settings/audit-logs'),
   getSuppressionList: () => request<any[]>('/settings/suppression-list'),
+  getKillSwitch: () => request<{ active: boolean; reason?: string; updated_at?: string }>('/settings/kill-switch'),
+  toggleKillSwitch: (active: boolean, reason?: string) =>
+    request<any>('/settings/kill-switch', { method: 'POST', body: JSON.stringify({ active, reason }) }),
+
+  // Gmail OAuth 2.0, LinkedIn OAuth 2.0 & Unified Channel Connections
+  getAllChannelStatuses: () => request<{ channels: Record<string, any> }>('/integrations/channels/status'),
+  getGmailStatus: () => request<any>('/integrations/gmail/status'),
+  startGmailOAuth: () => request<{ authorization_url: string; state: string; scopes: string[] }>('/integrations/gmail/oauth/start'),
+  syncGmailReplies: (maxResults: number = 20) =>
+    request<any>(`/integrations/gmail/sync-replies?max_results=${maxResults}`, { method: 'POST' }),
+  disconnectGmail: () => request<any>('/integrations/gmail/disconnect', { method: 'POST' }),
+  getDraftSendAttempts: (draftId: number) => request<any[]>(`/emails/drafts/${draftId}/attempts`),
+
+  // LinkedIn Official OAuth 2.0 & Compliant Outreach
+  getLinkedInStatus: () => request<any>('/linkedin/status'),
+  startLinkedInOAuth: () => request<{ authorization_url: string; state: string; scopes: string[] }>('/integrations/linkedin/oauth/start'),
+  disconnectLinkedIn: () => request<any>('/integrations/linkedin/disconnect', { method: 'POST' }),
+  getLinkedInMessages: (statusFilter?: string) => {
+    const query = statusFilter ? `?status=${encodeURIComponent(statusFilter)}` : '';
+    return request<any[]>(`/linkedin/messages${query}`);
+  },
+  draftLinkedInMessage: (data: {
+    company_id: number;
+    recipient_name?: string;
+    recipient_profile_url?: string;
+    message_type?: string;
+    tone?: string;
+    custom_message?: string;
+    custom_notes?: string;
+  }) => request<any>('/linkedin/draft', { method: 'POST', body: JSON.stringify(data) }),
+  updateLinkedInMessage: (id: number, data: { recipient_name?: string; recipient_profile_url?: string; message_body?: string }) =>
+    request<any>(`/linkedin/messages/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  approveLinkedInMessage: (id: number) => request<any>(`/linkedin/approve/${id}`, { method: 'POST' }),
+  rejectLinkedInMessage: (id: number, reason: string) =>
+    request<any>(`/linkedin/reject/${id}`, { method: 'POST', body: JSON.stringify({ reason }) }),
+  dispatchLinkedInMessage: (id: number) => request<any>(`/linkedin/dispatch/${id}`, { method: 'POST' }),
+  confirmLinkedInManualSend: (id: number, notes?: string) =>
+    request<any>(`/linkedin/confirm-manual-send/${id}`, { method: 'POST', body: JSON.stringify({ notes }) }),
+
+  // Background Jobs & Queue Automation
+  getQueueHealth: () => request<any>('/jobs/health'),
+  getTaskHistory: (category?: string, status?: string) => {
+    const query = new URLSearchParams();
+    if (category) query.append('category', category);
+    if (status) query.append('status', status);
+    return request<any[]>(`/jobs/history?${query.toString()}`);
+  },
+  triggerBackgroundTask: (data: { category: string; payload?: any; idempotency_key?: string; campaign_id?: number; execute_sync?: boolean }) =>
+    request<any>('/jobs/trigger', { method: 'POST', body: JSON.stringify(data) }),
+  cancelTask: (taskId: string) => request<any>(`/jobs/cancel/${taskId}`, { method: 'POST' }),
+  getDeadLetterQueue: () => request<any[]>('/jobs/dead-letter'),
+  retryDeadLetterTask: (dlqId: number) => request<any>(`/jobs/dead-letter/${dlqId}/retry`, { method: 'POST' }),
+  getOutbox: (statusFilter?: string) => {
+    const query = statusFilter ? `?status=${encodeURIComponent(statusFilter)}` : '';
+    return request<any[]>(`/jobs/outbox${query}`);
+  },
+  processOutbox: (limit: number = 20) => request<any>(`/jobs/outbox/process?limit=${limit}`, { method: 'POST' }),
+
+  // Autonomous Outreach Agent (Brain) Pipeline
+  getAgentStatus: () => request<any>('/agent/status'),
+  runAutonomousCycle: (data: {
+    target_city?: string;
+    campaign_id?: number;
+    channels?: string[];
+    max_prospects?: number;
+    auto_approve_simulation?: boolean;
+  }) => request<any>('/agent/run-cycle', { method: 'POST', body: JSON.stringify(data) }),
+  seedRegionalTargets: (city?: string) =>
+    request<any>(`/agent/seed-targets${city ? `?target_city=${encodeURIComponent(city)}` : ''}`, { method: 'POST' }),
+
+  // Local AI Brain & Desktop Storage
+  getLocalAIStatus: () => request<any>('/ai/status'),
+  getLocalAIModels: () => request<any>('/ai/models'),
+  switchLocalModel: (model_tag: string) =>
+    request<any>('/ai/switch-model', { method: 'POST', body: JSON.stringify({ model_tag }) }),
+  testLocalModel: (prompt?: string) =>
+    request<any>('/ai/test', { method: 'POST', body: JSON.stringify({ prompt }) }),
+  getDesktopStorageStatus: () => request<any>('/ai/storage'),
+  triggerInstantBackup: () => request<any>('/ai/backup', { method: 'POST' }),
+
+  // Persistent Local Automation & Scheduler
+  getAutomationStatus: () => request<any>('/automation/status'),
+  startAutomation: () => request<any>('/automation/start', { method: 'POST' }),
+  stopAutomation: () => request<any>('/automation/stop', { method: 'POST' }),
+  pauseAutomation: () => request<any>('/automation/pause', { method: 'POST' }),
+  resumeAutomation: () => request<any>('/automation/resume', { method: 'POST' }),
+  triggerAutomationJob: (job_name: string) =>
+    request<any>('/automation/trigger-job', { method: 'POST', body: JSON.stringify({ job_name }) }),
+
+  // ActTrident Service Catalogue
+  getServices: (activeOnly?: boolean) =>
+    request<any[]>(`/services${activeOnly ? '?active_only=true' : ''}`),
+  getService: (id: number) => request<any>(`/services/${id}`),
+  createService: (data: any) =>
+    request<any>('/services', { method: 'POST', body: JSON.stringify(data) }),
+  updateService: (id: number, data: any) =>
+    request<any>(`/services/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteService: (id: number) =>
+    request<void>(`/services/${id}`, { method: 'DELETE' }),
+  matchService: (data: any) =>
+    request<any>('/services/match', { method: 'POST', body: JSON.stringify(data) }),
+
+  // Follow-Up & Operations Management
+  getFollowups: (params?: { status?: string; due_only?: boolean; lead_id?: number; skip?: number; limit?: number }) => {
+    const q = new URLSearchParams();
+    if (params?.status) q.append('status', params.status);
+    if (params?.due_only) q.append('due_only', 'true');
+    if (params?.lead_id) q.append('lead_id', String(params.lead_id));
+    if (params?.skip !== undefined) q.append('skip', String(params.skip));
+    if (params?.limit !== undefined) q.append('limit', String(params.limit));
+    const qs = q.toString() ? `?${q.toString()}` : '';
+    return request<{ items: any[]; total: number }>(`/crm/followups${qs}`);
+  },
+  createFollowup: (leadId: number, data: any) =>
+    request<any>(`/crm/leads/${leadId}/followups`, { method: 'POST', body: JSON.stringify(data) }),
+  updateFollowup: (id: number, data: any) =>
+    request<any>(`/crm/followups/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteFollowup: (id: number) =>
+    request<void>(`/crm/followups/${id}`, { method: 'DELETE' }),
+
+  // Suppression Registry
+  addSuppression: (data: { identifier: string; channel?: string; reason?: string }) =>
+    request<any>('/settings/suppression-list', { method: 'POST', body: JSON.stringify(data) }),
+  removeSuppression: (id: number) =>
+    request<void>(`/settings/suppression-list/${id}`, { method: 'DELETE' }),
+
+  // Discovery Run History
+  getDiscoveryRuns: (skip?: number, limit?: number) =>
+    request<any[]>(`/discovery/runs?skip=${skip || 0}&limit=${limit || 20}`),
 };

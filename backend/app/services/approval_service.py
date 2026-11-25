@@ -1,17 +1,25 @@
+import json
 from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
-from app.models.email import EmailDraft, EmailEvent
+from app.models.email import EmailDraft, EmailEvent, ApprovalRecord
 from app.models.company import Company
 from app.models.consent import ContactConsent
+from app.models.activity import SuppressionList
 from app.schemas.email import EmailDraftResponse, EmailDraftUpdate, BulkApprovalRequest
 from app.core.audit import record_audit_log
+from app.core.security import (
+    compute_content_hash,
+    compute_draft_approval_hash,
+    verify_draft_approval,
+    validate_recipient_email_syntax,
+)
 
 
 def enrich_draft_response(db: Session, draft: EmailDraft) -> EmailDraftResponse:
-    """Enriches draft with compliance and source attribution data for the Human Approval UI."""
+    """Enriches draft with compliance, content hash, and source attribution data for the Human Approval UI."""
     company = draft.company
     contact_source_url = None
     consent_status = "unconsented"
@@ -42,9 +50,11 @@ def enrich_draft_response(db: Session, draft: EmailDraft) -> EmailDraftResponse:
         body_html=draft.body_html,
         body_text=draft.body_text,
         tone=draft.tone,
+        version=getattr(draft, "version", 1) or 1,
         approval_status=draft.approval_status,
         approved_by_id=draft.approved_by_id,
         approved_at=draft.approved_at,
+        scheduled_at=getattr(draft, "scheduled_at", None),
         rejection_reason=draft.rejection_reason,
         sent_at=draft.sent_at,
         provider=draft.provider,
@@ -57,7 +67,14 @@ def enrich_draft_response(db: Session, draft: EmailDraft) -> EmailDraftResponse:
         company_city=company.city if company else None,
         contact_source_url=contact_source_url,
         consent_status=consent_status,
-        campaign_name=draft.campaign.name if draft.campaign else "Direct Outreach"
+        campaign_name=draft.campaign.name if draft.campaign else "Direct Outreach",
+        generation_model=getattr(draft, "generation_model", "llama3.2:latest"),
+        matched_service_code=getattr(draft, "matched_service_code", None),
+        matched_service_name=getattr(draft, "matched_service_name", None),
+        variation_type=getattr(draft, "variation_type", "standard"),
+        subject_suggestions=(json.loads(draft.subject_suggestions) if getattr(draft, "subject_suggestions", None) and str(draft.subject_suggestions).startswith("[") else ([draft.subject_suggestions] if getattr(draft, "subject_suggestions", None) else [])) if getattr(draft, "subject_suggestions", None) else [],
+        source_evidence=getattr(draft, "source_evidence", None),
+        missing_information=(json.loads(draft.missing_information) if getattr(draft, "missing_information", None) and str(draft.missing_information).startswith("[") else ([draft.missing_information] if getattr(draft, "missing_information", None) else [])) if getattr(draft, "missing_information", None) else []
     )
 
 
@@ -82,16 +99,95 @@ def list_approval_queue(
     return enriched, total
 
 
+def _log_approval_record(
+    db: Session,
+    entity_type: str,
+    entity_id: int,
+    approver_id: Optional[int],
+    action: str,
+    content_version: int,
+    content_hash: str,
+    reason: Optional[str] = None
+) -> ApprovalRecord:
+    rec = ApprovalRecord(
+        entity_type=entity_type,
+        entity_id=entity_id,
+        approver_id=approver_id,
+        action=action,
+        content_version=content_version or 1,
+        content_hash=content_hash,
+        reason=reason,
+        created_at=datetime.now(timezone.utc)
+    )
+    db.add(rec)
+    return rec
+
+
 def approve_email_draft(db: Session, draft_id: int, user_id: int) -> Optional[EmailDraft]:
     draft = db.query(EmailDraft).filter(EmailDraft.id == draft_id).first()
     if not draft:
         return None
+    if not draft.recipient_email or not draft.recipient_email.strip():
+        draft.approval_status = "missing_recipient"
+        db.commit()
+        return None
+    if draft.approval_status in ("sending", "sent", "delivered"):
+        return draft
 
+    # Mandatory recipient syntax validation before human approval
+    draft.recipient_email = validate_recipient_email_syntax(draft.recipient_email)
+
+    # Mandatory suppression check before human approval (unsubscribed addresses cannot be approved)
+    clean_rec = draft.recipient_email.strip().lower()
+    suppressed = db.query(SuppressionList).filter(SuppressionList.identifier == clean_rec).first()
+    if suppressed:
+        raise ValueError(f"Recipient '{draft.recipient_email}' is on the suppression list ({suppressed.reason}) and cannot be approved.")
+
+    # Duplicate approval check: if already approved with valid cryptographic seal, handle idempotently
+    if draft.approval_status == "approved" and draft.approved_content_hash:
+        if verify_draft_approval(
+            stored_signature=draft.approved_content_hash,
+            company_id=draft.company_id,
+            recipient=draft.recipient_email,
+            channel="email",
+            subject=draft.subject,
+            body_text=draft.body_text,
+            version=draft.version or 1,
+            approved_by_id=draft.approved_by_id or user_id,
+            approved_at=draft.approved_at,
+            allow_legacy=True
+        ):
+            return draft
+
+    # Compute and bind immutable HMAC cryptographic seal to approval record
+    now_utc = datetime.now(timezone.utc)
+    current_hash = compute_draft_approval_hash(
+        company_id=draft.company_id,
+        recipient=draft.recipient_email,
+        channel="email",
+        subject=draft.subject,
+        body_text=draft.body_text,
+        version=draft.version or 1,
+        approved_by_id=user_id,
+        approved_at=now_utc
+    )
+    draft.content_hash = current_hash
+    draft.approved_content_hash = current_hash
     draft.approval_status = "approved"
     draft.approved_by_id = user_id
-    draft.approved_at = datetime.now(timezone.utc)
+    draft.approved_at = now_utc
+
+    _log_approval_record(
+        db=db,
+        entity_type="email_draft",
+        entity_id=draft.id,
+        approver_id=user_id,
+        action="approved",
+        content_version=draft.version or 1,
+        content_hash=current_hash
+    )
     
-    # Update lead status to awaiting_approval or ready for sending
+    # Update lead status to awaiting_approval / ready
     if draft.company and draft.company.lead:
         draft.company.lead.pipeline_status = "awaiting_approval"
 
@@ -105,8 +201,20 @@ def reject_email_draft(db: Session, draft_id: int, user_id: int, reason: Optiona
     if not draft:
         return None
 
+    current_hash = compute_content_hash([draft.subject, draft.body_text])
     draft.approval_status = "rejected"
     draft.rejection_reason = reason or "Rejected during human review"
+    draft.approved_content_hash = None
+    _log_approval_record(
+        db=db,
+        entity_type="email_draft",
+        entity_id=draft.id,
+        approver_id=user_id,
+        action="rejected",
+        content_version=draft.version or 1,
+        content_hash=current_hash,
+        reason=draft.rejection_reason
+    )
     db.commit()
     db.refresh(draft)
     return draft
@@ -117,28 +225,81 @@ def skip_email_draft(db: Session, draft_id: int, user_id: int) -> Optional[Email
     if not draft:
         return None
 
+    current_hash = compute_content_hash([draft.subject, draft.body_text])
     draft.approval_status = "skipped"
+    _log_approval_record(
+        db=db,
+        entity_type="email_draft",
+        entity_id=draft.id,
+        approver_id=user_id,
+        action="skipped",
+        content_version=draft.version or 1,
+        content_hash=current_hash
+    )
     db.commit()
     db.refresh(draft)
     return draft
 
 
-def edit_email_draft(db: Session, draft_id: int, update_in: EmailDraftUpdate, user_id: int) -> Optional[EmailDraft]:
+def edit_email_draft(
+    db: Session,
+    draft_id: int,
+    update_in: EmailDraftUpdate,
+    user_id: int,
+    user_role: str = "sales_rep"
+) -> Optional[EmailDraft]:
+    """
+    Editing a draft MUST NEVER implicitly approve it.
+    Any content change increments version, recalculates content hash, invalidates prior approval,
+    and writes an immutable ApprovalRecord entry.
+    """
     draft = db.query(EmailDraft).filter(EmailDraft.id == draft_id).first()
     if not draft:
         return None
 
-    if update_in.subject is not None:
+    was_approved = draft.approval_status == "approved"
+    content_changed = False
+    if update_in.recipient_email is not None:
+        normalized_email = validate_recipient_email_syntax(update_in.recipient_email)
+        if normalized_email != draft.recipient_email:
+            draft.recipient_email = normalized_email
+            content_changed = True
+    if update_in.subject is not None and update_in.subject != draft.subject:
         draft.subject = update_in.subject
-    if update_in.body_text is not None:
+        content_changed = True
+    if update_in.body_text is not None and update_in.body_text != draft.body_text:
         draft.body_text = update_in.body_text
-    if update_in.body_html is not None:
+        content_changed = True
+    if update_in.body_html is not None and update_in.body_html != draft.body_html:
         draft.body_html = update_in.body_html
-    if update_in.approval_status is not None:
-        draft.approval_status = update_in.approval_status
-        if update_in.approval_status == "approved":
-            draft.approved_by_id = user_id
-            draft.approved_at = datetime.now(timezone.utc)
+        content_changed = True
+
+    if content_changed:
+        draft.version = (draft.version or 1) + 1
+        new_hash = compute_content_hash([draft.subject, draft.body_text])
+        draft.content_hash = new_hash
+        # Invalidate approval immediately on content modification — explicit re-approval required
+        draft.approval_status = "draft"
+        draft.approved_by_id = None
+        draft.approved_at = None
+        draft.approved_content_hash = None
+        if was_approved:
+            _log_approval_record(
+                db=db,
+                entity_type="email_draft",
+                entity_id=draft.id,
+                approver_id=user_id,
+                action="invalidated_by_edit",
+                content_version=draft.version,
+                content_hash=new_hash,
+                reason="Prior approval invalidated after draft content modification"
+            )
+
+    # Strict rule: Editing endpoint can ONLY move to non-approved draft states (draft, awaiting_approval, cancelled)
+    # Implicit approval via PUT /emails/drafts/{id} is strictly forbidden.
+    if update_in.approval_status is not None and not content_changed:
+        if update_in.approval_status in ("draft", "awaiting_approval", "cancelled"):
+            draft.approval_status = update_in.approval_status
 
     db.commit()
     db.refresh(draft)
@@ -146,12 +307,12 @@ def edit_email_draft(db: Session, draft_id: int, update_in: EmailDraftUpdate, us
 
 
 def bulk_handle_approvals(db: Session, bulk_req: BulkApprovalRequest, user_id: int) -> dict:
+    if bulk_req.action == "approve":
+        raise ValueError("Bulk outbound approval is strictly prohibited. Each message requires individual human operator review.")
+
     processed = 0
     for draft_id in bulk_req.draft_ids:
-        if bulk_req.action == "approve":
-            approve_email_draft(db, draft_id, user_id)
-            processed += 1
-        elif bulk_req.action == "reject":
+        if bulk_req.action == "reject":
             reject_email_draft(db, draft_id, user_id, bulk_req.reason)
             processed += 1
         elif bulk_req.action == "skip":
@@ -159,3 +320,97 @@ def bulk_handle_approvals(db: Session, bulk_req: BulkApprovalRequest, user_id: i
             processed += 1
 
     return {"status": "success", "action": bulk_req.action, "processed_count": processed}
+
+
+def regenerate_email_draft(
+    db: Session,
+    draft_id: int,
+    user_id: int,
+    tone: Optional[str] = None,
+    custom_notes: Optional[str] = None
+) -> Optional[EmailDraft]:
+    draft = db.query(EmailDraft).filter(EmailDraft.id == draft_id).first()
+    if not draft:
+        return None
+    if draft.approval_status in ("sending", "sent", "delivered"):
+        return draft
+
+    # Mandatory recipient syntax validation before human approval
+    draft.recipient_email = validate_recipient_email_syntax(draft.recipient_email)
+
+    # Mandatory suppression check before human approval (unsubscribed addresses cannot be approved)
+    clean_rec = draft.recipient_email.strip().lower()
+    suppressed = db.query(SuppressionList).filter(SuppressionList.identifier == clean_rec).first()
+    if suppressed:
+        raise ValueError(f"Recipient '{draft.recipient_email}' is on the suppression list ({suppressed.reason}) and cannot be approved.")
+
+    from app.services.email_generator_service import build_email_content
+
+    company = draft.company
+    if not company:
+        return None
+
+    effective_tone = tone or draft.tone or "Friendly professional"
+    subject, body_text, body_html = build_email_content(
+        company=company,
+        contact=draft.contact,
+        tone=effective_tone,
+        custom_notes=custom_notes
+    )
+
+    draft.subject = subject
+    draft.body_text = body_text
+    draft.body_html = body_html
+    draft.tone = effective_tone
+    draft.version = (draft.version or 1) + 1
+    new_hash = compute_content_hash([subject, body_text])
+    draft.content_hash = new_hash
+    draft.approval_status = "draft"
+    draft.approved_by_id = None
+    draft.approved_at = None
+    draft.approved_content_hash = None
+
+    _log_approval_record(
+        db=db,
+        entity_type="email_draft",
+        entity_id=draft.id,
+        approver_id=user_id,
+        action="regenerated",
+        content_version=draft.version,
+        content_hash=new_hash,
+        reason=f"Regenerated with tone: {effective_tone}"
+    )
+    db.commit()
+    db.refresh(draft)
+    return draft
+
+
+def schedule_email_draft(
+    db: Session,
+    draft_id: int,
+    user_id: int,
+    scheduled_at: datetime
+) -> Optional[EmailDraft]:
+    draft = db.query(EmailDraft).filter(EmailDraft.id == draft_id).first()
+    if not draft:
+        return None
+
+    draft.scheduled_at = scheduled_at
+    current_hash = (
+        draft.content_hash
+        or draft.approved_content_hash
+        or compute_content_hash([draft.subject, draft.body_text])
+    )
+    _log_approval_record(
+        db=db,
+        entity_type="email_draft",
+        entity_id=draft.id,
+        approver_id=user_id,
+        action="scheduled",
+        content_version=draft.version or 1,
+        content_hash=current_hash,
+        reason=f"Scheduled for {scheduled_at.isoformat()}"
+    )
+    db.commit()
+    db.refresh(draft)
+    return draft
