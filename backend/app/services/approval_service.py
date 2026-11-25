@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 from sqlalchemy.orm import Session
@@ -6,9 +7,15 @@ from sqlalchemy import or_
 from app.models.email import EmailDraft, EmailEvent, ApprovalRecord
 from app.models.company import Company
 from app.models.consent import ContactConsent
+from app.models.activity import SuppressionList
 from app.schemas.email import EmailDraftResponse, EmailDraftUpdate, BulkApprovalRequest
 from app.core.audit import record_audit_log
-from app.core.security import compute_content_hash, compute_draft_approval_hash
+from app.core.security import (
+    compute_content_hash,
+    compute_draft_approval_hash,
+    verify_draft_approval,
+    validate_recipient_email_syntax,
+)
 
 
 def enrich_draft_response(db: Session, draft: EmailDraft) -> EmailDraftResponse:
@@ -43,6 +50,7 @@ def enrich_draft_response(db: Session, draft: EmailDraft) -> EmailDraftResponse:
         body_html=draft.body_html,
         body_text=draft.body_text,
         tone=draft.tone,
+        version=getattr(draft, "version", 1) or 1,
         approval_status=draft.approval_status,
         approved_by_id=draft.approved_by_id,
         approved_at=draft.approved_at,
@@ -59,7 +67,14 @@ def enrich_draft_response(db: Session, draft: EmailDraft) -> EmailDraftResponse:
         company_city=company.city if company else None,
         contact_source_url=contact_source_url,
         consent_status=consent_status,
-        campaign_name=draft.campaign.name if draft.campaign else "Direct Outreach"
+        campaign_name=draft.campaign.name if draft.campaign else "Direct Outreach",
+        generation_model=getattr(draft, "generation_model", "llama3.2:latest"),
+        matched_service_code=getattr(draft, "matched_service_code", None),
+        matched_service_name=getattr(draft, "matched_service_name", None),
+        variation_type=getattr(draft, "variation_type", "standard"),
+        subject_suggestions=(json.loads(draft.subject_suggestions) if getattr(draft, "subject_suggestions", None) and str(draft.subject_suggestions).startswith("[") else ([draft.subject_suggestions] if getattr(draft, "subject_suggestions", None) else [])) if getattr(draft, "subject_suggestions", None) else [],
+        source_evidence=getattr(draft, "source_evidence", None),
+        missing_information=(json.loads(draft.missing_information) if getattr(draft, "missing_information", None) and str(draft.missing_information).startswith("[") else ([draft.missing_information] if getattr(draft, "missing_information", None) else [])) if getattr(draft, "missing_information", None) else []
     )
 
 
@@ -119,21 +134,33 @@ def approve_email_draft(db: Session, draft_id: int, user_id: int) -> Optional[Em
     if draft.approval_status in ("sending", "sent", "delivered"):
         return draft
 
+    # Mandatory recipient syntax validation before human approval
+    draft.recipient_email = validate_recipient_email_syntax(draft.recipient_email)
+
+    # Mandatory suppression check before human approval (unsubscribed addresses cannot be approved)
+    clean_rec = draft.recipient_email.strip().lower()
+    suppressed = db.query(SuppressionList).filter(SuppressionList.identifier == clean_rec).first()
+    if suppressed:
+        raise ValueError(f"Recipient '{draft.recipient_email}' is on the suppression list ({suppressed.reason}) and cannot be approved.")
+
     # Duplicate approval check: if already approved with valid cryptographic seal, handle idempotently
     if draft.approval_status == "approved" and draft.approved_content_hash:
-        expected_existing_hash = compute_draft_approval_hash(
+        if verify_draft_approval(
+            stored_signature=draft.approved_content_hash,
             company_id=draft.company_id,
             recipient=draft.recipient_email,
             channel="email",
             subject=draft.subject,
             body_text=draft.body_text,
             version=draft.version or 1,
-            approved_by_id=draft.approved_by_id or user_id
-        )
-        if draft.approved_content_hash == expected_existing_hash:
+            approved_by_id=draft.approved_by_id or user_id,
+            approved_at=draft.approved_at,
+            allow_legacy=True
+        ):
             return draft
 
-    # Compute and bind immutable 7-factor content hash to approval record
+    # Compute and bind immutable HMAC cryptographic seal to approval record
+    now_utc = datetime.now(timezone.utc)
     current_hash = compute_draft_approval_hash(
         company_id=draft.company_id,
         recipient=draft.recipient_email,
@@ -141,13 +168,14 @@ def approve_email_draft(db: Session, draft_id: int, user_id: int) -> Optional[Em
         subject=draft.subject,
         body_text=draft.body_text,
         version=draft.version or 1,
-        approved_by_id=user_id
+        approved_by_id=user_id,
+        approved_at=now_utc
     )
     draft.content_hash = current_hash
     draft.approved_content_hash = current_hash
     draft.approval_status = "approved"
     draft.approved_by_id = user_id
-    draft.approved_at = datetime.now(timezone.utc)
+    draft.approved_at = now_utc
 
     _log_approval_record(
         db=db,
@@ -231,9 +259,11 @@ def edit_email_draft(
 
     was_approved = draft.approval_status == "approved"
     content_changed = False
-    if update_in.recipient_email is not None and update_in.recipient_email != draft.recipient_email:
-        draft.recipient_email = update_in.recipient_email
-        content_changed = True
+    if update_in.recipient_email is not None:
+        normalized_email = validate_recipient_email_syntax(update_in.recipient_email)
+        if normalized_email != draft.recipient_email:
+            draft.recipient_email = normalized_email
+            content_changed = True
     if update_in.subject is not None and update_in.subject != draft.subject:
         draft.subject = update_in.subject
         content_changed = True
@@ -304,6 +334,15 @@ def regenerate_email_draft(
         return None
     if draft.approval_status in ("sending", "sent", "delivered"):
         return draft
+
+    # Mandatory recipient syntax validation before human approval
+    draft.recipient_email = validate_recipient_email_syntax(draft.recipient_email)
+
+    # Mandatory suppression check before human approval (unsubscribed addresses cannot be approved)
+    clean_rec = draft.recipient_email.strip().lower()
+    suppressed = db.query(SuppressionList).filter(SuppressionList.identifier == clean_rec).first()
+    if suppressed:
+        raise ValueError(f"Recipient '{draft.recipient_email}' is on the suppression list ({suppressed.reason}) and cannot be approved.")
 
     from app.services.email_generator_service import build_email_content
 

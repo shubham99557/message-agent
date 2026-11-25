@@ -63,7 +63,10 @@ def approve_draft_endpoint(
     current_user: User = Depends(require_role(["admin", "manager"]))
 ):
     """Restricted to administrators and managers. Binds immutable content hash upon approval."""
-    draft = approve_email_draft(db, draft_id, current_user.id)
+    try:
+        draft = approve_email_draft(db, draft_id, current_user.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     if not draft:
         raise HTTPException(status_code=404, detail="Draft not found")
     record_audit_log(

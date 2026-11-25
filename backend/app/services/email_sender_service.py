@@ -13,7 +13,7 @@ from app.models.campaign import Campaign
 from app.schemas.email import EmailSendResult
 from app.core.config import settings
 from app.core.audit import record_audit_log
-from app.core.security import compute_content_hash, compute_draft_approval_hash
+from app.core.security import compute_content_hash, compute_draft_approval_hash, verify_draft_approval
 from app.integrations.gmail_adapter import (
     get_active_gmail_connection,
     send_gmail_message,
@@ -86,12 +86,10 @@ def check_daily_sending_limit(db: Session, campaign_id: Optional[int] = None) ->
 def _ensure_opt_out_footer(draft: EmailDraft) -> str:
     """Attaches compliance opt-out footer if missing from draft text."""
     body = draft.body_text or ""
-    if "opt-out" not in body.lower() and "unsubscribe" not in body.lower():
+    if "opt-out" not in body.lower() and "unsubscribe" not in body.lower() and "prefer not to receive" not in body.lower():
         footer = (
             f"\n\n---\n"
-            f"ActTrident AI B2B Outreach • Targeting 5+ managed laptops across Indian Enterprise Clusters.\n"
-            f"To opt out of future communications regarding ActTrident evaluations, reply with 'Unsubscribe' "
-            f"or visit https://acttrident.ai/opt-out?email={draft.recipient_email}"
+            f"If you would prefer not to receive further business emails from us, please reply and let us know."
         )
         return body + footer
     return body
@@ -168,19 +166,20 @@ def send_approved_email(
         )
 
     # 3. IMMUTABLE CONTENT HASH VERIFICATION (7-FACTOR INTEGRITY CHECK)
-    expected_7_hash = compute_draft_approval_hash(
+    is_valid = verify_draft_approval(
+        stored_signature=draft.approved_content_hash,
         company_id=draft.company_id,
         recipient=draft.recipient_email,
         channel="email",
         subject=draft.subject,
         body_text=draft.body_text,
         version=draft.version or 1,
-        approved_by_id=draft.approved_by_id
+        approved_by_id=draft.approved_by_id,
+        approved_at=draft.approved_at,
+        allow_legacy=True
     )
-    legacy_hash = compute_content_hash([draft.subject, draft.body_text])
-    current_hash = expected_7_hash if draft.approved_content_hash == expected_7_hash else legacy_hash
 
-    if not draft.approved_content_hash or draft.approved_content_hash not in (expected_7_hash, legacy_hash):
+    if not is_valid:
         draft.approval_status = "draft"
         draft.approved_by_id = None
         draft.approved_at = None
@@ -192,6 +191,8 @@ def send_approved_email(
             provider=draft.provider,
             message="Security Block: Draft content was modified or approval metadata was altered after approval was granted. Re-approval required."
         )
+
+    current_hash = draft.approved_content_hash or ""
 
     # Deterministic idempotency key for this approved version
     idem_key = f"email-draft-{draft.id}-v{draft.version or 1}-{current_hash[:16]}"
@@ -535,3 +536,571 @@ def record_provider_email_event(
 def send_email(db: Session, draft: EmailDraft) -> EmailSendResult:
     """Convenience alias for background job worker dispatch."""
     return send_approved_email(db, draft.id, user_id=1)
+
+
+# ---------------------------------------------------------------------------
+# PHASE 4A: TEST-MODE PROVIDER DISPATCH & AUTHENTICATED WEBHOOK PROCESSING
+# ---------------------------------------------------------------------------
+
+RESEND_TEST_RECIPIENTS = {
+    "delivered@resend.dev",
+    "bounced@resend.dev",
+    "complained@resend.dev",
+}
+
+
+def _get_test_allowlist() -> set:
+    raw = getattr(settings, "EMAIL_TEST_ALLOWLIST", "") or ""
+    operator_set = {item.strip().lower() for item in raw.split(",") if item.strip()}
+    return operator_set | RESEND_TEST_RECIPIENTS
+
+
+def _is_real_crm_prospect_email(db: Session, email_addr: str) -> bool:
+    """Returns True if email_addr belongs to any non-demo CRM prospect or contact."""
+    from app.models.company import Company, CompanyContact
+    clean = email_addr.strip().lower()
+    comp = db.query(Company).filter(
+        Company.is_demo == False,  # noqa: E712
+        (Company.public_email.ilike(clean)) | (Company.decision_maker_email.ilike(clean))
+    ).first()
+    if comp:
+        return True
+    contact = (
+        db.query(CompanyContact)
+        .join(Company, CompanyContact.company_id == Company.id)
+        .filter(Company.is_demo == False, CompanyContact.email.ilike(clean))  # noqa: E712
+        .first()
+    )
+    return contact is not None
+
+
+def send_test_mode_email(
+    db: Session,
+    recipient_email: str,
+    subject: str,
+    body_text: str,
+    user_id: int,
+    idempotency_key: str,
+    provider_override: Optional[str] = None,
+    http_client: Optional[httpx.Client] = None,
+) -> dict:
+    """
+    Phase 4A Independent Test-Mode Safety Gate.
+    Allows sending ONLY to operator-controlled EMAIL_TEST_ALLOWLIST addresses while
+    LIVE_SEND_ENABLED remains False. Never dispatches to real CRM prospect addresses.
+    """
+    import logging
+    from app.core.security import validate_recipient_email_syntax
+    from app.integrations.email_provider_adapter import (
+        EmailProviderSendRequest,
+        get_sandbox_email_provider,
+    )
+    from app.services.unsubscribe_service import build_unsubscribe_headers
+
+    tlog = logging.getLogger("acttrident.email_test_mode")
+
+    if not getattr(settings, "EMAIL_TEST_MODE_ENABLED", False):
+        raise PermissionError("Test-mode email dispatch is disabled (EMAIL_TEST_MODE_ENABLED=false).")
+
+    clean_recipient = validate_recipient_email_syntax(recipient_email).lower()
+    allowlist = _get_test_allowlist()
+    if not allowlist or clean_recipient not in allowlist:
+        raise PermissionError(
+            f"Test-mode safety block: '{clean_recipient}' is not in EMAIL_TEST_ALLOWLIST."
+        )
+
+    if _is_real_crm_prospect_email(db, clean_recipient):
+        raise PermissionError(
+            f"Test-mode safety block: '{clean_recipient}' belongs to a real CRM prospect and cannot be used for test dispatch."
+        )
+
+    suppressed = db.query(SuppressionList).filter(SuppressionList.identifier == clean_recipient).first()
+    if suppressed:
+        raise ValueError(f"Recipient '{clean_recipient}' is on the suppression list ({suppressed.reason}).")
+
+    # Idempotency check via AuditLog for test-mode dispatches
+    from app.models.activity import AuditLog
+    clean_idem = f"testmode-{idempotency_key.strip()}"
+    prior_logs = db.query(AuditLog).filter(AuditLog.action == "send_test_mode_email").order_by(AuditLog.id.desc()).limit(100).all()
+    for log_row in prior_logs:
+        if log_row.details and clean_idem in log_row.details and '"outcome": "accepted"' in log_row.details:
+            return {
+                "status": "duplicate_blocked",
+                "idempotent": True,
+                "provider": getattr(settings, "EMAIL_SANDBOX_PROVIDER", "sandbox_mock"),
+                "provider_message_id": log_row.entity_id,
+                "message": "Duplicate test-mode send prevented by idempotency key.",
+            }
+
+    unsub_headers, _ = build_unsubscribe_headers(clean_recipient, company_id=None)
+    footer = "\n\n---\nIf you would prefer not to receive further business emails from us, please reply and let us know."
+    full_body = body_text.strip() + ("" if "prefer not to receive" in body_text.lower() else footer)
+    full_html = f"<p>{full_body.replace(chr(10), '<br/>')}</p>"
+
+    adapter = get_sandbox_email_provider(provider_override=provider_override, http_client=http_client)
+    from_email = (
+        getattr(settings, "RESEND_FROM_EMAIL", "onboarding@resend.dev") or "onboarding@resend.dev"
+        if adapter.provider_name == "resend"
+        else settings.SMTP_FROM_EMAIL
+    )
+    req = EmailProviderSendRequest(
+        recipient_email=clean_recipient,
+        subject=subject,
+        body_text=full_body,
+        body_html=full_html,
+        from_name=settings.SMTP_FROM_NAME,
+        from_email=from_email,
+        idempotency_key=clean_idem,
+        headers=unsub_headers,
+        is_test_mode=True,
+    )
+    res = adapter.send_test_email(req)
+
+    # Never log message body or API secrets
+    tlog.info(
+        f"Test-mode dispatch outcome={res.outcome} provider={res.provider} "
+        f"provider_message_id={res.provider_message_id} attempts={res.attempts_made}"
+    )
+
+    record_audit_log(
+        db=db,
+        action="send_test_mode_email",
+        entity_type="email_test_mode",
+        entity_id=res.provider_message_id or clean_idem,
+        user_id=user_id,
+        details={
+            "idempotency_key": clean_idem,
+            "recipient": clean_recipient,
+            "provider": res.provider,
+            "outcome": res.outcome,
+            "is_sandbox": res.is_sandbox,
+            "attempts_made": res.attempts_made,
+            "live_send_enabled": settings.LIVE_SEND_ENABLED,
+        },
+    )
+
+    return {
+        "status": res.outcome,
+        "provider": res.provider,
+        "is_sandbox": res.is_sandbox,
+        "provider_message_id": res.provider_message_id,
+        "attempts_made": res.attempts_made,
+        "error_code": res.error_code,
+        "error_message": res.error_message,
+        "unsubscribe_headers_attached": True,
+        "live_send_enabled": settings.LIVE_SEND_ENABLED,
+    }
+
+
+def verify_email_webhook_signature(
+    raw_body: bytes,
+    signature_header: Optional[str],
+    timestamp_header: Optional[str] = None,
+) -> None:
+    """
+    Verifies HMAC-SHA256 provider webhook signature in constant time and enforces
+    optional timestamp replay window (<= 300s). Raises PermissionError on failure.
+    """
+    import hashlib
+    import hmac
+
+    secret = (getattr(settings, "EMAIL_WEBHOOK_SECRET", "") or "").strip()
+    if not secret:
+        raise PermissionError("Webhook rejected: EMAIL_WEBHOOK_SECRET is not configured.")
+    if not signature_header or not signature_header.strip():
+        raise PermissionError("Webhook rejected: missing signature header.")
+
+    if timestamp_header is not None:
+        try:
+            ts = int(str(timestamp_header).strip())
+        except ValueError as exc:
+            raise PermissionError("Webhook rejected: malformed timestamp header.") from exc
+        now_ts = int(datetime.now(timezone.utc).timestamp())
+        if abs(now_ts - ts) > 300:
+            raise PermissionError("Webhook rejected: timestamp outside 300s replay window.")
+
+    provided = signature_header.strip()
+    if provided.startswith("sha256="):
+        provided = provided.split("=", 1)[1]
+
+    expected = hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, provided):
+        raise PermissionError("Webhook rejected: invalid HMAC signature.")
+
+
+def process_provider_webhook_event(
+    db: Session,
+    raw_body: bytes,
+    signature_header: Optional[str],
+    timestamp_header: Optional[str],
+    payload: dict,
+) -> dict:
+    """
+    Authenticated provider webhook processor with signature check, replay protection,
+    idempotent event deduplication, and hard-bounce/complaint vs soft-bounce separation.
+    """
+    from app.models.whatsapp import WebhookEvent
+
+    verify_email_webhook_signature(raw_body, signature_header, timestamp_header)
+
+    event_id = str(payload.get("event_id") or "").strip()
+    event_type = str(payload.get("event_type") or "").strip().lower()
+    provider_message_id = str(payload.get("provider_message_id") or "").strip()
+    recipient = str(payload.get("recipient") or "").strip().lower()
+    details = str(payload.get("details") or "")
+
+    if not event_id or not event_type:
+        raise ValueError("Webhook payload must include 'event_id' and 'event_type'.")
+
+    # Idempotent duplicate event check
+    dup = db.query(WebhookEvent).filter(
+        WebhookEvent.source == "email_provider",
+        WebhookEvent.event_id == event_id,
+    ).first()
+    if dup:
+        return {"status": "duplicate_ignored", "event_id": event_id, "idempotent": True}
+
+    db.add(WebhookEvent(
+        source="email_provider",
+        event_id=event_id,
+        idempotency_key=f"email-wh-{event_id}",
+        payload_json=raw_body.decode("utf-8", errors="replace")[:2000],
+        status="processed",
+    ))
+
+    allowed_types = {"accepted", "delivered", "hard_bounce", "bounced", "soft_bounce", "deferred", "complaint", "failed"}
+    if event_type not in allowed_types:
+        db.commit()
+        raise ValueError(f"Unsupported webhook event_type '{event_type}'.")
+
+    draft = None
+    if provider_message_id:
+        draft = db.query(EmailDraft).filter(EmailDraft.provider_message_id == provider_message_id).first()
+
+    suppressed_added = False
+    if event_type in ("hard_bounce", "bounced", "complaint"):
+        target_email = recipient or (draft.recipient_email.lower() if draft and draft.recipient_email else "")
+        if target_email:
+            existing_sup = db.query(SuppressionList).filter(SuppressionList.identifier == target_email).first()
+            if not existing_sup:
+                db.add(SuppressionList(
+                    identifier=target_email,
+                    channel="email",
+                    reason=f"Provider webhook {event_type}: {details or 'permanent failure'}",
+                ))
+                suppressed_added = True
+
+    if draft:
+        if event_type == "delivered" and draft.approval_status in ("sent", "accepted"):
+            draft.approval_status = "delivered"
+        elif event_type in ("hard_bounce", "bounced"):
+            draft.approval_status = "bounced"
+            draft.error_message = details or "Hard bounce reported by provider"
+        elif event_type == "complaint":
+            draft.approval_status = "rejected"
+            draft.rejection_reason = details or "Spam complaint reported by provider"
+        elif event_type in ("soft_bounce", "deferred"):
+            # Transient failure: keep separate from permanent bounces and do NOT suppress
+            draft.error_message = details or "Transient delivery deferral"
+
+        db.add(EmailEvent(
+            draft_id=draft.id,
+            event_type=event_type,
+            details=details or f"Webhook event {event_id}: {event_type}",
+        ))
+        attempt = db.query(EmailSendAttempt).filter(
+            EmailSendAttempt.draft_id == draft.id,
+            EmailSendAttempt.provider_message_id == provider_message_id,
+        ).order_by(EmailSendAttempt.id.desc()).first()
+        if attempt:
+            attempt.outcome = event_type
+
+    db.commit()
+    return {
+        "status": "processed",
+        "event_id": event_id,
+        "event_type": event_type,
+        "draft_id": draft.id if draft else None,
+        "suppressed_added": suppressed_added,
+        "idempotent": False,
+    }
+
+
+def _decode_svix_secret(secret: str) -> bytes:
+    import base64
+    clean = (secret or "").strip()
+    if clean.startswith("whsec_"):
+        b64_part = clean[len("whsec_"):]
+        return base64.b64decode(b64_part)
+    return clean.encode("utf-8")
+
+
+def verify_resend_svix_signature(
+    raw_body: bytes,
+    svix_id: Optional[str],
+    svix_timestamp: Optional[str],
+    svix_signature: Optional[str],
+    secret_override: Optional[str] = None,
+) -> None:
+    """
+    Verifies Resend/Svix webhook signatures (svix-id, svix-timestamp, svix-signature)
+    against the exact raw request body bytes using RESEND_WEBHOOK_SECRET.
+    Rejects missing, expired (>300s), or invalid signatures. Never falls back to generic HMAC.
+    """
+    import base64
+    import hashlib
+    import hmac
+
+    secret = (secret_override if secret_override is not None else getattr(settings, "RESEND_WEBHOOK_SECRET", "")) or ""
+    if not secret.strip():
+        raise PermissionError("Resend webhook rejected: RESEND_WEBHOOK_SECRET is not configured.")
+    if not svix_id or not svix_timestamp or not svix_signature:
+        raise PermissionError("Resend webhook rejected: missing svix-id, svix-timestamp, or svix-signature header.")
+
+    try:
+        ts = int(str(svix_timestamp).strip())
+    except ValueError as exc:
+        raise PermissionError("Resend webhook rejected: malformed svix-timestamp.") from exc
+
+    now_ts = int(datetime.now(timezone.utc).timestamp())
+    if abs(now_ts - ts) > 300:
+        raise PermissionError("Resend webhook rejected: svix-timestamp outside 300s replay tolerance.")
+
+    secret_bytes = _decode_svix_secret(secret)
+    signed_content = f"{svix_id.strip()}.{svix_timestamp.strip()}.".encode("utf-8") + raw_body
+    expected_b64 = base64.b64encode(
+        hmac.new(secret_bytes, signed_content, hashlib.sha256).digest()
+    ).decode("ascii")
+
+    matched = False
+    for token in svix_signature.strip().split():
+        if "," in token:
+            ver, sig_val = token.split(",", 1)
+            if ver == "v1" and hmac.compare_digest(expected_b64, sig_val):
+                matched = True
+                break
+
+    if not matched:
+        raise PermissionError("Resend webhook rejected: invalid Svix v1 signature.")
+
+
+RESEND_EVENT_MAP = {
+    "email.sent": "sent",
+    "email.delivered": "delivered",
+    "email.delivery_delayed": "deferred",
+    "email.bounced": "bounced",
+    "email.complained": "complaint",
+    "email.failed": "failed",
+    "email.suppressed": "rejected",
+}
+
+
+def process_resend_webhook_event(
+    db: Session,
+    raw_body: bytes,
+    svix_id: Optional[str],
+    svix_timestamp: Optional[str],
+    svix_signature: Optional[str],
+    payload: dict,
+) -> dict:
+    """
+    Processes verified Resend Svix webhook events idempotently, mapping Resend event types
+    to internal EmailDraft, EmailEvent, EmailSendAttempt, and SuppressionList records.
+    """
+    from app.models.whatsapp import WebhookEvent
+
+    verify_resend_svix_signature(raw_body, svix_id, svix_timestamp, svix_signature)
+
+    resend_type = str(payload.get("type") or "").strip().lower()
+    if resend_type not in RESEND_EVENT_MAP:
+        raise ValueError(f"Unsupported Resend webhook event type: '{resend_type}'")
+
+    internal_type = RESEND_EVENT_MAP[resend_type]
+    data = payload.get("data") or {}
+    email_id = str(data.get("email_id") or "").strip()
+    to_list = data.get("to") or []
+    recipient = str(to_list[0]).strip().lower() if isinstance(to_list, list) and to_list else ""
+    event_id = svix_id.strip()
+
+    # Duplicate Svix event deduplication
+    dup = db.query(WebhookEvent).filter(
+        WebhookEvent.source == "resend",
+        WebhookEvent.event_id == event_id,
+    ).first()
+    if dup:
+        return {"status": "duplicate_ignored", "event_id": event_id, "idempotent": True}
+
+    db.add(WebhookEvent(
+        source="resend",
+        event_id=event_id,
+        idempotency_key=f"resend-svix-{event_id}",
+        payload_json=raw_body.decode("utf-8", errors="replace")[:2000],
+        status="processed",
+    ))
+
+    draft = None
+    if email_id:
+        draft = db.query(EmailDraft).filter(EmailDraft.provider_message_id == email_id).first()
+
+    suppressed_added = False
+    if internal_type in ("bounced", "complaint", "rejected"):
+        target_email = recipient or (draft.recipient_email.lower() if draft and draft.recipient_email else "")
+        if target_email:
+            existing_sup = db.query(SuppressionList).filter(SuppressionList.identifier == target_email).first()
+            if not existing_sup:
+                db.add(SuppressionList(
+                    identifier=target_email,
+                    channel="email",
+                    reason=f"Resend webhook {resend_type}",
+                ))
+                suppressed_added = True
+
+    if draft:
+        if internal_type == "delivered" and draft.approval_status in ("sent", "accepted"):
+            draft.approval_status = "delivered"
+        elif internal_type == "sent" and draft.approval_status in ("approved", "sending", "accepted"):
+            draft.approval_status = "sent"
+        elif internal_type == "bounced":
+            draft.approval_status = "bounced"
+            draft.error_message = f"Resend reported {resend_type}"
+        elif internal_type in ("complaint", "rejected"):
+            draft.approval_status = "rejected"
+            draft.rejection_reason = f"Resend reported {resend_type}"
+        elif internal_type == "failed":
+            draft.approval_status = "failed"
+            draft.error_message = f"Resend reported {resend_type}"
+        elif internal_type == "deferred":
+            draft.error_message = "Resend delivery delayed (transient)"
+
+        db.add(EmailEvent(
+            draft_id=draft.id,
+            event_type=internal_type,
+            details=f"Resend Svix {event_id}: {resend_type} (email_id={email_id})",
+        ))
+        attempt = db.query(EmailSendAttempt).filter(
+            EmailSendAttempt.draft_id == draft.id,
+            EmailSendAttempt.provider_message_id == email_id,
+        ).order_by(EmailSendAttempt.id.desc()).first()
+        if attempt:
+            attempt.outcome = internal_type
+
+    db.commit()
+    return {
+        "status": "processed",
+        "provider": "resend",
+        "event_id": event_id,
+        "resend_event": resend_type,
+        "internal_event": internal_type,
+        "email_id": email_id,
+        "draft_id": draft.id if draft else None,
+        "suppressed_added": suppressed_added,
+        "idempotent": False,
+    }
+
+
+def simulate_local_resend_event(
+    db: Session,
+    event_type: str,
+    event_id: str,
+    recipient_email: Optional[str] = None,
+    draft_id: Optional[int] = None,
+    provider_message_id: Optional[str] = None,
+    user_id: Optional[int] = None,
+) -> dict:
+    """
+    Development-only Local Event Simulator.
+    Strictly blocked when ENVIRONMENT is production/staging or LIVE_SEND_ENABLED is True.
+    Labels all records [SIMULATED] so they can never be confused with genuine Resend webhooks.
+    """
+    from app.models.whatsapp import WebhookEvent
+
+    env = (getattr(settings, "ENVIRONMENT", "development") or "development").lower()
+    if env not in ("development", "test") or getattr(settings, "LIVE_SEND_ENABLED", False):
+        raise PermissionError("Local event simulator is strictly restricted to development/test mode with LIVE_SEND_ENABLED=false.")
+
+    allowed_sim = {"email.sent", "email.delivered", "email.delivery_delayed", "email.bounced", "email.complained", "email.failed"}
+    clean_type = (event_type or "").strip().lower()
+    if clean_type not in allowed_sim:
+        raise ValueError(f"Unsupported simulated event '{clean_type}'. Allowed: {sorted(allowed_sim)}")
+
+    clean_event_id = f"sim-{event_id.strip()}"
+    dup = db.query(WebhookEvent).filter(
+        WebhookEvent.source == "resend_simulated",
+        WebhookEvent.event_id == clean_event_id,
+    ).first()
+    if dup:
+        return {"status": "duplicate_ignored", "event_id": clean_event_id, "simulated": True, "idempotent": True}
+
+    internal_type = RESEND_EVENT_MAP[clean_type]
+    sim_msg_id = (provider_message_id or f"SIM-{clean_event_id}").strip()
+
+    db.add(WebhookEvent(
+        source="resend_simulated",
+        event_id=clean_event_id,
+        idempotency_key=f"resend-sim-{clean_event_id}",
+        payload_json=f'{{"simulated":true,"type":"{clean_type}","recipient":"{recipient_email or ""}"}}',
+        status="processed_simulated",
+    ))
+
+    draft = None
+    if draft_id:
+        draft = db.query(EmailDraft).filter(EmailDraft.id == draft_id).first()
+    elif provider_message_id:
+        draft = db.query(EmailDraft).filter(EmailDraft.provider_message_id == provider_message_id).first()
+
+    suppressed_added = False
+    target_email = (recipient_email or (draft.recipient_email if draft else "") or "").strip().lower()
+    if internal_type in ("bounced", "complaint") and target_email:
+        existing_sup = db.query(SuppressionList).filter(SuppressionList.identifier == target_email).first()
+        if not existing_sup:
+            db.add(SuppressionList(
+                identifier=target_email,
+                channel="email",
+                reason=f"[SIMULATED] Resend {clean_type}",
+            ))
+            suppressed_added = True
+
+    if draft:
+        if internal_type == "delivered" and draft.approval_status in ("sent", "accepted", "simulated"):
+            draft.approval_status = "delivered"
+        elif internal_type == "sent" and draft.approval_status in ("approved", "sending", "accepted"):
+            draft.approval_status = "sent"
+        elif internal_type == "bounced":
+            draft.approval_status = "bounced"
+            draft.error_message = f"[SIMULATED] {clean_type}"
+        elif internal_type == "complaint":
+            draft.approval_status = "rejected"
+            draft.rejection_reason = f"[SIMULATED] {clean_type}"
+        elif internal_type == "failed":
+            draft.approval_status = "failed"
+            draft.error_message = f"[SIMULATED] {clean_type}"
+        elif internal_type == "deferred":
+            draft.error_message = f"[SIMULATED] {clean_type} (transient)"
+
+        db.add(EmailEvent(
+            draft_id=draft.id,
+            event_type=f"simulated_{internal_type}",
+            details=f"[SIMULATED] Local simulator event {clean_event_id}: {clean_type} (ref={sim_msg_id})",
+        ))
+
+    record_audit_log(
+        db=db,
+        action="simulate_resend_event",
+        entity_type="email_simulator",
+        entity_id=clean_event_id,
+        user_id=user_id,
+        details={"simulated": True, "resend_event": clean_type, "internal_event": internal_type, "suppressed_added": suppressed_added},
+    )
+    db.commit()
+
+    return {
+        "status": "processed_simulated",
+        "simulated": True,
+        "label": "SIMULATED",
+        "event_id": clean_event_id,
+        "resend_event": clean_type,
+        "internal_event": internal_type,
+        "draft_id": draft.id if draft else None,
+        "suppressed_added": suppressed_added,
+        "idempotent": False,
+    }

@@ -13,7 +13,7 @@ def test_ai_email_generation_5_tones_and_structure(client, auth_headers, monkeyp
             "industry": "Software Development",
             "laptop_count_verified": 10,
             "laptop_count_evidence": "10 dedicated developer workstations verified",
-            "public_email": "hello@kanchenjungastudios.example.com",
+            "public_email": "hello@kanchenjungastudios.in",
             "decision_maker_name": "Debabrata Sengupta",
             "decision_maker_role": "Director of Engineering"
         },
@@ -44,7 +44,7 @@ def test_human_approval_enforcement_and_sending(client, auth_headers, admin_auth
         json={
             "name": "Sikkim Cloud Ops",
             "city": "Gangtok",
-            "public_email": "security@sikkimcloudops.example.com"
+            "public_email": "security@sikkimcloudops.in"
         },
         headers=auth_headers
     ).json()
@@ -92,12 +92,12 @@ def test_human_approval_enforcement_and_sending(client, auth_headers, admin_auth
 def test_suppression_list_blocks_sending(client, auth_headers, admin_auth_headers, db_session):
     comp = client.post(
         "/api/v1/companies",
-        json={"name": "Suppressed Tech", "city": "Patna", "public_email": "do-not-email@suppressed.example.com"},
+        json={"name": "Suppressed Tech", "city": "Patna", "public_email": "do-not-email@suppressed-test.in"},
         headers=auth_headers
     ).json()
 
     # Add to suppression list
-    suppressed = SuppressionList(identifier="do-not-email@suppressed.example.com", channel="email", reason="Opted out")
+    suppressed = SuppressionList(identifier="do-not-email@suppressed-test.in", channel="email", reason="Opted out")
     db_session.add(suppressed)
     db_session.commit()
 
@@ -107,10 +107,10 @@ def test_suppression_list_blocks_sending(client, auth_headers, admin_auth_header
         headers=auth_headers
     ).json()
 
-    # Approve draft using admin credentials
-    client.post(f"/api/v1/approvals/approve/{draft['id']}", headers=admin_auth_headers)
+    # Approve draft using admin credentials -> must be blocked because recipient is suppressed
+    appr_res = client.post(f"/api/v1/approvals/approve/{draft['id']}", headers=admin_auth_headers)
+    assert appr_res.status_code == 400
 
     # Attempt send -> must be blocked
     send_res = client.post(f"/api/v1/emails/send/{draft['id']}", headers=admin_auth_headers)
-    assert send_res.status_code == 200
-    assert send_res.json()["status"] == "blocked_suppression"
+    assert send_res.status_code == 400
